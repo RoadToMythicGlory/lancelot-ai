@@ -1,0 +1,51 @@
+רשימת פרומפטים ל-Gemini Video Creator עבור אתר התדמית של Lancelot ERP
+=================================================================
+
+סצנה 1 - פתיחה מרשימה (10 שניות)
+---------------------------------
+Create a dynamic opening video showing a modern TV broadcast control room with multiple monitors displaying live feeds. Camera slowly zooms in on screens showing sports events, news broadcasts, and studio shows. Add flowing data visualizations and digital connections between screens. Style: Professional, high-tech, blue and silver color scheme with glowing elements.
+
+סצנה 2 - ניהול לוחות זמנים (15 שניות)
+---------------------------------------
+Generate a video showing an interactive calendar interface with broadcast events being scheduled in real-time. Show events being dragged and dropped, time slots being allocated, and automatic conflict detection with red highlights. Include Hebrew text overlays showing "ניהול לוחות זמנים חכם". Style: Clean UI, smooth animations, corporate blue theme.
+
+סצנה 3 - ייבוא קבצי Excel (12 שניות)
+-------------------------------------
+Create a video showing Excel files being uploaded to a modern web interface. Show the spreadsheet data transforming into organized broadcast schedules with automatic parsing of Hebrew columns. Display progress bars and successful import notifications. Style: Tech-forward, green success indicators, smooth transitions.
+
+סצנה 4 - ניהול ציוד שידור (15 שניות)
+--------------------------------------
+Generate a video showcasing a digital warehouse management system. Show 3D models of broadcast equipment (cameras, audio gear, lighting) being tracked in real-time. Display availability status, barcode scanning animations, and equipment checkout process. Style: Industrial modern, orange and gray color palette.
+
+סצנה 5 - תיאום צוותי הפקה (12 שניות)
+--------------------------------------
+Create a video showing crew members being assigned to broadcast events through a digital interface. Show profile cards, role assignments (cameramen, sound engineers, producers), and real-time availability tracking. Include calendar synchronization effects. Style: Professional, people-focused, warm colors.
+
+סצנה 6 - מערכת התראות בזמן אמת (10 שניות)
+------------------------------------------
+Generate a video demonstrating real-time notifications and alerts. Show push notifications for schedule changes, equipment conflicts, and urgent updates. Include WebSocket connection visualizations and instant message delivery. Style: Modern messaging UI, notification sounds visualization, purple accents.
+
+סצנה 7 - ממשק מחלקות מותאם (15 שניות)
+--------------------------------------
+Create a video showing different department views of the same broadcast event. Transition between production, technical, and management interfaces, each with custom data fields and workflows. Show seamless data synchronization. Style: Multi-layered interface, department color coding, smooth morphing transitions.
+
+סצנה 8 - דוחות וניתוחי נתונים (12 שניות)
+-----------------------------------------
+Generate a video featuring dynamic dashboards and analytics. Show real-time graphs of equipment utilization, crew productivity, and broadcast performance metrics. Include animated charts and KPI indicators. Style: Data visualization focused, gradient backgrounds, modern infographics.
+
+סצנה 9 - אבטחה וגישה מבוקרת (10 שניות)
+----------------------------------------
+Create a video demonstrating secure login process, role-based access control, and encrypted data transmission. Show authentication flow, permission levels, and secure API connections. Include lock icons and security shields. Style: Trustworthy, green checkmarks, security-focused imagery.
+
+סצנה 10 - סיום עם לוגו Lancelot (8 שניות)
+-------------------------------------------
+Generate a closing video with the Lancelot ERP logo emerging from particle effects. Show key features floating around the logo as holographic elements. End with tagline "מערכת ניהול השידורים המתקדמת בישראל". Style: Premium, cinematic, company brand colors, professional finish.
+
+הערות נוספות לעריכה:
+=====================
+- משך כולל: כ-2 דקות
+- מוזיקת רקע: מודרנית, טכנולוגית, מקצועית
+- קצב: דינמי אך לא מהיר מדי
+- שפה: עברית בכותרות, ממשק בעברית/אנגלית
+- טון: מקצועי, חדשני, אמין
+- קהל יעד: מנהלי הפקה ושידור בתעשיית הטלוויזיה

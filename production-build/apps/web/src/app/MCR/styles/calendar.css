@@ -1,0 +1,165 @@
+/* MCR Calendar Styles */
+
+.mcr-calendar {
+  height: 100%;
+  background: white;
+}
+
+/* Calendar header */
+.mcr-calendar .rbc-toolbar {
+  padding: 15px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #e0e0e0;
+  margin-bottom: 0;
+}
+
+.mcr-calendar .rbc-toolbar-label {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #333;
+}
+
+/* Calendar navigation buttons */
+.mcr-calendar .rbc-btn-group button {
+  background: white;
+  border: 1px solid #ddd;
+  color: #555;
+  padding: 6px 12px;
+  font-weight: 500;
+}
+
+.mcr-calendar .rbc-btn-group button:hover {
+  background: #f5f5f5;
+}
+
+.mcr-calendar .rbc-btn-group button.rbc-active {
+  background: #3182ce;
+  color: white;
+  border-color: #3182ce;
+}
+
+/* Month view header */
+.mcr-calendar .rbc-header {
+  background: #f8f9fa;
+  padding: 10px;
+  font-weight: 600;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+/* Week/Day view time header */
+.mcr-calendar .rbc-time-header {
+  background: #f8f9fa;
+  border-bottom: 1px solid #e0e0e0;
+  min-height: 60px;
+}
+
+.mcr-calendar .rbc-time-header-cell {
+  padding: 10px;
+  font-weight: 600;
+  min-height: 70px;
+  vertical-align: top;
+}
+
+/* Time slots */
+.mcr-calendar .rbc-timeslot-group {
+  border-bottom: 1px solid #f0f0f0;
+  min-height: 40px;
+}
+
+.mcr-calendar .rbc-time-slot {
+  color: #666;
+  font-size: 0.875rem;
+}
+
+/* Today highlight */
+.mcr-calendar .rbc-today {
+  background-color: rgba(59, 130, 246, 0.05);
+}
+
+/* Events */
+.mcr-calendar .rbc-event {
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: none;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  color: white;
+  box-sizing: border-box;
+  min-height: 20px;
+  line-height: 1.2;
+  text-align: right !important;
+  direction: rtl !important;
+}
+
+.mcr-calendar .rbc-event:hover {
+  filter: brightness(0.9);
+}
+
+.mcr-calendar .rbc-event-content {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right !important;
+  direction: rtl !important;
+  display: block;
+}
+
+/* Selected event */
+.mcr-calendar .rbc-event.rbc-selected {
+  box-shadow: 0 0 0 2px rgba(0,0,0,0.2);
+}
+
+/* All day events row */
+.mcr-calendar .rbc-allday-cell {
+  background: #f8f9fa;
+}
+
+/* Current time indicator */
+.mcr-calendar .rbc-current-time-indicator {
+  background-color: #ef4444;
+  height: 2px;
+}
+
+/* Grid lines */
+.mcr-calendar .rbc-time-content > * + * {
+  border-left: 1px solid #e0e0e0;
+}
+
+/* Selection */
+.mcr-calendar .rbc-slot-selecting {
+  background: rgba(59, 130, 246, 0.1);
+}
+
+/* Show more link */
+.mcr-calendar .rbc-show-more {
+  background: #3182ce;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.75rem;
+}
+
+/* Ensure all event text is right-aligned for RTL */
+.mcr-calendar .rbc-event-label {
+  text-align: right !important;
+  direction: rtl !important;
+}
+
+/* Scrollbar */
+.mcr-calendar .rbc-time-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.mcr-calendar .rbc-time-content::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+.mcr-calendar .rbc-time-content::-webkit-scrollbar-thumb {
+  background: #c0c0c0;
+  border-radius: 4px;
+}
+
+.mcr-calendar .rbc-time-content::-webkit-scrollbar-thumb:hover {
+  background: #999;
+}

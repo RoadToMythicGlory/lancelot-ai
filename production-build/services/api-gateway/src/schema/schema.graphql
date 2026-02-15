@@ -1,0 +1,1933 @@
+scalar DateTime
+scalar JSON
+
+# Import MCR types
+enum BroadcastType {
+  SRT_CALLER
+  SRT_LISTENER
+  DVBS2
+  DVBS2X
+  NS3
+  NS4
+  RTMP
+  ZIXI
+  PRT
+  LIVEU
+  KLITA_MOU
+  OTHER
+}
+
+enum ActivityStatus {
+  READY
+  NOT_READY
+  ERROR
+  UNKNOWN
+}
+
+# User type for createdBy field
+type User {
+  id: ID!
+  firstName: String
+  lastName: String
+  displayName: String!
+  email: String!
+  department: String
+  permissions: [String!]
+  
+  # New fields for hierarchical system
+  systemRole: SystemRole
+  departments: [UserDepartment!]
+  phone: String
+  mobile: String
+  isActive: Boolean!
+  lastLogin: DateTime
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  createdBy: User
+  updatedBy: User
+}
+
+# Hierarchical System Roles
+enum SystemRole {
+  SYSTEM_ADMIN
+  IT_ADMIN
+  IT_USER
+  DEPARTMENT_ADMIN
+  DEPARTMENT_USER
+}
+
+# User's department membership with roles
+type UserDepartment {
+  departmentId: String!
+  departmentName: String!
+  roles: [String!]!
+}
+
+# Department type
+type Department {
+  id: ID!
+  name: String!
+  hebrewName: String
+  code: String
+  createdAt: DateTime!
+  # New fields
+  category: String!
+  roles: [String!]!
+  description: String
+  isActive: Boolean!
+  updatedAt: DateTime!
+}
+
+# Input types for user management
+input CreateUserInput {
+  email: String!
+  password: String!
+  firstName: String!
+  lastName: String!
+  systemRole: SystemRole!
+  departments: [UserDepartmentInput!]!
+  phone: String
+  mobile: String
+  isActive: Boolean
+}
+
+input UpdateUserInput {
+  firstName: String
+  lastName: String
+  systemRole: SystemRole
+  departments: [UserDepartmentInput!]
+  phone: String
+  mobile: String
+  isActive: Boolean
+  password: String
+}
+
+input UserDepartmentInput {
+  departmentId: String!
+  departmentName: String!
+  roles: [String!]!
+}
+
+input UserFilter {
+  isActive: Boolean
+  systemRole: SystemRole
+  departmentId: String
+  searchTerm: String
+}
+
+# Warehouse Equipment types
+type WarehouseEquipment {
+  id: ID!
+  name: String!
+  category: String!
+  brand: String
+  barcode: String!
+  status: String!
+  condition: String
+  quantityTotal: Int!
+  quantityAvailable: Int!
+  quantityAssigned: Int!
+  currentLocation: String
+  
+  # Additional details
+  price: Float
+  purchaseDate: DateTime
+  warrantyExpiryDate: DateTime
+  company: String
+  equipmentModel: String
+  contactPerson: String
+  manualLink: String
+  imageUrl: String
+  
+  # Storage location
+  storage: StorageLocation
+  
+  # Equipment state
+  isDisabled: Boolean!
+  disabledAt: DateTime
+  disabledBy: User
+  disabledReason: String
+  
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type StorageLocation {
+  row: String
+  shelf: String
+  cell: String
+}
+
+input WarehouseEquipmentFilter {
+  category: String
+  status: String
+  available: Boolean
+  location: String
+}
+
+# Equipment Input Types
+input CreateEquipmentInput {
+  name: String!
+  category: String!
+  price: Float
+  purchaseDate: DateTime
+  warrantyExpiryDate: DateTime
+  company: String
+  equipmentModel: String
+  contactPerson: String
+  manualLink: String
+  imageUrl: String
+  storage: StorageLocationInput
+  quantityTotal: Int!
+}
+
+input UpdateEquipmentInput {
+  name: String
+  category: String
+  price: Float
+  purchaseDate: DateTime
+  warrantyExpiryDate: DateTime
+  company: String
+  equipmentModel: String
+  contactPerson: String
+  manualLink: String
+  imageUrl: String
+  storage: StorageLocationInput
+  status: String
+  condition: String
+  quantityTotal: Int
+  currentLocation: String
+  isDisabled: Boolean
+  disabledReason: String
+}
+
+input StorageLocationInput {
+  row: String
+  shelf: String
+  cell: String
+}
+
+# Equipment Assignment Types
+type EquipmentAssignment {
+  id: ID!
+  equipmentId: ID!
+  eventName: String!
+  eventId: ID!
+  startDate: DateTime!
+  endDate: DateTime!
+  location: String
+  status: String!
+  quantityAssigned: Int!
+  assignmentStatus: String!
+  assignedAt: DateTime
+  scheduledPickupAt: DateTime
+  scheduledReturnAt: DateTime
+  actualPickupAt: DateTime
+  actualReturnAt: DateTime
+  assignmentNotes: String
+  returnNotes: String
+  assignedToName: String
+  assignedBy: String
+  assignedByUser: User
+  collectedByUser: User
+  returnedByUser: User
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+# Equipment History Type for tracking equipment usage over time
+type EquipmentHistory {
+  id: ID!
+  equipmentId: ID!
+  eventId: ID!
+  eventName: String!
+  action: String! # assigned, returned, transferred, quantity_adjusted, disabled, enabled
+  quantity: Int!
+  date: DateTime!
+  performedBy: String
+  performedByUser: User
+  notes: String
+  previousValue: String
+  newValue: String
+  transferDetails: EquipmentTransferDetails
+}
+
+# Equipment Transfer Details for undo functionality
+type EquipmentTransferDetails {
+  sourceEventId: ID!
+  sourceEventName: String!
+  targetEventId: ID!
+  targetEventName: String!
+  transferredQuantity: Int!
+  canUndo: Boolean!
+}
+
+input CreateEquipmentAssignmentInput {
+  equipmentId: ID!
+  broadcastEventId: ID!
+  quantityAssigned: Int!
+  assignmentStatus: String!
+  assignedAt: DateTime
+  scheduledPickupAt: DateTime
+  scheduledReturnAt: DateTime
+  assignmentNotes: String
+  assignedToName: String
+}
+
+input UpdateEquipmentAssignmentInput {
+  quantityAssigned: Int
+  assignmentStatus: String
+  actualPickupAt: DateTime
+  actualReturnAt: DateTime
+  returnNotes: String
+  assignedToName: String
+}
+
+# Enums
+enum BroadcastEventType {
+  live
+  recorded
+  remote
+  studio
+}
+
+enum BroadcastEventStatus {
+  planned
+  confirmed
+  in_progress
+  completed
+  cancelled
+}
+
+# Broadcast Types
+type BroadcastEvent {
+  id: ID!
+  eventNumber: Int
+  title: String!
+  hebrewTitle: String
+  description: String
+  eventType: String
+  startTime: DateTime!
+  endTime: DateTime!
+  koTime: DateTime
+  arrivalTime: DateTime
+  actualStartTime: DateTime
+  actualEndTime: DateTime
+  location: String
+  venue: String
+  liveLocation: String
+  synopsis: String
+  synopsis_file: String
+  synopsisFile: String
+  channel: String!
+  parallelChannel: String
+  channel1_4k: Boolean
+  live: Boolean
+  backup: Boolean
+  requiresSignLanguage: Boolean
+  requiresSubtitles: Boolean
+  accessibilityStatus: String
+  contentDuration: Int
+  contentType: String
+  contentSource: String
+  source: String
+  destination: String
+  satellite: String
+  technicalDirectorId: String
+  controlOperatorId: String
+  priority: String
+  routingConfig: JSON
+  routing_preset: String
+  routingPreset: String
+  notes: String
+  subtitles: String
+  sport: String
+  league: String
+  stage: String
+  homeTeam: String
+  awayTeam: String
+  production_crew: [String!]
+  equipment_list: [String!]
+  file_path: String
+  reception_start_time: DateTime
+  gmt_start_time: DateTime
+  gmt_end_time: DateTime
+  metadata: JSON
+  createdBy: User
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  
+  # Legacy fields for compatibility
+  type: BroadcastEventType!
+  status: BroadcastEventStatus!
+  projectCode: String
+  episodeNumber: String
+  season: String
+  isLive: Boolean
+  isRerun: Boolean
+  departmentData: JSON
+  overlappingEvents: [BroadcastEvent!]
+}
+
+# Input Types
+input CreateBroadcastEventInput {
+  title: String!
+  hebrewTitle: String
+  description: String
+  eventType: String
+  startTime: DateTime!
+  endTime: DateTime!
+  koTime: DateTime
+  arrivalTime: DateTime
+  actualStartTime: DateTime
+  actualEndTime: DateTime
+  location: String
+  venue: String
+  liveLocation: String
+  synopsis: String
+  synopsis_file: String
+  synopsisFile: String
+  channel: String!
+  parallelChannel: String
+  channel1_4k: Boolean
+  live: Boolean
+  backup: Boolean
+  requiresSignLanguage: Boolean
+  requiresSubtitles: Boolean
+  accessibilityStatus: String
+  contentDuration: Int
+  contentType: String
+  contentSource: String
+  source: String
+  destination: String
+  satellite: String
+  technicalDirectorId: String
+  controlOperatorId: String
+  priority: String
+  routingConfig: JSON
+  routing_preset: String
+  routingPreset: String
+  notes: String
+  subtitles: String
+  sport: String
+  league: String
+  stage: String
+  homeTeam: String
+  awayTeam: String
+  production_crew: [String!]
+  equipment_list: [String!]
+  file_path: String
+  reception_start_time: DateTime
+  gmt_start_time: DateTime
+  gmt_end_time: DateTime
+  metadata: JSON
+  
+  # Legacy fields
+  type: BroadcastEventType
+  projectCode: String
+  episodeNumber: String
+  season: String
+  isLive: Boolean
+  isRerun: Boolean
+}
+
+input UpdateBroadcastEventInput {
+  title: String
+  hebrewTitle: String
+  description: String
+  eventType: String
+  startTime: DateTime
+  endTime: DateTime
+  koTime: DateTime
+  arrivalTime: DateTime
+  actualStartTime: DateTime
+  actualEndTime: DateTime
+  location: String
+  venue: String
+  liveLocation: String
+  synopsis: String
+  synopsis_file: String
+  synopsisFile: String
+  channel: String
+  parallelChannel: String
+  channel1_4k: Boolean
+  live: Boolean
+  backup: Boolean
+  requiresSignLanguage: Boolean
+  requiresSubtitles: Boolean
+  accessibilityStatus: String
+  contentDuration: Int
+  contentType: String
+  contentSource: String
+  source: String
+  destination: String
+  satellite: String
+  technicalDirectorId: String
+  controlOperatorId: String
+  priority: String
+  routingConfig: JSON
+  routing_preset: String
+  routingPreset: String
+  notes: String
+  subtitles: String
+  sport: String
+  league: String
+  stage: String
+  homeTeam: String
+  awayTeam: String
+  production_crew: [String!]
+  equipment_list: [String!]
+  file_path: String
+  reception_start_time: DateTime
+  gmt_start_time: DateTime
+  gmt_end_time: DateTime
+  metadata: JSON
+  
+  # Legacy fields
+  type: BroadcastEventType
+  status: BroadcastEventStatus
+  projectCode: String
+  episodeNumber: String
+  season: String
+  isLive: Boolean
+  isRerun: Boolean
+}
+
+input ExcelBroadcastEventInput {
+  title: String!
+  hebrewTitle: String
+  startTime: DateTime!
+  endTime: DateTime!
+  type: BroadcastEventType!
+  channel: String!
+  description: String
+  projectCode: String
+  episodeNumber: String
+  season: String
+  isLive: Boolean
+  isRerun: Boolean
+  rowIndex: Int
+  importBatchId: String
+  
+  # Additional fields
+  routingConfig: JSON
+  routing_preset: String
+  routingPreset: String
+  notes: String
+  subtitles: String
+  sport: String
+  league: String
+  stage: String
+  homeTeam: String
+  awayTeam: String
+  production_crew: [String!]
+  equipment_list: [String!]
+  file_path: String
+  reception_start_time: DateTime
+  gmt_start_time: DateTime
+  gmt_end_time: DateTime
+  metadata: JSON
+}
+
+# Output type for Excel broadcast events (used in error responses)
+type ExcelBroadcastEvent {
+  title: String!
+  hebrewTitle: String
+  startTime: DateTime!
+  endTime: DateTime!
+  type: BroadcastEventType!
+  channel: String!
+  description: String
+  projectCode: String
+  episodeNumber: String
+  season: String
+  isLive: Boolean
+  isRerun: Boolean
+  rowIndex: Int
+  importBatchId: String
+}
+
+input DepartmentSpecificDataInput {
+  broadcastArray: JSON
+  mcr: JSON
+  externalBroadcasts: JSON
+  closedCaptions: JSON
+  warehouse: JSON
+  rundown: JSON
+  customData: JSON
+  data: JSON
+}
+
+# Overlap Types
+type ChannelOverlap {
+  eventId: String!
+  eventTitle: String!
+  startTime: String!
+  endTime: String!
+  channel: String!
+}
+
+type OverlapCheckResult {
+  hasOverlaps: Boolean!
+  message: String!
+  overlaps: [ChannelOverlap!]!
+}
+
+# Response Types
+type CreateBroadcastEventResponse {
+  success: Boolean!
+  event: BroadcastEvent
+  overlapCheck: OverlapCheckResult
+  requiresConfirmation: Boolean!
+}
+
+type BulkCreateResponse {
+  success: Boolean!
+  eventsCreated: Int!
+  errors: [String!]!
+  events: [BroadcastEvent!]!
+  overlapCheck: OverlapCheckResult
+  requiresConfirmation: Boolean!
+}
+
+type BulkCreateError {
+  index: Int!
+  message: String!
+  event: ExcelBroadcastEvent
+}
+
+type BulkDeleteResponse {
+  deleted: Int!
+  message: String
+}
+
+type EquipmentReturnResponse {
+  success: Boolean!
+  message: String!
+  updatedEvent: BroadcastEvent
+  updatedEquipment: [WarehouseEquipment!]
+}
+
+type TransferEquipmentResponse {
+  success: Boolean!
+  message: String!
+  sourceEvent: BroadcastEvent
+  targetEvent: BroadcastEvent
+}
+
+type HealthCheck {
+  status: String!
+  timestamp: DateTime!
+}
+
+# Vendor Types
+type Vendor {
+  id: ID!
+  name: String!
+  hebrewName: String
+  category: VendorCategory
+  contactName: String
+  contactPhone: String
+  contactEmail: String
+  alternateContactName: String
+  alternateContactPhone: String
+  address: VendorAddress
+  website: String
+  notes: String
+  isActive: Boolean!
+  createdBy: User
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type VendorAddress {
+  street: String
+  city: String
+  postalCode: String
+  country: String
+}
+
+enum VendorCategory {
+  equipment
+  services
+  both
+}
+
+# Vendor Input Types
+input CreateVendorInput {
+  name: String!
+  hebrewName: String
+  category: VendorCategory
+  contactName: String
+  contactPhone: String
+  contactEmail: String
+  alternateContactName: String
+  alternateContactPhone: String
+  address: VendorAddressInput
+  website: String
+  notes: String
+}
+
+input UpdateVendorInput {
+  name: String
+  hebrewName: String
+  category: VendorCategory
+  contactName: String
+  contactPhone: String
+  contactEmail: String
+  alternateContactName: String
+  alternateContactPhone: String
+  address: VendorAddressInput
+  website: String
+  notes: String
+  isActive: Boolean
+}
+
+input VendorAddressInput {
+  street: String
+  city: String
+  postalCode: String
+  country: String
+}
+
+input VendorFilter {
+  category: VendorCategory
+  isActive: Boolean
+  searchText: String
+}
+
+# Root Types
+type Query {
+  # Health check
+  health: HealthCheck!
+  
+  # User Management
+  users(filter: UserFilter): [User!]!
+  user(id: ID!): User
+  me: User
+  usersByDepartment(departmentId: String!): [User!]!
+  usersBySystemRole(systemRole: SystemRole!): [User!]!
+  
+  # Broadcast Events
+  broadcastEvents(startDate: DateTime, endDate: DateTime): [BroadcastEvent!]!
+  broadcastEvent(id: ID!): BroadcastEvent
+  
+  # Departments
+  departments: [Department!]!
+  
+  # Warehouse Equipment
+  warehouseEquipment(filter: WarehouseEquipmentFilter): [WarehouseEquipment!]!
+  
+  # Equipment Assignments
+  equipmentAssignmentsByEvent(broadcastEventId: ID!): [EquipmentAssignment!]!
+  equipmentAssignments(equipmentId: ID!): [EquipmentAssignment!]!
+  equipmentHistory(equipmentId: ID!): [EquipmentHistory!]!
+  
+  # Vendors
+  vendors(filter: VendorFilter): [Vendor!]!
+  vendor(id: ID!): Vendor
+  
+  # ===== SHIFTS QUERIES =====
+  # Shifts
+  shifts(startDate: String!, endDate: String!, department: String, userId: String): [Shift!]!
+  shift(id: ID!): Shift
+  myUpcomingShifts(limit: Int = 10): [Shift!]!
+  
+  # Shift Templates
+  shiftTemplates(department: String, active: Boolean): [ShiftTemplate!]!
+  shiftTemplate(id: ID!): ShiftTemplate
+  
+  # Shift Role Templates
+  shiftRoleTemplates(departmentId: String!): [ShiftRoleTemplate!]!
+  shiftRoleTemplate(id: ID!): ShiftRoleTemplate
+  
+  # Shift Swap Requests
+  shiftSwapRequests(status: RequestStatus, userId: String): [ShiftSwapRequest!]!
+  shiftSwapRequest(id: ID!): ShiftSwapRequest
+  myShiftSwapRequests: [ShiftSwapRequest!]!
+  incomingShiftSwapRequests(status: RequestStatus): [ShiftSwapRequest!]!
+  
+  # Vacation Requests
+  vacationRequests(status: RequestStatus, userId: String): [VacationRequest!]!
+  vacationRequest(id: ID!): VacationRequest
+  myVacationRequests: [VacationRequest!]!
+  
+  # Availability Constraints
+  availabilityConstraints(weekStartDate: String!, userId: String): [AvailabilityConstraint!]!
+  myAvailabilityConstraints(weekStartDate: String!): AvailabilityConstraint
+  
+  # Employee Settings
+  employeeSettings(userId: String!): EmployeeSettings
+  myEmployeeSettings: EmployeeSettings
+  allEmployeeSettings: [EmployeeSettings!]!
+  
+  # Statistics
+  shiftAssignmentStats(weekStartDate: String!): ShiftAssignmentStats!
+  employeeShiftStats(userId: String!, startDate: String!, endDate: String!): ShiftAssignmentStats!
+  
+  # Admin queries
+  getShiftsByWeek(weekOffset: Int!): WeekShiftData!
+  getShiftTemplates: [ShiftTemplate!]!
+  getSpecialRequests(status: String): [SpecialRequest!]!
+  getAllShifts(startDate: String, endDate: String): [Shift!]!
+  getVacationRequests: [VacationRequest!]!
+  
+  # User queries
+  # Note: users query with filtering is defined in the User Management section above
+  
+  # Department Shift Configuration
+  departmentShiftConfig(departmentId: String!): DepartmentShiftConfig
+  myDepartmentShiftConfig: DepartmentShiftConfig
+  allDepartmentShiftConfigs: [DepartmentShiftConfig!]!
+  
+  # New queries for admin dashboard
+  employees(department: String): [User!]!
+  employee(id: ID!): User
+  specialDays: [SpecialDay!]!
+}
+
+type Mutation {
+  # Broadcast Events
+  createBroadcastEvent(input: CreateBroadcastEventInput!): BroadcastEvent!
+  createBroadcastEventWithOverlapCheck(input: CreateBroadcastEventInput!, forceCreate: Boolean): CreateBroadcastEventResponse!
+  updateBroadcastEvent(id: ID!, input: UpdateBroadcastEventInput!): BroadcastEvent!
+  deleteBroadcastEvent(id: ID!): Boolean!
+  
+  # Bulk operations
+  createBroadcastEventsFromExcel(events: [ExcelBroadcastEventInput!]!): BulkCreateResponse!
+  createBroadcastEventsFromExcelWithOverlapCheck(events: [ExcelBroadcastEventInput!]!, forceCreate: Boolean): BulkCreateResponse!
+  deleteBroadcastEventsByDateRange(startDate: DateTime!, endDate: DateTime!): BulkDeleteResponse!
+  deleteImportedBroadcastEvents: BulkDeleteResponse!
+  
+  # Department-specific data
+  updateBroadcastEventDepartmentData(eventId: ID!, department: String!, data: DepartmentSpecificDataInput!): BroadcastEvent!
+  
+  # Warehouse Equipment
+  createEquipment(input: CreateEquipmentInput!): WarehouseEquipment!
+  updateEquipment(id: ID!, input: UpdateEquipmentInput!): WarehouseEquipment!
+  deleteEquipment(id: ID!): Boolean!
+  
+  # Return equipment from broadcast event
+  returnEquipmentFromEvent(eventId: ID!, equipmentIds: [String!]!): EquipmentReturnResponse!
+  
+  # Transfer equipment between broadcast events
+  transferEquipmentBetweenEvents(sourceEventId: ID!, targetEventId: ID!, equipmentIds: [String!]!): TransferEquipmentResponse!
+  
+  # Equipment Assignment mutations
+  createEquipmentAssignment(input: CreateEquipmentAssignmentInput!): EquipmentAssignment!
+  updateEquipmentAssignment(id: ID!, input: UpdateEquipmentAssignmentInput!): EquipmentAssignment!
+  deleteEquipmentAssignment(id: ID!): Boolean!
+  updateWarehouseEquipmentQuantity(id: ID!, quantityChange: Int!): WarehouseEquipment!
+  
+  # Equipment quantity adjustment
+  adjustEquipmentQuantity(id: ID!, adjustment: Int!, reason: String!): WarehouseEquipment!
+  
+  # Equipment state management
+  disableEquipment(id: ID!, reason: String!): WarehouseEquipment!
+  enableEquipment(id: ID!): WarehouseEquipment!
+  
+  # Undo equipment transfer
+  undoEquipmentTransfer(transferId: ID!): TransferEquipmentResponse!
+  
+  # Vendor mutations
+  createVendor(input: CreateVendorInput!): Vendor!
+  updateVendor(id: ID!, input: UpdateVendorInput!): Vendor!
+  deleteVendor(id: ID!): Boolean!
+  toggleVendorStatus(id: ID!): Vendor!
+  
+  # ===== SHIFTS MUTATIONS =====
+  # Shifts
+  createShift(input: ShiftInput!): Shift!
+  updateShift(id: ID!, input: ShiftInput!): Shift!
+  deleteShift(id: ID!): Boolean!
+  assignUserToShift(input: ShiftAssignmentInput!): Shift!
+  removeUserFromShift(shiftId: String!, userId: String!): Shift!
+  
+  # Shift Templates
+  createShiftTemplate(input: ShiftTemplateInput!): ShiftTemplate!
+  updateShiftTemplate(id: ID!, input: ShiftTemplateInput!): ShiftTemplate!
+  deleteShiftTemplate(id: ID!): Boolean!
+  generateShiftsFromTemplate(templateId: String!, startDate: String!, endDate: String!): [Shift!]!
+  
+  # Shift Role Templates
+  createShiftRoleTemplate(input: ShiftRoleTemplateInput!): ShiftRoleTemplate!
+  updateShiftRoleTemplate(id: ID!, input: ShiftRoleTemplateInput!): ShiftRoleTemplate!
+  deleteShiftRoleTemplate(id: ID!): Boolean!
+  applyShiftRoleTemplate(templateId: String!, weekStartDate: String!): ApplyTemplateResult!
+  
+  # Shift Swap Requests
+  createShiftSwapRequest(input: ShiftSwapRequestInput!): ShiftSwapRequest!
+  cancelShiftSwapRequest(id: ID!): ShiftSwapRequest!
+  respondToShiftSwapRequest(id: ID!, accepted: Boolean!, reason: String): ShiftSwapRequest!
+  approveShiftSwapRequest(input: ApprovalInput!): ShiftSwapRequest!
+  
+  # Vacation Requests
+  createVacationRequest(input: VacationRequestInput!): VacationRequest!
+  updateVacationRequest(id: ID!, input: VacationRequestInput!): VacationRequest!
+  deleteVacationRequest(id: ID!): Boolean!
+  cancelVacationRequest(id: ID!): VacationRequest!
+  approveVacationRequest(input: ApprovalInput!): VacationRequest!
+  
+  # Availability Constraints
+  submitAvailabilityConstraints(input: AvailabilityConstraintInput!): AvailabilityConstraint!
+  
+  # Employee Settings
+  updateEmployeeSettings(input: EmployeeSettingsInput!): EmployeeSettings!
+  
+  # Authentication
+  login(email: String!, password: String!): AuthPayload!
+  
+  # User Management
+  createUser(input: CreateUserInput!): User!
+  updateUser(id: ID!, input: UpdateUserInput!): User!
+  deleteUser(id: ID!): Boolean!
+  updateMyProfile(input: UpdateUserInput!): User!
+  changePassword(oldPassword: String!, newPassword: String!): Boolean!
+  
+  # Department Shift Configuration
+  createDepartmentShiftConfig(input: DepartmentShiftConfigInput!): DepartmentShiftConfig!
+  updateDepartmentShiftConfig(departmentId: String!, input: DepartmentShiftConfigInput!): DepartmentShiftConfig!
+  deleteDepartmentShiftConfig(departmentId: String!): Boolean!
+  
+  # New mutations for admin dashboard
+  createSpecialRequest(input: SpecialRequestInput!): SpecialRequest!
+  handleSpecialRequest(requestId: String!, approved: Boolean!, adminNotes: String): SpecialRequest!
+  sendNotification(input: NotificationInput!): NotificationPayload!
+  generateShiftReport(input: ShiftReportInput!): ShiftReport!
+  createEmployee(input: CreateEmployeeInput!): User!
+  updateSpecialDays(input: SpecialDayInput!): SpecialDay!
+  deleteSpecialDay(id: ID!): Boolean!
+}
+
+# Authentication types
+type AuthPayload {
+  token: String!
+  user: User!
+}
+
+# ===== SUBSCRIPTIONS =====
+type Subscription {
+  # Broadcast event updates
+  broadcastEventUpdated: BroadcastEvent!
+  
+  # ===== SHIFTS SUBSCRIPTIONS =====
+  shiftUpdated(userId: String): Shift!
+  shiftSwapRequestUpdated(userId: String): ShiftSwapRequest!
+  vacationRequestUpdated(userId: String): VacationRequest!
+} 
+
+# ================== SHIFTS MANAGEMENT SYSTEM ==================
+
+# Shifts Enums
+# ShiftType is now a String to support dynamic shift types
+
+enum AvailabilityStatus {
+  available
+  unavailable
+  prefer
+  prefer_not
+}
+
+enum VacationType {
+  annual
+  sick
+  personal
+  maternity
+  other
+}
+
+enum RequestStatus {
+  pending
+  approved
+  rejected
+  cancelled
+}
+
+# Shifts Types
+type Shift {
+  id: ID!
+  date: String!
+  shiftType: String!
+  startTime: String
+  endTime: String
+  department: String!
+  requiredWorkers: Int!
+  assignedWorkers: [ShiftAssignment!]!
+  templateId: String
+  notes: String
+  status: String
+  user: User
+  createdAt: String!
+  updatedAt: String!
+}
+
+type ShiftAssignment {
+  userId: String!
+  user: User
+  role: String!
+  assignedAt: String!
+  assignedBy: String
+}
+
+type ShiftTemplate {
+  id: ID!
+  name: String!
+  dayOfWeek: Int!
+  shiftType: String!
+  startTime: String!
+  endTime: String!
+  department: String!
+  departments: [String!]!
+  daysOfWeek: [Int!]!
+  requiredWorkers: Int!
+  defaultRoles: [RoleRequirement!]
+  active: Boolean!
+  isActive: Boolean!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type RoleRequirement {
+  role: String!
+  count: Int!
+}
+
+# New Shift Role Template for combining shift types with roles
+type ShiftRoleTemplate {
+  id: ID!
+  name: String!
+  departmentId: String!
+  dayOfWeek: Int!
+  shiftType: String!
+  roleAssignments: [ShiftRoleAssignment!]!
+  isActive: Boolean!
+  createdBy: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type ShiftRoleAssignment {
+  roleId: String!
+  roleName: String!
+  count: Int!
+}
+
+type ShiftSwapRequest {
+  id: ID!
+  requestingUserId: String!
+  requestingUser: User
+  shiftId: String!
+  shift: Shift
+  targetUserId: String!
+  targetUser: User
+  reason: String
+  status: RequestStatus!
+  targetUserResponse: String # 'accepted', 'rejected', or null
+  targetUserResponseAt: String
+  targetUserResponseReason: String
+  adminNotes: String
+  approvedBy: String
+  approvedByUser: User
+  approvedAt: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type VacationRequest {
+  id: ID!
+  userId: String!
+  user: User
+  startDate: String!
+  endDate: String!
+  vacationType: VacationType!
+  reason: String
+  status: RequestStatus!
+  adminNotes: String
+  approvedBy: String
+  approvedByUser: User
+  approvedAt: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type AvailabilityConstraint {
+  id: ID!
+  userId: String!
+  user: User
+  weekStartDate: String!
+  constraints: [ConstraintItem!]!
+  submittedAt: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type ConstraintItem {
+  dayOfWeek: Int!
+  shiftType: String!
+  availability: AvailabilityStatus!
+}
+
+type EmployeeSettings {
+  id: ID!
+  userId: String!
+  user: User
+  roles: [String!]
+  teams: [String!]
+  employmentPercentage: Int
+  constraintDeadline: ConstraintDeadline
+  restrictions: [EmployeeRestriction!]
+  createdAt: String!
+  updatedAt: String!
+}
+
+type ConstraintDeadline {
+  dayOfWeek: Int!
+  hour: Int!
+}
+
+type EmployeeRestriction {
+  type: String!
+  description: String!
+  active: Boolean!
+}
+
+type ShiftAssignmentStats {
+  weekStartDate: String!
+  totalShifts: Int!
+  assignedShifts: Int!
+  unassignedShifts: Int!
+  assignmentPercentage: Float!
+  departmentStats: [DepartmentShiftStats!]
+}
+
+type DepartmentShiftStats {
+  department: String!
+  totalShifts: Int!
+  assignedShifts: Int!
+  unassignedShifts: Int!
+  assignmentPercentage: Float!
+}
+
+# New types for admin queries
+type WeekShiftData {
+  weekStart: String!
+  weekEnd: String!
+  completionPercentage: Float!
+  shifts: [Shift!]!
+  stats: ShiftWeekStats!
+}
+
+type ShiftWeekStats {
+  total: Int!
+  assigned: Int!
+  unassigned: Int!
+}
+
+type SpecialRequest {
+  id: ID!
+  user: User!
+  type: String!
+  date: String!
+  shiftType: String
+  reason: String!
+  status: String!
+  createdAt: String!
+}
+
+# Department Shift Configuration Types
+type DepartmentShiftConfig {
+  id: ID!
+  departmentId: String!
+  departmentName: String!
+  shiftTypes: [ShiftTypeConfig!]!
+  weeklyPatterns: [WeeklyPattern!]!
+  constraints: ShiftConstraints!
+  notifications: NotificationSettings!
+  departmentRoles: [DepartmentRole!]
+  useTemplateSystem: Boolean!
+  metadata: ConfigMetadata!
+}
+
+type DepartmentRole {
+  id: ID!
+  name: String!
+  description: String
+  color: String!
+  priority: Int!
+}
+
+type ShiftTypeConfig {
+  type: String!
+  label: String!
+  color: String!
+  defaultStartTime: String!
+  defaultEndTime: String!
+  enabled: Boolean!
+  requiredStaff: Int!
+}
+
+type WeeklyPattern {
+  name: String!
+  description: String!
+  pattern: [DayPattern!]!
+  isActive: Boolean!
+}
+
+type DayPattern {
+  dayOfWeek: Int!
+  shifts: [PatternShift!]!
+}
+
+type PatternShift {
+  shiftType: String!
+  requiredStaff: Int!
+  startTime: String!
+  endTime: String!
+}
+
+type ShiftConstraints {
+  minRestBetweenShifts: Int!
+  maxConsecutiveDays: Int!
+  maxShiftsPerWeek: Int!
+  maxNightShiftsPerWeek: Int!
+  requireApprovalForSwaps: Boolean!
+  autoAssignEnabled: Boolean!
+  allowOvertime: Boolean!
+  overtimeThresholdHours: Int!
+}
+
+type NotificationSettings {
+  sendShiftReminders: Boolean!
+  reminderHoursBefore: Int!
+  sendSwapRequests: Boolean!
+  sendScheduleUpdates: Boolean!
+}
+
+type ConfigMetadata {
+  createdBy: String!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  lastModifiedBy: String!
+}
+
+# Shifts Input Types
+input ShiftInput {
+  date: String!
+  shiftType: String!
+  department: String!
+  requiredWorkers: Int!
+  notes: String
+  templateId: String
+  startTime: String
+  endTime: String
+}
+
+input ShiftTemplateInput {
+  name: String!
+  dayOfWeek: Int!
+  shiftType: String!
+  department: String!
+  requiredWorkers: Int!
+  defaultRoles: [RoleRequirementInput!]
+  active: Boolean
+}
+
+input RoleRequirementInput {
+  role: String!
+  count: Int!
+}
+
+input ShiftRoleTemplateInput {
+  name: String!
+  departmentId: String!
+  dayOfWeek: Int!
+  shiftType: String!
+  roleAssignments: [ShiftRoleAssignmentInput!]!
+  isActive: Boolean
+}
+
+input ShiftRoleAssignmentInput {
+  roleId: String!
+  roleName: String!
+  count: Int!
+}
+
+type ApplyTemplateResult {
+  success: Boolean!
+  message: String!
+  shiftsCreated: Int!
+  shiftsUpdated: Int!
+}
+
+input ShiftAssignmentInput {
+  shiftId: String!
+  userId: String!
+  role: String!
+}
+
+input ShiftSwapRequestInput {
+  shiftId: String!
+  targetUserId: String!
+  reason: String
+}
+
+input VacationRequestInput {
+  userId: String  # Optional - if provided by admin, creates request for this user
+  startDate: String!
+  endDate: String!
+  vacationType: VacationType!
+  reason: String
+}
+
+input AvailabilityConstraintInput {
+  weekStartDate: String!
+  constraints: [ConstraintItemInput!]!
+}
+
+input ConstraintItemInput {
+  dayOfWeek: Int!
+  shiftType: String!
+  availability: AvailabilityStatus!
+}
+
+input EmployeeSettingsInput {
+  userId: String!
+  roles: [String!]
+  teams: [String!]
+  employmentPercentage: Int
+  constraintDeadline: ConstraintDeadlineInput
+  restrictions: [EmployeeRestrictionInput!]
+}
+
+input ConstraintDeadlineInput {
+  dayOfWeek: Int!
+  hour: Int!
+}
+
+input EmployeeRestrictionInput {
+  type: String!
+  description: String!
+  active: Boolean!
+}
+
+input ApprovalInput {
+  requestId: String!
+  approved: Boolean!
+  adminNotes: String
+} 
+
+# Department Shift Configuration Input Types
+input DepartmentShiftConfigInput {
+  departmentId: String!
+  departmentName: String!
+  shiftTypes: [ShiftTypeConfigInput!]
+  weeklyPatterns: [WeeklyPatternInput!]
+  constraints: ShiftConstraintsInput
+  notifications: NotificationSettingsInput
+  departmentRoles: [DepartmentRoleInput!]
+  useTemplateSystem: Boolean
+}
+
+input DepartmentRoleInput {
+  id: String!
+  name: String!
+  description: String
+  color: String!
+  priority: Int!
+}
+
+input ShiftTypeConfigInput {
+  type: String!
+  label: String!
+  color: String!
+  defaultStartTime: String!
+  defaultEndTime: String!
+  enabled: Boolean!
+  requiredStaff: Int!
+}
+
+input WeeklyPatternInput {
+  name: String!
+  description: String!
+  pattern: [DayPatternInput!]!
+  isActive: Boolean!
+}
+
+input DayPatternInput {
+  dayOfWeek: Int!
+  shifts: [PatternShiftInput!]!
+}
+
+input PatternShiftInput {
+  shiftType: String!
+  requiredStaff: Int!
+  startTime: String!
+  endTime: String!
+}
+
+input ShiftConstraintsInput {
+  minRestBetweenShifts: Int
+  maxConsecutiveDays: Int
+  maxShiftsPerWeek: Int
+  maxNightShiftsPerWeek: Int
+  requireApprovalForSwaps: Boolean
+  autoAssignEnabled: Boolean
+  allowOvertime: Boolean
+  overtimeThresholdHours: Int
+}
+
+input NotificationSettingsInput {
+  sendShiftReminders: Boolean
+  reminderHoursBefore: Int
+  sendSwapRequests: Boolean
+  sendScheduleUpdates: Boolean
+} 
+
+# Special Request input
+input SpecialRequestInput {
+  type: String!
+  date: String!
+  shiftType: String
+  reason: String!
+}
+
+# Notification types
+type NotificationPayload {
+  success: Boolean!
+  message: String!
+  notificationId: String
+}
+
+input NotificationInput {
+  title: String!
+  message: String!
+  type: String
+  recipients: [String!]
+  department: String
+}
+
+# Report types
+type ShiftReport {
+  reportType: String!
+  data: JSON!
+  generatedAt: DateTime!
+  message: String
+}
+
+input ShiftReportInput {
+  reportType: String!
+  startDate: String
+  endDate: String
+  department: String
+}
+
+# Employee input type
+input CreateEmployeeInput {
+  firstName: String!
+  lastName: String!
+  email: String!
+  department: String!
+  phone: String
+  systemRole: SystemRole
+  password: String
+  isActive: Boolean
+}
+
+# Special Days types
+type SpecialDay {
+  id: ID!
+  name: String!
+  date: DateTime!
+  type: String!
+  affectsDepartments: [String!]!
+  createdBy: String!
+  createdAt: DateTime!
+}
+
+input SpecialDayInput {
+  name: String!
+  date: String!
+  type: String!
+  departments: [String!]
+} 
+
+# ================== CHAT SYSTEM (Private Conversations) ==================
+
+# A private conversation between two users
+type PrivateConversation {
+  id: ID!
+  participant1: User!
+  participant2: User!
+  unreadCount: Int!
+  lastMessageAt: DateTime
+}
+
+# A message within a private conversation
+type PrivateMessage {
+  id: ID!
+  conversationId: ID!
+  message: String!
+  messageType: String
+  fromUser: User!
+  isRead: Boolean!
+  createdAt: DateTime!
+}
+
+extend type Query {
+  # Current user's private conversations
+  privateConversations: [PrivateConversation!]!
+
+  # Messages of a private conversation
+  conversationMessages(conversationId: ID!, limit: Int, offset: Int): [PrivateMessage!]!
+}
+
+extend type Mutation {
+  # Create a conversation with a user or return the existing one
+  createOrGetConversation(userId: ID!): PrivateConversation!
+
+  # Send a message to a private conversation
+  sendPrivateMessage(conversationId: ID!, message: String!, messageType: String): PrivateMessage!
+
+  # Mark all messages in a conversation as read for the current user
+  markMessagesAsRead(conversationId: ID!): Boolean!
+}
+
+# ================== BULLETIN BOARD SYSTEM ==================
+
+# Bulletin post type for announcements and notifications
+type BulletinPost {
+  id: ID!
+  title: String!
+  content: String!
+  isEmergency: Boolean!
+  isPinned: Boolean!
+  departmentId: String
+  departmentName: String
+  author: User!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  expiresAt: DateTime
+  viewCount: Int!
+  tags: [String!]
+}
+
+# Dashboard statistics
+type DashboardStats {
+  totalUsers: Int!
+  activeUsers: Int!
+  totalDepartments: Int!
+  todaysBroadcasts: Int!
+  upcomingBroadcasts: Int!
+  activeShifts: Int!
+  openTickets: Int!
+  criticalAlerts: Int!
+}
+
+# Department-specific statistics
+type DepartmentStats {
+  departmentId: String!
+  departmentName: String!
+  totalEmployees: Int!
+  activeToday: Int!
+  onLeave: Int!
+  upcomingShifts: Int!
+  assignedEquipment: Int!
+  openTickets: Int!
+}
+
+# Support ticket type
+type SupportTicket {
+  id: ID!
+  title: String!
+  description: String!
+  status: TicketStatus!
+  priority: TicketPriority!
+  category: String!
+  departmentId: String
+  departmentName: String
+  assignedTo: User
+  createdBy: User!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  resolvedAt: DateTime
+  comments: [TicketComment!]
+}
+
+type TicketComment {
+  id: ID!
+  ticketId: ID!
+  content: String!
+  author: User!
+  createdAt: DateTime!
+  isInternal: Boolean!
+}
+
+enum TicketStatus {
+  open
+  in_progress
+  waiting_on_user
+  resolved
+  closed
+}
+
+enum TicketPriority {
+  low
+  medium
+  high
+  critical
+}
+
+extend type Query {
+  # Bulletin board queries
+  bulletinPosts(departmentId: String, limit: Int, onlyEmergency: Boolean, onlyPinned: Boolean): [BulletinPost!]!
+  bulletinPost(id: ID!): BulletinPost
+  
+  # Dashboard queries
+  dashboardStats: DashboardStats!
+  departmentStats(departmentId: String!): DepartmentStats!
+  myDepartmentStats: DepartmentStats!
+  todaysBroadcasts: [BroadcastEvent!]!
+  weeklyShifts(userId: String): [Shift!]!
+  
+  # Support ticket queries
+  supportTickets(status: TicketStatus, priority: TicketPriority, assignedToMe: Boolean, departmentId: String): [SupportTicket!]!
+  supportTicket(id: ID!): SupportTicket
+  myTickets: [SupportTicket!]!
+}
+
+extend type Mutation {
+  # Bulletin board mutations
+  createBulletinPost(title: String!, content: String!, isEmergency: Boolean, isPinned: Boolean, departmentId: String, expiresAt: DateTime, tags: [String!]): BulletinPost!
+  updateBulletinPost(id: ID!, title: String, content: String, isEmergency: Boolean, isPinned: Boolean, expiresAt: DateTime, tags: [String!]): BulletinPost!
+  deleteBulletinPost(id: ID!): Boolean!
+  incrementBulletinViewCount(id: ID!): BulletinPost!
+  
+  # Support ticket mutations
+  createSupportTicket(title: String!, description: String!, priority: TicketPriority!, category: String!, departmentId: String): SupportTicket!
+  updateSupportTicket(id: ID!, title: String, description: String, status: TicketStatus, priority: TicketPriority, assignedToId: String): SupportTicket!
+  addTicketComment(ticketId: ID!, content: String!, isInternal: Boolean): TicketComment!
+  resolveTicket(id: ID!, resolution: String): SupportTicket!
+  closeTicket(id: ID!): SupportTicket!
+}
+
+# =====================================================
+# Vizrt Graphics Integration Schema
+# =====================================================
+
+type VizrtTemplate {
+  id: ID!
+  name: String!
+  description: String
+  category: VizrtTemplateCategory!
+  fields: [VizrtTemplateField!]!
+  previewUrl: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type VizrtTemplateField {
+  key: String!
+  label: String!
+  type: VizrtFieldType!
+  required: Boolean!
+  defaultValue: String
+  options: [String!]
+}
+
+enum VizrtTemplateCategory {
+  LOWER_THIRD
+  SCORE_BUG
+  BREAKING_NEWS
+  WEATHER
+  SPORTS_TICKER
+  ELECTION_RESULTS
+  CUSTOM
+}
+
+enum VizrtFieldType {
+  TEXT
+  NUMBER
+  BOOLEAN
+  SELECT
+  COLOR
+  IMAGE
+  VIDEO
+}
+
+type VizrtConfig {
+  id: ID!
+  name: String!
+  mode: VizrtMode!
+  baseUrl: String!
+  isActive: Boolean!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+enum VizrtMode {
+  ARC
+  PDS
+  ENGINE
+}
+
+type CGTriggerResult {
+  success: Boolean!
+  message: String
+  previewUrl: String
+  triggerId: String
+}
+
+input VizrtConfigInput {
+  name: String!
+  mode: VizrtMode!
+  baseUrl: String!
+  apiKey: String
+  headers: String # JSON string of headers
+}
+
+input CGTriggerInput {
+  templateId: ID!
+  fields: String! # JSON string of field values
+  preview: Boolean = false
+  eventId: ID
+  segmentId: ID
+}
+
+input VizrtTemplateInput {
+  name: String!
+  description: String
+  category: VizrtTemplateCategory!
+  fields: [VizrtTemplateFieldInput!]!
+}
+
+input VizrtTemplateFieldInput {
+  key: String!
+  label: String!
+  type: VizrtFieldType!
+  required: Boolean!
+  defaultValue: String
+  options: [String!]
+}
+
+extend type Query {
+  vizrtConfigs: [VizrtConfig!]!
+  vizrtTemplates(category: VizrtTemplateCategory): [VizrtTemplate!]!
+  vizrtTemplate(id: ID!): VizrtTemplate
+}
+
+extend type Mutation {
+  createVizrtConfig(input: VizrtConfigInput!): VizrtConfig!
+  updateVizrtConfig(id: ID!, input: VizrtConfigInput!): VizrtConfig!
+  deleteVizrtConfig(id: ID!): Boolean!
+  
+  createVizrtTemplate(input: VizrtTemplateInput!): VizrtTemplate!
+  updateVizrtTemplate(id: ID!, input: VizrtTemplateInput!): VizrtTemplate!
+  deleteVizrtTemplate(id: ID!): Boolean!
+  
+  triggerCG(input: CGTriggerInput!): CGTriggerResult!
+  previewCG(input: CGTriggerInput!): CGTriggerResult!
+}
+
+# MCR Types
+type BroadcastDetails {
+  # SRT fields
+  ip: String
+  port: String
+  passphrase: String
+  contact: String
+  notes: String
+  
+  # Satellite/File fields
+  satelliteConfig: String
+  fileContent: String
+  filePath: String
+  
+  # LIVEU fields
+  cameraCount: Int
+}
+
+type MCREvent {
+  id: ID!
+  title: String!
+  start: DateTime!
+  end: DateTime!
+  broadcastType: BroadcastType
+  isMCROnly: Boolean
+  details: BroadcastDetails
+  createdBy: User
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  # Link to broadcast planning if exists
+  broadcastEventId: ID
+}
+
+type MCRBulletinPost {
+  id: ID!
+  content: String!
+  createdBy: User!
+  createdAt: DateTime!
+  expiryDate: DateTime
+  untilNewPost: Boolean
+  departmentId: ID!
+  isActive: Boolean!
+}
+
+type ActivityRow {
+  id: ID!
+  date: DateTime!
+  activityName: String!
+  time: String!
+  endTime: String!
+  equipment: String
+  backup: String
+  routing: String
+  channel: String
+  broadcastType: BroadcastType
+  notes: String
+  status: ActivityStatus!
+  isHidden: Boolean
+  isManual: Boolean
+  createdBy: User
+  updatedBy: User
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+# MCR Inputs
+input BroadcastDetailsInput {
+  ip: String
+  port: String
+  passphrase: String
+  contact: String
+  notes: String
+  satelliteConfig: String
+  fileContent: String
+  filePath: String
+  cameraCount: Int
+}
+
+input CreateMCREventInput {
+  title: String!
+  start: DateTime!
+  end: DateTime!
+  broadcastType: BroadcastType
+  isMCROnly: Boolean
+  details: BroadcastDetailsInput
+  broadcastEventId: ID
+}
+
+input UpdateMCREventInput {
+  title: String
+  start: DateTime
+  end: DateTime
+  broadcastType: BroadcastType
+  isMCROnly: Boolean
+  details: BroadcastDetailsInput
+  broadcastEventId: ID
+}
+
+input CreateBulletinPostInput {
+  content: String!
+  expiryDate: DateTime
+  untilNewPost: Boolean
+}
+
+input UpdateBulletinPostInput {
+  content: String
+  expiryDate: DateTime
+  untilNewPost: Boolean
+}
+
+input CreateActivityRowInput {
+  date: DateTime!
+  activityName: String!
+  time: String!
+  endTime: String!
+  equipment: String
+  backup: String
+  routing: String
+  channel: String
+  broadcastType: BroadcastType
+  notes: String
+  status: ActivityStatus!
+  isManual: Boolean
+}
+
+input UpdateActivityRowInput {
+  activityName: String
+  time: String
+  endTime: String
+  equipment: String
+  backup: String
+  routing: String
+  channel: String
+  broadcastType: BroadcastType
+  notes: String
+  status: ActivityStatus
+  isHidden: Boolean
+}
+
+# MCR Queries
+extend type Query {
+  # MCR Events
+  mcrEvents(
+    start: DateTime
+    end: DateTime
+    broadcastType: BroadcastType
+  ): [MCREvent!]!
+  
+  mcrEvent(id: ID!): MCREvent
+  
+  # Bulletin Posts
+  mcrBulletinPosts(
+    departmentId: ID
+    activeOnly: Boolean
+  ): [MCRBulletinPost!]!
+  
+  mcrBulletinPost(id: ID!): MCRBulletinPost
+  
+  # Activity Rows
+  activityRows(
+    date: DateTime!
+    includeHidden: Boolean
+  ): [ActivityRow!]!
+  
+  activityRow(id: ID!): ActivityRow
+}
+
+# MCR Mutations
+extend type Mutation {
+  # MCR Events
+  createMCREvent(input: CreateMCREventInput!): MCREvent!
+  updateMCREvent(id: ID!, input: UpdateMCREventInput!): MCREvent!
+  deleteMCREvent(id: ID!): Boolean!
+  
+  # Bulletin Posts
+  createMCRBulletinPost(input: CreateBulletinPostInput!): MCRBulletinPost!
+  updateMCRBulletinPost(id: ID!, input: UpdateBulletinPostInput!): MCRBulletinPost!
+  deleteMCRBulletinPost(id: ID!): Boolean!
+  
+  # Activity Rows
+  createActivityRow(input: CreateActivityRowInput!): ActivityRow!
+  updateActivityRow(id: ID!, input: UpdateActivityRowInput!): ActivityRow!
+  deleteActivityRow(id: ID!): Boolean!
+  hideActivityRow(id: ID!): ActivityRow!
+}
+
+# MCR Subscriptions
+extend type Subscription {
+  # Real-time updates for MCR events
+  mcrEventCreated: MCREvent!
+  mcrEventUpdated: MCREvent!
+  mcrEventDeleted: ID!
+  
+  # Real-time updates for bulletin posts
+  mcrBulletinPostCreated: MCRBulletinPost!
+  mcrBulletinPostUpdated: MCRBulletinPost!
+  mcrBulletinPostDeleted: ID!
+  
+  # Real-time updates for activity rows
+  activityRowCreated: ActivityRow!
+  activityRowUpdated: ActivityRow!
+  activityRowDeleted: ID!
+}

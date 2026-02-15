@@ -1,0 +1,428 @@
+BROADCAST PLANNING SYSTEM DOCUMENTATION
+===============================================
+
+SYSTEM OVERVIEW
+===============
+
+This document describes a broadcast television production management platform 
+with focus on the External Broadcasts functionality that needs to be replicated 
+in a Python desktop application.
+
+CORE SYSTEM COMPONENTS
+=====================
+
+1. BROADCAST PLANNING SYSTEM
+---------------------------
+Purpose: Manages scheduled TV broadcast events (sports, news, studio shows, remote feeds)
+
+Event Data Structure:
+- Basic Information:
+  * Event ID (MongoDB ObjectId)
+  * Title (Hebrew/English)
+  * Start Time / End Time
+  * Channel assignment
+  * Event Type (live, recorded, remote, studio)
+  * Status (planned, confirmed, in_progress, completed, cancelled)
+
+- Sports Events Specific:
+  * Sport type (football, basketball, tennis, etc.)
+  * League information
+  * Stage (finals, semifinals, qualifiers)
+  * Home Team / Away Team
+  * KO Time (kick-off time)
+
+- Technical Details:
+  * Equipment requirements
+  * Crew assignments
+  * Routing configurations
+  * Department-specific metadata
+
+2. EXTERNAL BROADCASTS FUNCTIONALITY (MAIN FOCUS)
+================================================
+
+What it does:
+- Manages equipment and crew requirements for external/remote broadcast events
+- Allows production managers to select required equipment from warehouse inventory
+- Assigns production crew members to specific broadcast events
+- Tracks equipment availability vs requirements
+- Manages equipment checkout/checkin process
+
+Equipment Management:
+- Equipment categories: cameras, audio equipment, lighting, cables, batteries, etc.
+- Each equipment item has: name, brand, model, barcode, availability status
+- Quantity tracking (total vs available vs assigned)
+- Real-time inventory updates
+
+Crew Management:
+- Role-based assignments: cameramen, sound engineers, producers, directors
+- Contact information and availability tracking
+- Department-based crew organization
+
+3. WAREHOUSE SYSTEM INTEGRATION
+==============================
+
+Equipment Database Structure:
+- Equipment ID (UUID)
+- Name (e.g., "Sony FX6 Camera")
+- Category (camera, audio, lighting, other)
+- Brand
+- Model
+- Barcode (unique identifier for scanning)
+- Serial Number
+- Asset Tag
+- Status (available, assigned, maintenance, broken)
+- Condition (new, good, fair, needs_repair)
+- Quantities:
+  * Total quantity
+  * Available quantity
+  * Assigned quantity
+  * In maintenance quantity
+- Location information (default location, current location, shelf location)
+- Maintenance tracking (last maintenance, next maintenance due)
+- Purchase information (date, warranty expiry)
+
+API ENDPOINTS AND DATA STRUCTURES
+=================================
+
+1. FETCH BROADCAST EVENTS
+------------------------
+GraphQL Query:
+```
+query GetBroadcastEvents($startDate: DateTime, $endDate: DateTime) {
+  broadcastEvents(startDate: $startDate, endDate: $endDate) {
+    id
+    title
+    hebrewTitle
+    startTime
+    endTime
+    koTime
+    channel
+    parallelChannel
+    sport
+    league
+    stage
+    homeTeam
+    awayTeam
+    live
+    channel1_4k
+    eventType
+    status
+    metadata
+    createdAt
+    updatedAt
+  }
+}
+```
+
+Response Structure:
+```json
+{
+  "data": {
+    "broadcastEvents": [
+      {
+        "id": "ObjectId",
+        "title": "Manchester United vs Liverpool",
+        "hebrewTitle": "מנצ'סטר יונייטד נגד ליברפול",
+        "startTime": "2024-01-15T19:00:00Z",
+        "endTime": "2024-01-15T21:00:00Z",
+        "koTime": "2024-01-15T19:30:00Z",
+        "channel": "Channel1",
+        "sport": "football",
+        "league": "Premier League",
+        "homeTeam": "Manchester United",
+        "awayTeam": "Liverpool",
+        "metadata": {
+          "departments": {
+            "externalBroadcasts": {
+              "customData": {
+                "equipmentList": [...],
+                "productionCrew": [...],
+                "notApplicable": false
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}
+```
+
+2. FETCH WAREHOUSE EQUIPMENT
+---------------------------
+GraphQL Query:
+```
+query GetWarehouseEquipment($filter: WarehouseEquipmentFilter) {
+  warehouseEquipment(filter: $filter) {
+    id
+    name
+    category
+    brand
+    model
+    barcode
+    serialNumber
+    status
+    condition
+    quantityTotal
+    quantityAvailable
+    quantityAssigned
+    currentLocation
+    specifications
+    createdAt
+    updatedAt
+  }
+}
+```
+
+Response Structure:
+```json
+{
+  "data": {
+    "warehouseEquipment": [
+      {
+        "id": "uuid",
+        "name": "Sony FX6 Camera",
+        "category": "camera",
+        "brand": "Sony",
+        "model": "FX6",
+        "barcode": "CAM001",
+        "serialNumber": "SN123456",
+        "status": "available",
+        "condition": "good",
+        "quantityTotal": 5,
+        "quantityAvailable": 3,
+        "quantityAssigned": 2,
+        "currentLocation": "Camera Storage A1"
+      }
+    ]
+  }
+}
+```
+
+3. EQUIPMENT LIST DATA STRUCTURE
+-------------------------------
+When equipment is assigned to a broadcast event:
+```json
+{
+  "equipmentList": [
+    {
+      "equipmentId": "uuid",
+      "quantity": 2,
+      "name": "Sony FX6 Camera",
+      "category": "camera"
+    },
+    {
+      "equipmentId": "uuid",
+      "quantity": 3,
+      "name": "Sennheiser MKE 600",
+      "category": "audio"
+    }
+  ]
+}
+```
+
+4. PRODUCTION CREW DATA STRUCTURE
+--------------------------------
+When crew is assigned to a broadcast event:
+```json
+{
+  "productionCrew": [
+    {
+      "role": "cameraman",
+      "userId": "uuid",
+      "name": "John Smith",
+      "phone": "[PHONE REDACTED]"
+    },
+    {
+      "role": "soundman",
+      "userId": "uuid",
+      "name": "Jane Doe",
+      "phone": "[PHONE REDACTED]"
+    },
+    {
+      "role": "producer",
+      "userId": "uuid",
+      "name": "Bob Johnson",
+      "phone": "[PHONE REDACTED]"
+    }
+  ]
+}
+```
+
+5. UPDATE BROADCAST EVENT DEPARTMENT DATA
+----------------------------------------
+GraphQL Mutation:
+```
+mutation UpdateBroadcastEventDepartmentData(
+  $eventId: ID!
+  $department: String!
+  $data: DepartmentSpecificDataInput!
+) {
+  updateBroadcastEventDepartmentData(
+    eventId: $eventId
+    department: $department
+    data: $data
+  ) {
+    id
+    metadata
+  }
+}
+```
+
+Variables:
+```json
+{
+  "eventId": "ObjectId",
+  "department": "externalBroadcasts",
+  "data": {
+    "customData": {
+      "equipmentList": [...],
+      "productionCrew": [...],
+      "notApplicable": false
+    }
+  }
+}
+```
+
+API AUTHENTICATION
+==================
+
+The system uses JWT (JSON Web Tokens) for authentication:
+- Authentication endpoint: POST /api/auth/login
+- Include JWT token in Authorization header: "Bearer <token>"
+- Token contains user permissions and department access
+
+EQUIPMENT CATEGORIES
+===================
+
+Standard equipment categories used in the system:
+- camera: Professional cameras, camcorders
+- audio: Microphones, audio mixers, recording equipment
+- lighting: Professional lighting equipment, reflectors
+- cable: Various cables (HDMI, SDI, power, audio)
+- battery: Camera batteries, power banks
+- tripod: Camera tripods, monopods
+- gimbal: Camera stabilizers
+- lens: Camera lenses, filters
+- other: Miscellaneous equipment
+
+CREW ROLES
+==========
+
+Standard crew roles in the system:
+- cameraman: Camera operators
+- soundman: Audio engineers
+- producer: Production managers
+- director: Broadcast directors
+- editor: Video editors
+- field_tech: Field technicians
+
+PYTHON EXE APPLICATION REQUIREMENTS
+==================================
+
+CORE FUNCTIONALITY NEEDED:
+
+1. Event Management:
+   - Fetch and display upcoming broadcast events
+   - Filter events by date range, sport type, channel
+   - Show event details including teams, timing, equipment requirements
+
+2. Equipment Management:
+   - Display warehouse equipment inventory
+   - Show real-time availability status
+   - Search and filter equipment by category, brand, availability
+   - Barcode scanning for equipment identification
+   - Equipment assignment to broadcast events
+   - Track equipment checkout/checkin
+
+3. Crew Management:
+   - Display available crew members by role
+   - Assign crew to specific broadcast events
+   - Track crew availability and contact information
+
+4. Data Synchronization:
+   - Real-time sync with main system via GraphQL API
+   - Offline capability with local data caching
+   - Conflict resolution for simultaneous updates
+
+USER INTERFACE REQUIREMENTS:
+
+1. Main Dashboard:
+   - Calendar view of upcoming broadcasts
+   - Equipment availability overview
+   - Quick stats (total equipment, available, assigned)
+
+2. Event Details View:
+   - Event information display
+   - Equipment requirements vs availability
+   - Crew assignments
+   - Equipment checkout/checkin interface
+
+3. Equipment Management:
+   - Searchable equipment list with filters
+   - Barcode scanning interface
+   - Equipment detail view with history
+   - Assignment tracking
+
+4. Reporting:
+   - Equipment usage reports
+   - Crew assignment reports
+   - Equipment availability forecasting
+
+TECHNICAL SPECIFICATIONS:
+
+1. Technology Stack:
+   - Python (tkinter, PyQt, or similar for GUI)
+   - GraphQL client library (requests, graphql-core)
+   - SQLite for local data caching
+   - Barcode scanning library (pyzbar, opencv)
+
+2. API Integration:
+   - GraphQL endpoint: https://your-domain.com/graphql
+   - JWT authentication
+   - Real-time subscriptions for live updates
+
+3. Data Storage:
+   - Local SQLite database for offline operation
+   - Periodic sync with main system
+   - Equipment checkout/checkin logs
+
+4. Barcode Support:
+   - Equipment barcode scanning
+   - Support for standard barcode formats
+   - Integration with equipment assignment workflow
+
+WORKFLOW EXAMPLE:
+================
+
+1. User opens application and logs in
+2. System fetches upcoming broadcast events from API
+3. User selects a broadcast event to manage
+4. System displays equipment requirements vs warehouse availability
+5. User scans equipment barcodes to assign to the event
+6. System updates equipment availability in real-time
+7. User assigns crew members to the event
+8. System saves all assignments back to main system via API
+9. Generate equipment checkout list for production crew
+
+ERROR HANDLING:
+==============
+
+1. Network connectivity issues - offline mode with local caching
+2. API authentication failures - re-authentication workflow
+3. Barcode scanning errors - manual equipment selection fallback
+4. Concurrent updates - conflict resolution and user notification
+5. Data validation - ensure equipment availability before assignment
+
+SECURITY CONSIDERATIONS:
+=======================
+
+1. Secure storage of JWT tokens
+2. Encrypted local data storage
+3. User permission validation
+4. Audit logging for equipment assignments
+5. Secure communication with main system (HTTPS/WSS)
+
+This documentation provides a complete overview of the broadcast planning system's 
+external broadcasts functionality that can be used as a specification for developing 
+a Python desktop application that replicates this workflow. 

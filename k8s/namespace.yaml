@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lancelot
+  labels:
+    name: lancelot
+    app.kubernetes.io/name: lancelot
+    app.kubernetes.io/part-of: lancelot-platform 

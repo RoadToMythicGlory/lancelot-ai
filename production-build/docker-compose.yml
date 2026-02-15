@@ -1,0 +1,87 @@
+version: '3.8'
+
+services:
+
+
+  # MongoDB - Broadcast Templates & Configs
+  mongodb:
+    image: mongo:7
+    container_name: broadcast-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: LancelotERP_DB
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-<MONGO_PASSWORD>}
+      MONGO_INITDB_DATABASE: lancelot
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+      - ./services/database/mongodb:/docker-entrypoint-initdb.d
+    networks:
+      - broadcast-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # API Gateway - Broadcast GraphQL API
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    container_name: broadcast-api-gateway
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 4000
+      MONGODB_URI: mongodb://LancelotERP_DB:${MONGO_PASSWORD:-<MONGO_PASSWORD>}@mongodb:27017/lancelot?authSource=admin
+    ports:
+      - "4000:4000"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - broadcast-network
+    restart: unless-stopped
+
+  # Web Frontend - Broadcast Planning UI
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    container_name: broadcast-web
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      NEXT_PUBLIC_GRAPHQL_URL: ${NEXT_PUBLIC_GRAPHQL_URL:-http://localhost:4000/graphql}
+      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:4000/graphql}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api-gateway
+    networks:
+      - broadcast-network
+    restart: unless-stopped
+
+  # Excel Parser Service - Broadcast Schedule Import
+  excel-parser:
+    build:
+      context: ./services/excel-parser
+      dockerfile: Dockerfile
+    container_name: broadcast-excel-parser
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3002
+      GRAPHQL_URL: http://api-gateway:4000/graphql
+    ports:
+      - "3002:3002"
+    depends_on:
+      - api-gateway
+    networks:
+      - broadcast-network
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+
+networks:
+  broadcast-network:
+    driver: bridge 

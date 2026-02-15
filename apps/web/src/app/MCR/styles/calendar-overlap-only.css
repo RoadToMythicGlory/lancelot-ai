@@ -1,0 +1,24 @@
+/* Minimal fixes for overlapping events - preserve RBC's positioning */
+
+/* Just add visual separation between events */
+.mcr-calendar .rbc-event {
+  margin: 0 1px !important;
+}
+
+/* Fix event content overflow */
+.mcr-calendar .rbc-event-content {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  text-align: right !important;
+  direction: rtl !important;
+}
+
+/* Proper z-index layering */
+.mcr-calendar .rbc-event {
+  z-index: 2 !important;
+}
+
+.mcr-calendar .rbc-event.rbc-selected {
+  z-index: 3 !important;
+}

@@ -1,0 +1,133 @@
+/* Enterprise Graphics Studio - Dark Theme Overrides */
+/* Scoped to only affect the graphics studio component */
+
+.graphics-studio-container {
+  /* Ant Design Dark Theme Overrides - Scoped */
+}
+
+.graphics-studio-container .ant-input-number {
+  background-color: #1f2937 !important;
+  border-color: #374151 !important;
+}
+
+.graphics-studio-container .ant-input-number-input {
+  background-color: #1f2937 !important;
+  color: #fff !important;
+}
+
+.graphics-studio-container .ant-input-number-handler-wrap {
+  background-color: #374151 !important;
+}
+
+.graphics-studio-container .ant-input-number-handler:hover {
+  background-color: #4b5563 !important;
+}
+
+.graphics-studio-container .ant-input-number-handler-up-inner,
+.graphics-studio-container .ant-input-number-handler-down-inner {
+  color: #9ca3af !important;
+}
+
+.graphics-studio-container .ant-input-number-prefix {
+  color: #9ca3af !important;
+}
+
+/* Input Fields */
+.graphics-studio-container .ant-input {
+  background-color: #1f2937 !important;
+  border-color: #374151 !important;
+  color: #fff !important;
+}
+
+.graphics-studio-container .ant-input:hover,
+.graphics-studio-container .ant-input:focus {
+  border-color: #60a5fa !important;
+}
+
+/* Select Dropdowns */
+.graphics-studio-container .ant-select-selector {
+  background-color: #1f2937 !important;
+  border-color: #374151 !important;
+  color: #fff !important;
+}
+
+.graphics-studio-container .ant-select-arrow {
+  color: #9ca3af !important;
+}
+
+.graphics-studio-container .ant-select-dropdown {
+  background-color: #1f2937 !important;
+}
+
+.graphics-studio-container .ant-select-item {
+  color: #e5e7eb !important;
+}
+
+.graphics-studio-container .ant-select-item-option-active {
+  background-color: #374151 !important;
+}
+
+.graphics-studio-container .ant-select-item-option-selected {
+  background-color: #2563eb !important;
+}
+
+/* Sliders */
+.graphics-studio-container .ant-slider-rail {
+  background-color: #374151 !important;
+}
+
+.graphics-studio-container .ant-slider-track {
+  background-color: #2563eb !important;
+}
+
+.graphics-studio-container .ant-slider-handle {
+  border-color: #2563eb !important;
+  background-color: #2563eb !important;
+}
+
+.graphics-studio-container .ant-slider-handle:focus {
+  box-shadow: 0 0 0 5px rgba(37, 99, 235, 0.2) !important;
+}
+
+/* Tooltips */
+.graphics-studio-container .ant-tooltip-inner {
+  background-color: #1f2937 !important;
+  color: #fff !important;
+}
+
+.graphics-studio-container .ant-tooltip-arrow-content {
+  background-color: #1f2937 !important;
+}
+
+/* Color Picker */
+.graphics-studio-container .ant-color-picker-trigger {
+  background-color: #1f2937 !important;
+  border-color: #374151 !important;
+}
+
+/* Segmented Control */
+.graphics-studio-container .ant-segmented {
+  background-color: #1f2937 !important;
+}
+
+.graphics-studio-container .ant-segmented-item {
+  color: #9ca3af !important;
+}
+
+.graphics-studio-container .ant-segmented-item-selected {
+  background-color: #374151 !important;
+  color: #fff !important;
+}
+
+/* Buttons in Dark Theme */
+.graphics-studio-container .graphics-studio-dark-btn {
+  background-color: #1f2937 !important;
+  border-color: #374151 !important;
+  color: #e5e7eb !important;
+}
+
+.graphics-studio-container .graphics-studio-dark-btn:hover {
+  background-color: #374151 !important;
+  border-color: #4b5563 !important;
+  color: #fff !important;
+}

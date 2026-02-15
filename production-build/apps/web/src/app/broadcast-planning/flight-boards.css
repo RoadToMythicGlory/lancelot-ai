@@ -1,0 +1,433 @@
+/* Flight Boards Styles */
+.flight-board-modal .ant-modal-content {
+  background: #1a1a1a;
+  border-radius: 16px;
+  border: 1px solid #333;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+}
+
+.flight-board-modal .ant-modal-header {
+  background: #1a1a1a;
+  border-bottom: 2px solid #ff0000;
+  padding: 24px 32px;
+}
+
+.flight-board-modal .ant-modal-title {
+  color: #ffffff;
+  font-family: 'Heebo', sans-serif;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+
+.flight-board-modal .ant-modal-body {
+  background: #1a1a1a;
+  padding: 0;
+}
+
+.flight-board-modal .ant-modal-close {
+  color: #666;
+  transition: all 0.3s ease;
+}
+
+.flight-board-modal .ant-modal-close:hover {
+  color: #ff0000;
+  transform: rotate(90deg);
+}
+
+/* Custom Tabs Design */
+.flight-board-modal .ant-tabs {
+  color: #ffffff;
+}
+
+.flight-board-modal .ant-tabs-nav {
+  background: #0d0d0d;
+  padding: 0 32px;
+  margin: 0;
+  border-bottom: 1px solid #333;
+}
+
+.flight-board-modal .ant-tabs-nav::before {
+  border: none;
+}
+
+.flight-board-modal .ant-tabs-tab {
+  color: #666;
+  font-family: 'Heebo', sans-serif;
+  font-size: 16px;
+  font-weight: 500;
+  padding: 20px 24px;
+  margin: 0 8px;
+  transition: all 0.3s ease;
+  position: relative;
+  background: transparent;
+  border: none;
+}
+
+.flight-board-modal .ant-tabs-tab:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.flight-board-modal .ant-tabs-tab.ant-tabs-tab-active {
+  color: #ffffff;
+  background: #ff0000;
+  border-radius: 8px 8px 0 0;
+}
+
+.flight-board-modal .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.flight-board-modal .ant-tabs-ink-bar {
+  display: none;
+}
+
+.flight-board-modal .ant-tabs-content {
+  padding: 24px;
+  background: #0d0d0d;
+}
+
+/* Flight Board Card */
+.flight-board-card {
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.flight-board-card .ant-card-body {
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Fix table container to fill card */
+.flight-board-card .ant-table-wrapper {
+  width: 100% !important;
+}
+
+.flight-board-card .ant-table {
+  width: 100% !important;
+}
+
+/* Table Styles */
+.flight-board-table {
+  background: #1a1a1a;
+  font-family: 'Heebo', sans-serif;
+}
+
+.flight-board-table .ant-table {
+  background: transparent;
+  color: #ffffff;
+}
+
+.flight-board-table table {
+  width: 100% !important;
+  table-layout: fixed !important;
+}
+
+/* Fix table wrapper */
+.flight-board-table .ant-table-container {
+  background: #1a1a1a;
+}
+
+/* Ensure minimum width for table */
+.flight-board-table .ant-table-content {
+  background: #1a1a1a;
+}
+
+/* Fix for RTL table alignment */
+.flight-board-table .ant-table-thead > tr > th,
+.flight-board-table .ant-table-tbody > tr > td {
+  text-align: right !important;
+}
+
+/* Remove Ant Design's default scroll behavior that can cause misalignment */
+.flight-board-table .ant-table-body {
+  overflow: visible !important;
+}
+
+.flight-board-table .ant-table-content {
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+}
+
+.flight-board-table .ant-table-container {
+  background: #1a1a1a;
+}
+
+.flight-board-table .ant-table-tbody {
+  background: #1a1a1a;
+}
+
+.flight-board-table .ant-table-placeholder {
+  background: #1a1a1a;
+}
+
+.flight-board-table .ant-table-placeholder .ant-empty {
+  color: #666;
+}
+
+.flight-board-table .ant-table-placeholder .ant-empty-description {
+  color: #666;
+}
+
+.flight-board-table .ant-table-thead > tr > th {
+  background: #ff0000;
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 16px;
+  border-bottom: none;
+  padding: 16px 20px;
+  position: relative;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Better row separation */
+.flight-board-table .ant-table-tbody > tr {
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+  border-bottom: 2px solid #1a1a1a;
+}
+
+/* Multi-line text support */
+.flight-board-table .ant-table-cell {
+  word-wrap: break-word;
+  white-space: normal;
+}
+
+.flight-board-table .ant-table-tbody > tr:nth-child(odd) {
+  background: #2d2d2d;
+}
+
+.flight-board-table .ant-table-tbody > tr:nth-child(even) {
+  background: #242424;
+}
+
+.flight-board-table .ant-table-tbody > tr:hover {
+  background: #3a3a3a !important;
+  transform: translateX(4px);
+  box-shadow: 0 0 20px rgba(255, 0, 0, 0.2);
+}
+
+.flight-board-table .ant-table-tbody > tr:hover > td {
+  color: #ffffff !important;
+  background: transparent !important;
+}
+
+.flight-board-table .ant-table-tbody > tr > td {
+  border-bottom: 1px solid #333;
+  color: #ffffff;
+  font-size: 15px;
+  padding: 16px 20px;
+  position: relative;
+  vertical-align: middle;
+  line-height: 1.5;
+}
+
+.flight-board-table .ant-table-tbody > tr.row-live {
+  background: #3d1f1f !important;
+}
+
+.flight-board-table .ant-table-tbody > tr.row-live::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: #ff0000;
+}
+
+.flight-board-table .ant-table-tbody > tr.row-upcoming {
+  background: #3d2f1f !important;
+}
+
+.flight-board-table .ant-table-tbody > tr.row-completed {
+  opacity: 0.5;
+}
+
+/* Live Indicator */
+.live-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: #ff0000;
+  border-radius: 50%;
+  margin-right: 8px;
+  box-shadow: 0 0 10px #ff0000;
+}
+
+/* Tags and Badges */
+.flight-board-table .ant-tag {
+  background: #333;
+  border: 1px solid #444;
+  color: #ffffff;
+  font-weight: 500;
+  padding: 2px 12px;
+  border-radius: 4px;
+}
+
+.flight-board-table .ant-tag.ant-tag-red {
+  background: #ff0000;
+  border-color: #ff0000;
+  color: #ffffff;
+}
+
+.flight-board-table .ant-tag.ant-tag-blue {
+  background: #1a4d8f;
+  border-color: #2563eb;
+}
+
+.flight-board-table .ant-badge-status-success .ant-badge-status-dot {
+  background: #00ff00;
+  box-shadow: 0 0 10px #00ff00;
+}
+
+.flight-board-table .ant-badge-status-warning .ant-badge-status-dot {
+  background: #ff9500;
+  box-shadow: 0 0 10px #ff9500;
+}
+
+.flight-board-table .ant-badge-status-error .ant-badge-status-dot {
+  background: #ff0000;
+  box-shadow: 0 0 10px #ff0000;
+}
+
+/* Header Controls */
+.flight-board-modal .ant-space {
+  color: #ffffff;
+}
+
+.flight-board-modal .ant-btn {
+  background: #333;
+  border: 1px solid #444;
+  color: #ffffff;
+  font-family: 'Heebo', sans-serif;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.flight-board-modal .ant-btn:hover {
+  background: #ff0000;
+  border-color: #ff0000;
+  color: #ffffff;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(255, 0, 0, 0.4);
+}
+
+.flight-board-modal .ant-picker {
+  background: #333;
+  border: 1px solid #444;
+  color: #ffffff;
+}
+
+.flight-board-modal .ant-picker:hover {
+  border-color: #ff0000;
+}
+
+.flight-board-modal .ant-picker-input > input {
+  color: #ffffff;
+}
+
+.flight-board-modal .ant-picker-suffix {
+  color: #666;
+}
+
+/* Empty State */
+.flight-board-modal .empty-state {
+  background: #1a1a1a;
+  padding: 60px 20px;
+  text-align: center;
+}
+
+.flight-board-modal .ant-empty {
+  color: #666;
+}
+
+.flight-board-modal .ant-empty-image svg {
+  opacity: 0.3;
+}
+
+.flight-board-modal .ant-empty-description {
+  color: #666;
+  font-size: 18px;
+  font-family: 'Heebo', sans-serif;
+}
+
+/* Ensure all table areas have dark background */
+.flight-board-modal .ant-table-wrapper {
+  background: #1a1a1a;
+}
+
+.flight-board-modal .ant-spin-nested-loading {
+  background: #1a1a1a;
+}
+
+.flight-board-modal .ant-spin-container {
+  background: #1a1a1a;
+}
+
+/* Scrollbar */
+.flight-board-modal .ant-table-body::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.flight-board-modal .ant-table-body::-webkit-scrollbar-track {
+  background: #1a1a1a;
+}
+
+.flight-board-modal .ant-table-body::-webkit-scrollbar-thumb {
+  background: #ff0000;
+  border-radius: 4px;
+}
+
+.flight-board-modal .ant-table-body::-webkit-scrollbar-thumb:hover {
+  background: #cc0000;
+}
+
+/* Font Mono for Time */
+.font-mono {
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-weight: 500;
+  letter-spacing: -0.5px;
+}
+
+/* Icon Styles */
+.flight-board-table .anticon {
+  font-size: 16px;
+  vertical-align: middle;
+}
+
+.flight-board-table .anticon-clock-circle {
+  color: #ff0000;
+}
+
+.flight-board-table .anticon-check-circle {
+  color: #00ff00;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .flight-board-modal .ant-modal-title {
+    font-size: 20px;
+  }
+  
+  .flight-board-modal .ant-tabs-tab {
+    padding: 16px 16px;
+    font-size: 14px;
+  }
+  
+  .flight-board-table .ant-table-thead > tr > th,
+  .flight-board-table .ant-table-tbody > tr > td {
+    padding: 12px 16px;
+    font-size: 14px;
+  }
+}
+
+ 

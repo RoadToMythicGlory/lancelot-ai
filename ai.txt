@@ -1,0 +1,2667 @@
+================================================================================
+LANCELOT AI AGENT - COMPREHENSIVE DOCUMENTATION
+================================================================================
+Document Created: February 8, 2026
+Last Updated: February 9, 2026
+Project: Lancelot ERP Broadcast System
+Location: services/ai-agent
+================================================================================
+
+TABLE OF CONTENTS
+-----------------
+1. OVERVIEW & IDENTITY
+2. ARCHITECTURE & DESIGN PHILOSOPHY
+3. TECHNICAL STACK
+4. CORE CAPABILITIES & TOOLS
+4b. RELIABILITY HARDENING (February 2026)
+5. RSS PIPELINE SYSTEM (NEW - February 2026)
+6. INTEGRATION WITH PLATFORM
+7. LLM CONFIGURATION & MODELS
+8. MESSAGE PROCESSING PIPELINE
+9. INTENT CLASSIFICATION & ROUTING
+10. TOOL SYSTEM & REGISTRY
+11. STRUCTURED OUTPUT SCHEMAS
+12. API ENDPOINTS
+13. CONFIGURATION & ENVIRONMENT
+14. DATA LAYER & PERSISTENCE
+15. SECURITY & E2EE SUPPORT
+16. OBSERVABILITY & MONITORING
+17. PERFORMANCE TARGETS
+18. DEPLOYMENT & OPERATIONS
+19. FUTURE ROADMAP
+20. FILE STRUCTURE
+21. DOCUMENT METADATA & VERSION HISTORY
+
+================================================================================
+1. OVERVIEW & IDENTITY
+================================================================================
+
+The Lancelot AI Agent is a local LLM-powered assistant designed as a "digital 
+employee" within the Lancelot ERP broadcast system. Unlike typical chatbots, 
+it is integrated into the existing chat system as a first-class user participant.
+
+KEY CHARACTERISTICS:
+- Identity Email: lancelot-ai@internal.system
+- Display Name: Lancelot AI (לנסלוט)
+- User Type: AI Agent (isAIAgent: true flag in database)
+- Language Support: Hebrew (primary) and English
+- Offline-First: All inference runs locally via Ollama
+- No Cloud Dependencies: Never makes external LLM API calls
+- Operational Mode: Reliability-first with hard gates and anti-hallucination
+
+DESIGN PHILOSOPHY:
+The agent is NOT a separate UI component or chatbot interface. It participates 
+in the platform's existing Socket.IO-based chat system just like a human user:
+- Has its own user account in MongoDB
+- Receives messages via chat routing
+- Sends responses through the same chat infrastructure
+- Can participate in E2EE conversations (owns cryptographic keys)
+
+RELIABILITY PRINCIPLES (Feb 2026 Hardening):
+The agent behaves like a reliable broadcast operator, not a "smart chatbot":
+- Operational intents (cg, lineup, shifts, news, rights) NEVER produce free chat
+- Missing data → clarification questions, NEVER invented facts
+- Tool execution required → no hallucinated substitutes
+- Source-only policy → news/items must come from verified RSS feeds or be labeled placeholder
+- LIVE CG mode → deterministic parsing with Viz validation, no LLM guessing
+
+================================================================================
+2. ARCHITECTURE & DESIGN PHILOSOPHY
+================================================================================
+
+SERVICE ARCHITECTURE:
+┌─────────────────────────────────────────────────────────────────────┐
+│                      LANCELOT PLATFORM                               │
+│                                                                       │
+│  ┌─────────────┐         ┌──────────────────┐                       │
+│  │  Web UI     │────────▶│  API Gateway     │                       │
+│  │ (Next.js)   │         │  (GraphQL +      │                       │
+│  └─────────────┘         │   Socket.IO)     │                       │
+│         │                └──────────┬────────┘                       │
+│         │                           │                                 │
+│         │                           │ HTTP/JSON                       │
+│         │                           ▼                                 │
+│         │                ┌──────────────────────┐                    │
+│         │                │   AI Agent Service   │                    │
+│         │                │  (Express + Ollama)  │                    │
+│         │                └──────────┬───────────┘                    │
+│         │                           │                                 │
+│         │                    ┌──────┴───────┐                        │
+│         │                    │              │                         │
+│         │                    ▼              ▼                         │
+│         │              ┌──────────┐   ┌──────────┐                   │
+│         │              │ MongoDB  │   │  Ollama  │                   │
+│         └─────────────▶│ (shared) │   │  (local) │                   │
+│                        └──────────┘   └──────────┘                   │
+└─────────────────────────────────────────────────────────────────────┘
+
+MESSAGE FLOW:
+1. User sends message in chat UI
+2. Frontend → API Gateway (Socket.IO)
+3. API Gateway detects recipient is AI agent
+4. API Gateway → AI Agent Service (HTTP POST /ai/chat)
+5. AI Agent processes message through orchestrator
+6. AI Agent → Ollama (local LLM inference)
+7. Tools executed as needed (news, lineup, CG, etc.)
+8. Response generated with structured data
+9. AI Agent → API Gateway (JSON response)
+10. API Gateway → Frontend (Socket.IO emit)
+11. User sees response in chat
+
+INTEGRATION POINTS:
+- services/api-gateway/src/socket/chat-socket.ts
+  Routes messages to AI agent when recipient is AI user
+  
+- services/api-gateway/src/resolvers/ai.ts
+  GraphQL resolvers for AI queries and mutations
+  
+- services/ai-agent/src/api/chat-handler.ts
+  Receives and validates incoming chat requests
+
+================================================================================
+3. TECHNICAL STACK
+================================================================================
+
+RUNTIME:
+- Node.js 18+
+- TypeScript 5+
+- Express.js (API server)
+
+LLM INFERENCE:
+- Ollama (primary LLM provider)
+- Support for llama.cpp (configurable)
+- Local GGUF model loading
+
+VALIDATION & SCHEMAS:
+- Zod (structured output validation)
+- JSON Schema for tool inputs/outputs
+
+DATA LAYER:
+- MongoDB 6+ (shared with main platform)
+- Collections: users, privateConversations, chatMessages, newsCache, 
+  trustedSources, etc.
+
+CORE LIBRARIES:
+- uuid (trace IDs and message IDs)
+- winston (structured logging)
+- cors (cross-origin support)
+- dotenv (environment configuration)
+- fast-xml-parser (RSS/Atom/XML parsing for RSS pipeline)
+
+CRYPTOGRAPHY (E2EE):
+- libsodium (X25519 key exchange, ChaCha20-Poly1305 encryption)
+- Key management in services/ai-agent/src/crypto/
+
+================================================================================
+4. CORE CAPABILITIES & TOOLS
+================================================================================
+
+The AI Agent provides six primary tool categories:
+
+1. CHAT INTERFACE (General Conversation)
+   - Natural language understanding (Hebrew + English)
+   - Context-aware responses
+   - Greeting detection (hardcoded responses)
+   - Conversation history tracking
+   
+2. LINEUP BUILDER
+   Intent: "lineup"
+   Purpose: Generate program rundowns for sports, news, entertainment
+   Features:
+   - Dual modes: STRUCTURE (segment-based) vs ITEMS (content-based)
+   - Structure mode: traditional segment flow (intro/interview/break)
+   - Items mode: fetches real articles from RSS, fills N items by category
+   - Exact count enforcement: respects totalItems and categoryCounts
+   - Source-only policy: never invents fake news headlines
+   - Real articles with citations OR placeholder skeletons
+   - Category-based article matching with exclusion rules
+   Schema: services/ai-agent/src/schemas/lineup-rundown.ts
+   New schemas: ItemsLineup, LineupItem, LineupTypeSchema
+   
+3. CG ASSISTANT (Graphics Specifications)
+   Intent: "cg"
+   Purpose: Create structured graphics specifications for Vizrt
+   Features:
+   - Lower third specs
+   - Scorebug configurations
+   - Ticker layouts
+   - LIVE CG mode: deterministic regex parsing (near-zero error)
+   - Validates against Viz constraints (40 char max for names, RTL normalization)
+   - Returns JSON-only in LIVE mode with requiresApproval flag
+   - Detects mode via context.metadata.mode = "LIVE_CG" or message prefix
+   Schema: services/ai-agent/src/schemas/cg-spec.ts
+   New functions: parseLiveCGMessage(), isLiveCGRequest(), validateCGTextField()
+   
+4. SHIFT SCHEDULER
+   Intent: "shifts"
+   Purpose: Intelligent shift scheduling assistance
+   Features:
+   - Constraint extraction mode: LLM extracts requirements, never invents schedule
+   - Availability analysis
+   - Swap recommendations
+   - Constraint solving with greedy algorithm (OR-Tools integration ready)
+   - Returns extracted constraints + missing info when data incomplete
+   Note: LLM = constraint extractor; solver = scheduling logic
+   Schema: services/ai-agent/src/schemas/shift-schedule.ts
+   New functions: extractShiftConstraints()
+   
+5. NEWS FETCHER
+   Intent: "news"
+   Purpose: RSS-based news aggregation from trusted sources
+   Features:
+   - Multi-source RSS parsing
+   - Caching for offline mode (24h TTL)
+   - Trusted source allowlist
+   - Article deduplication by excerptHash
+   - Truth boundary enforcement: no sources → explicit message, never invention
+   - Returns source citations with confidence scores
+   - Integrated with items lineup for real article population
+   File: services/ai-agent/src/tools/news-fetcher.ts
+   Config: services/ai-agent/src/config/trusted-sources.ts
+   Cache: services/ai-agent/src/data/news-cache.ts
+   
+6. RIGHTS BOARD
+   Intent: "rights"
+   Purpose: Broadcast rights and sports intelligence tracking
+   Features:
+   - Sports fixtures tracking
+   - League information
+   - Broadcast rights status
+   Schema: services/ai-agent/src/schemas/rights-board.ts
+
+TOOL EXECUTION FLOW:
+services/ai-agent/src/agent/orchestrator.ts
+1. Classify intent from user message
+2. Check if clarification needed
+3. Look up tool handler in registry
+4. Validate input against Zod schema
+5. Execute tool with timeout protection
+6. Build structured response with metadata
+
+================================================================================
+4b. RELIABILITY HARDENING (February 2026)
+================================================================================
+
+PROBLEM STATEMENT:
+Original agent behavior had critical reliability issues for live broadcast ops:
+- Agent "talked" instead of executing tools for operational requests
+- Confidently hallucinated: invented facts, dates, scores, rights info
+- Misinterpreted rundown requests (returned generic skeletons vs specific items)
+- For LIVE CG, LLM-only behavior was too error-prone
+- Shift scheduling attempted with LLM logic instead of constraint solver
+- News writing crossed truth boundaries and invented content
+
+SOLUTION - OPERATIONAL HARD GATES:
+Files: orchestrator.ts, intent-classifier.ts, all tool handlers
+
+Key Functions:
+- isOperationalIntent(intent): Returns true for cg/lineup/shifts/news/rights
+- requiredEntitiesSatisfied(intent, entities, message): Validates required data
+- buildMissingEntitiesClarification(intent, missing): Asks for missing info
+
+Behavior:
+Operational intents follow: TOOL → OR → CLARIFICATION → OR → EXPLICIT ERROR
+They NEVER fall through to free-form LLM chat.
+
+Gate Logic in processMessage():
+1. After intent classification, check if operational
+2. If operational AND entities missing → clarification response
+3. If operational AND tool not registered → explicit error
+4. If operational AND tool fails → explicit failure message
+5. Safety net: free chat path blocked with error if operational intent reaches it
+
+LINEUP: ITEMS vs STRUCTURE DETECTION:
+Problem: User asked for "12 items with category counts", got generic segment skeleton.
+
+Solution:
+- New entity: lineupType = "items" | "structure"
+- Detection rules:
+  * Numbers + categories ("12 פריטים", "5 כדורגל") → items
+  * Segments/flow words ("פתיח", "ראיון", "הפסקה") → structure
+- Functions: detectLineupType(), extractItemCount(), extractCategoryCounts()
+
+Items Mode Behavior:
+- Fetches real articles from RSS sources
+- Scores articles for category relevance with mustMatch/excludeMatch rules
+- Assigns articles to categories (deduplication across categories)
+- Fills with real headlines + source citations
+- Placeholders ONLY where no matching articles found
+- NEVER invents fake news
+
+Structure Mode Behavior (unchanged):
+- Traditional segment-based templates (intro/interview/break)
+- Time allocation and scaling
+- Breaking news incorporation
+
+LIVE CG MODE:
+Problem: LIVE ops require near-zero error; LLM-only is too unpredictable.
+
+Solution:
+- Deterministic regex parsing for scorebug/lower third/slate
+- Extracts: teams, scores, times, names, titles
+- Validates against Viz constraints: 40 char max, RTL normalization, no control chars
+- Returns: { parseSuccess, templateType, fields, missing, validationErrors }
+- LLM extraction only as fallback when deterministic parsing incomplete
+- Output: JSON-only with requiresApproval=true flag (no free text)
+
+Detection:
+- context.metadata.mode = "LIVE_CG"
+- OR message prefix: "CG LIVE", "LIVE_CG"
+
+Functions:
+- parseLiveCGMessage(message): Deterministic field extraction
+- isLiveCGRequest(message, mode): Mode detection
+- validateCGTextField(value, maxLen): Viz constraint validation
+- normalizeRTL(text): Hebrew text normalization
+
+ANTI-HALLUCINATION ENFORCEMENT:
+System Prompt Updates (AGENT_SYSTEM_PROMPT):
+- "Never guess. If info missing, say you don't have data and ask 1-2 questions."
+- "Never invent facts, dates, scores, rights, or names."
+- "Never produce content that looks factual without verified source."
+- "For operational tasks: execute tool or ask clarification. Never free-form text."
+- "If tool fails, report failure clearly. Never invent substitute result."
+
+Backed by code gates:
+- Operational hard gates in orchestrator
+- Source-only policy in news/lineup tools
+- Explicit placeholder labeling when data unavailable
+
+JSON VALIDATION WITH REPAIR LOOP:
+Function: enforceStructuredOutput<T>(rawOutput, schema, repairFn)
+
+Flow:
+1. Parse LLM output with Zod schema
+2. If valid → return data
+3. If invalid → call repairFn ONCE with error description
+4. Parse repaired output
+5. If still invalid → return explicit error with details
+6. NEVER accept partial or hallucinated data
+
+Used in: CG field extraction, lineup enhancements, any tool expecting JSON
+
+SHIFT SCHEDULING - CONSTRAINT EXTRACTION:
+Function: extractShiftConstraints(message)
+
+Behavior:
+- LLM extracts scheduling constraints from natural language
+- Returns: { department, weekStartDate, roles, hardConstraints, availabilityNotes, missingConstraints }
+- If critical data missing → returns what was extracted + questions for user
+- NEVER generates a schedule without solver
+- LLM role = interface + explanation; solver = optimization
+
+NEWS TRUTH BOUNDARY:
+- No RSS articles available → explicit message: "לא נמצאו חדשות ממקורות מאומתים"
+- Offers alternatives: provide bullet points OR check RSS config OR retry later
+- Writing requires sources/notes; no invention
+- All news items include source attribution: [sourceName]
+
+MESSAGE CONTEXT EXTENSION:
+Added optional metadata field (non-breaking):
+```typescript
+interface MessageContext {
+  // ... existing fields
+  metadata?: {
+    mode?: 'LIVE_CG' | 'NORMAL';
+    task?: 'cg' | 'lineup' | 'news' | 'rights' | 'shifts' | 'general';
+  };
+}
+```
+
+TESTING:
+File: services/ai-agent/tests/agent.test.ts
+Added test suites for:
+- Operational Hard Gates (6 tests)
+- Lineup Type Detection (5 tests)
+- Items Lineup Generation (5 tests)
+- LIVE CG Deterministic Parser (5 tests)
+- CG Field Validators (5 tests)
+- JSON Repair Loop (3 tests)
+- Shift Constraint Extraction (4 tests)
+Total: 44 tests, all passing
+
+================================================================================
+5. RSS PIPELINE SYSTEM (NEW - February 2026)
+================================================================================
+
+OVERVIEW:
+A comprehensive RSS ingestion and processing system that provides production-grade
+news and sports content aggregation. The pipeline replaces ad-hoc RSS fetching with
+a structured, cacheable, and highly reliable workflow.
+
+KEY GOALS:
+- Production-ready RSS ingestion from trusted sources
+- Deduplicated article storage with MongoDB TTL
+- Category-aware ranking and selection
+- LLM-generated briefs for selected articles
+- Graceful degradation (per-feed errors don't stop pipeline)
+- Offline support via cached articles
+- Feed verification tooling
+
+ARCHITECTURE:
+The RSS pipeline is a 7-stage orchestrated workflow:
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         RSS PIPELINE FLOW                                │
+│                                                                           │
+│  1. Get Active Feeds (rss-config.ts)                                     │
+│     → Filters feeds with active=true AND url≠'<TODO_VERIFY>'            │
+│                                                                           │
+│  2. Fetch All Active Feeds (rss-client.ts)                               │
+│     → Concurrent fetch with timeout                                      │
+│     → XML parsing via fast-xml-parser                                    │
+│     → Per-feed error isolation                                           │
+│                                                                           │
+│  3. Dedup + Store (rss-dedup.ts + rss-articles-store.ts)                │
+│     → Hash-based deduplication (title, excerpt, URL)                     │
+│     → Store to rssArticles collection with TTL                           │
+│                                                                           │
+│  4. Retrieve Pool (rss-articles-store.ts)                                │
+│     → Query by time window (default 24h)                                 │
+│     → Category filtering (optional)                                      │
+│                                                                           │
+│  5. Rank Pool (rss-ranking.ts)                                           │
+│     → Score articles per requested category                              │
+│     → mustMatch / boostMatch / excludeMatch rules                        │
+│     → Sort by relevance                                                  │
+│                                                                           │
+│  6. Select for Lineup (rss-selection.ts)                                 │
+│     → Exact count fulfillment per category                               │
+│     → Greedy allocation (best score first)                               │
+│     → Fill with placeholders when insufficient articles                  │
+│                                                                           │
+│  7. Generate Briefs (rss-brief-generator.ts)                             │
+│     → LLM-generated summaries for REAL articles only                     │
+│     → Placeholders bypass brief generation                               │
+│     → Output: briefText, bullets, whyItMatters, citation                 │
+│                                                                           │
+└─────────────────────────────────────────────────────────────────────────┘
+
+MODULE BREAKDOWN:
+
+1. RSS CONFIG (src/rss/rss-config.ts)
+   Purpose: Central configuration for pipeline and feed sources
+   
+   Key exports:
+   - rssPipelineConfig: Global settings (TTL, timeout, window, etc.)
+   - rssFeedSources: Array of feed definitions
+   - getActiveFeeds(sourceIds?, warnings?): Filter active/verified feeds
+   
+   Feed definition:
+   {
+     id: 'one_sports',
+     name: 'ONE',
+     url: 'https://www.one.co.il/cat/news/rss',
+     lang: 'he' | 'en',
+     categories: ['ספורט ישראלי'],
+     priority: 85,  // 0-100 score for source ranking
+     active: true,  // Must be true for feed to run
+     type: 'rss',
+   }
+   
+   Current active feeds:
+   - one_sports (ONE - Israeli sports)
+   - ynet_sports (Ynet Sports)
+   - espn_sports (ESPN)
+   
+   Environment variables:
+   - RSS_PIPELINE_ENABLED (default: false)
+   - RSS_DEBUG_RANKING (default: false)
+   - RSS_CACHE_TTL_MINUTES (default: 60)
+   - RSS_FETCH_TIMEOUT_MS (default: 10000)
+   - RSS_TIME_WINDOW_HOURS (default: 24)
+
+2. RSS CLIENT (src/rss/rss-client.ts)
+   Purpose: Fetch and parse RSS/Atom feeds
+   
+   Key functions:
+   - fetchActiveFeeds(feeds): Fetch all feeds concurrently
+   - fetchFeed(feed): Fetch single feed with timeout
+   - parseRssFeed(xml, feedConfig): Parse XML to ArticleCandidate[]
+   
+   Features:
+   - Supports RSS 2.0, Atom, RDF
+   - fast-xml-parser for robust XML parsing
+   - Per-feed error isolation (one failure doesn't stop others)
+   - Timeout protection (10s default)
+   - Concurrent fetch with limit (5 feeds at a time)
+   
+   XML Parser config:
+   - Handles CDATA sections
+   - Extracts: title, link, description, pubDate, category, author
+   - Attribute handling: @_ prefix
+   - Array coercion for <item> and <entry> tags
+
+3. RSS DEDUP (src/rss/rss-dedup.ts)
+   Purpose: Hash-based deduplication of articles
+   
+   Key functions:
+   - deduplicateArticles(articles): Remove exact duplicates
+   - computeArticleHashes(article): Generate title/excerpt/URL hashes
+   
+   Hashing strategy:
+   - titleHash: SHA-256 of normalized title
+   - excerptHash: SHA-256 of first 500 chars of summary
+   - urlHash: SHA-256 of URL
+   - Compound ID: source + ':' + urlHash
+   
+   Normalization:
+   - Lowercase
+   - Strip HTML tags
+   - Remove extra whitespace
+   - Trim
+
+4. RSS ARTICLES STORE (src/data/rss-articles-store.ts)
+   Purpose: Dedicated MongoDB storage for RSS articles
+   
+   Collection: rssArticles
+   _id: source:urlHash (compound identifier)
+   TTL: expiresAt field with expireAfterSeconds: 0
+   
+   Key functions:
+   - initializeRssArticlesStore(): Create indexes
+   - storeArticle(candidate): Store single article
+   - storeArticles(candidates): Bulk store with duplicate handling
+   - getArticlesByTimeWindow(hours, categories?, limit?): Query articles
+   - getArticleById(id): Direct lookup
+   - getRssStoreStats(): Collection statistics
+   
+   Indexes:
+   - { expiresAt: 1 } with expireAfterSeconds: 0 (TTL)
+   - { titleHash: 1, excerptHash: 1 } (dedup diagnostics)
+   - { fetchedAt: -1 } (time-window queries)
+   - { publishedAt: -1 } (recency ranking)
+   - { source: 1 } (per-feed queries)
+   - { rawCategories: 1 } (category filtering)
+   
+   Document schema:
+   {
+     _id: string,               // source:urlHash
+     url: string,
+     source: string,            // Feed ID
+     sourceName: string,        // Display name
+     title: string,
+     summary: string,
+     publishedAt: Date,
+     publishedAtEstimated: boolean,
+     fetchedAt: Date,
+     lang: 'he' | 'en',
+     rawCategories: string[],   // Feed-provided categories
+     contentLevel: 'rss_only',
+     excerptHash: string,
+     titleHash: string,
+     urlHash: string,
+     expiresAt: Date,           // TTL expiration
+   }
+
+5. RSS RANKING (src/rss/rss-ranking.ts)
+   Purpose: Score articles for category relevance
+   
+   Key functions:
+   - rankPool(articles, categoryCounts): Rank all articles per category
+   - scoreArticleForCategory(article, category): Individual scoring
+   
+   Ranking strategy:
+   - Each category has mustMatch / boostMatch / excludeMatch rules
+   - mustMatch: Required patterns (hard filter)
+   - boostMatch: Relevance boosters (soft ranking)
+   - excludeMatch: Rejection patterns (hard filter)
+   
+   Scoring:
+   - Base score: 50
+   - mustMatch hit: continue scoring
+   - mustMatch miss: score = 0 (reject)
+   - boostMatch hit: +20 per pattern
+   - excludeMatch hit: score = 0 (reject)
+   - Source priority: +0 to +30 (based on feed config)
+   - Recency: +0 to +20 (newer articles ranked higher)
+   - Language match: +10 (if requested lang matches article)
+   
+   Category rules example (כדורגל ישראלי):
+   - mustMatch: Israeli team names OR Israeli league keywords
+   - excludeMatch: Premier League, La Liga, Champions League
+   - boostMatch: Maccabi, Hapoel, Ligat Ha'al
+   
+   Output: RankedArticle[]
+   {
+     articleId: string,
+     category: string,
+     score: number,
+     reasons: string[],  // Human-readable scoring explanation
+     reject: boolean,
+   }
+
+6. RSS SELECTION (src/rss/rss-selection.ts)
+   Purpose: Select exact article counts per category
+   
+   Key functions:
+   - selectForLineup(rankedPool, candidateMap, totalItems, categoryCounts)
+   
+   Selection strategy:
+   - Per-category allocation (exact counts)
+   - Greedy selection (best score first within category)
+   - No duplicates across categories
+   - Fill remaining slots with placeholders
+   
+   Output: SelectedArticle[]
+   {
+     article: ArticleCandidate,  // Real article or placeholder
+     isPlaceholder: boolean,
+     category: string,
+     score: number,
+   }
+   
+   Placeholder schema:
+   {
+     id: 'placeholder-<uuid>',
+     title: '[Placeholder: <category>]',
+     summary: 'No matching articles found for this category.',
+     isPlaceholder: true,
+     // ... other required fields with empty/default values
+   }
+
+7. RSS BRIEF GENERATOR (src/rss/rss-brief-generator.ts)
+   Purpose: Generate LLM-powered summaries for articles
+   
+   Key functions:
+   - generateBriefs(articles): Batch generate briefs
+   - generateSingleBrief(article): Single article brief
+   
+   LLM prompt:
+   - Input: article.title + article.summary
+   - Output: { briefText, bullets[], whyItMatters }
+   - Model: qwen2.5:7b (Hebrew support)
+   - Timeout: 30s
+   
+   Brief schema:
+   {
+     articleId: string,
+     briefText: string,         // 2-3 sentence summary
+     bullets: string[],         // 3-5 key points
+     whyItMatters: string,      // Why this is important
+     briefQuality: 'llm' | 'rss_only',
+     citation: {
+       source: string,
+       url: string,
+       publishedAt: string,
+     },
+   }
+   
+   Fallback strategy:
+   - If LLM unavailable → briefQuality: 'rss_only', use raw summary
+   - If LLM fails → log error, skip brief (graceful degradation)
+   - Placeholders NEVER get briefs
+
+8. RSS PIPELINE ORCHESTRATOR (src/rss/rss-pipeline.ts)
+   Purpose: Execute full 7-stage pipeline
+   
+   Key function:
+   - runRssPipeline(options): Full pipeline execution
+   
+   Options:
+   {
+     categoryCounts: Record<string, number>,  // e.g. { "כדורגל ישראלי": 5 }
+     totalItems: number,                      // Total articles needed
+     timeWindowHours?: number,                // Default: 24
+     sources?: string[],                      // Filter by feed IDs
+   }
+   
+   Output: RSSPipelineResult
+   {
+     items: ArticleCandidate[],    // Selected articles (real + placeholders)
+     briefs: Brief[],               // LLM-generated briefs (real articles only)
+     errors: FeedError[],           // Per-feed errors
+     stats: {
+       feedsFetched: number,
+       feedsFailed: number,
+       articlesIngested: number,
+       duplicatesSkipped: number,
+     },
+   }
+   
+   Graceful degradation:
+   - Per-feed errors logged, pipeline continues
+   - Zero active feeds → explicit error, empty result
+   - Store failure → use cached articles
+   - No articles in pool → placeholders fill lineup
+   - Brief generation failure → skip brief, article still included
+
+9. RSS SCHEMAS (src/schemas/rss-schemas.ts)
+   Purpose: Zod validation schemas for RSS types
+   
+   Schemas:
+   - ArticleCandidateSchema
+   - BriefSchema
+   - BriefQualitySchema ('llm' | 'rss_only')
+   - BriefCitationSchema
+   - RankedArticleSchema
+   - LLMBriefOutputSchema
+
+SCRIPTS:
+
+1. RSS FEED VERIFICATION (src/scripts/verify-rss-feeds.ts)
+   CLI: npm run rss:verify
+   
+   Purpose: Verify feed health before activation
+   
+   Checks per feed:
+   0. SKIP if url === '<TODO_VERIFY>'
+   1. FAIL if domain not in allowlist (terminal)
+   2. HTTP GET + latency measurement (15s timeout)
+   3. XML validity check
+   4. Minimum item count (≥3 with title + link)
+   5. Date field check (≥70% with pubDate/updated → WARN if below)
+   6. Latency report
+   
+   Does NOT:
+   - Auto-activate feeds (manual activation required)
+   - Check RSS_PIPELINE_ENABLED flag (runs regardless)
+   
+   Output:
+   - [PASS] feed_id (name) - N items, XXXms, N/N have pubDate
+   - [WARN] feed_id (name) - N items, XXXms, N/N have pubDate (XX%)
+   - [FAIL] feed_id (name) - reason, XXXms
+   - [SKIP] feed_id (name) - URL not configured
+   
+   Exit code: 1 if any feeds failed
+
+INTEGRATION WITH LINEUP BUILDER:
+
+File: src/tools/lineup-builder.ts
+
+When lineupType = 'items':
+1. Extract totalItems and categoryCounts from user request
+2. Call runRssPipeline({ categoryCounts, totalItems, timeWindowHours: 24 })
+3. Receive items[] + briefs[]
+4. Map to LineupItem[] schema:
+   {
+     id: string,
+     title: string,
+     summary: string,        // From brief.briefText OR article.summary
+     bullets: string[],      // From brief.bullets OR []
+     whyItMatters: string,   // From brief.whyItMatters OR ''
+     category: string,
+     duration: number,       // Estimated from content length
+     isPlaceholder: boolean,
+     source: string,
+     url: string,
+     publishedAt: string,
+   }
+
+When lineupType = 'structure':
+- Traditional segment-based generation (unchanged)
+- Does NOT use RSS pipeline
+
+MONGODB COLLECTIONS:
+
+rssArticles:
+- Purpose: Persistent cache for RSS pipeline
+- TTL: Configurable (default 60 min)
+- Indexes: See "RSS Articles Store" above
+- Independent from fetchedArticles (news-cache.ts)
+
+fetchedArticles (legacy):
+- Purpose: Old news cache (still used by news-fetcher.ts)
+- Status: Coexists with rssArticles (no conflict)
+- Future: May be deprecated in favor of RSS pipeline
+
+DEPENDENCIES:
+
+New:
+- fast-xml-parser (^4.5.3): Robust RSS/Atom/XML parsing
+
+Existing:
+- mongodb (^6.17.0): Storage
+- zod (^3.22.4): Validation
+- uuid (^9.0.1): ID generation
+
+CONFIGURATION REFERENCE:
+
+Environment variables:
+- RSS_PIPELINE_ENABLED=true          # Enable pipeline (default: false)
+- RSS_DEBUG_RANKING=true             # Log ranking details (default: false)
+- RSS_CACHE_TTL_MINUTES=60           # Article TTL (default: 60)
+- RSS_FETCH_TIMEOUT_MS=10000         # Per-feed timeout (default: 10000)
+- RSS_TIME_WINDOW_HOURS=24           # Query window (default: 24)
+
+Feed activation:
+1. Run: npm run rss:verify
+2. Review output ([PASS] / [WARN] / [FAIL])
+3. Edit src/rss/rss-config.ts:
+   - Set active: true for verified feeds
+   - Replace '<TODO_VERIFY>' URLs with actual URLs
+4. Restart service
+
+PERFORMANCE:
+
+Typical execution times:
+- Feed fetch: 1-5s per feed (concurrent)
+- Dedup + store: 100-500ms (bulk insert)
+- Pool retrieval: 50-200ms (indexed query)
+- Ranking: 10-50ms (in-memory scoring)
+- Selection: 5-20ms (greedy allocation)
+- Brief generation: 2-5s per article (LLM inference)
+
+Total pipeline: 5-15s for 5-10 articles (depends on LLM and feed count)
+
+Caching:
+- MongoDB TTL: 60 min (configurable)
+- Duplicate articles skipped (fast)
+- Offline support: queries fall back to cached articles
+
+TESTING:
+
+File: tests/rss.test.ts
+
+Test coverage:
+- Feed parsing (RSS 2.0, Atom, RDF)
+- Deduplication logic
+- Ranking algorithm
+- Selection with exact counts
+- Placeholder generation
+- Brief generation (mocked LLM)
+- Pipeline orchestration
+
+FUTURE ENHANCEMENTS:
+
+1. Feed health monitoring
+   - Track fetch success/failure rates
+   - Alert on feed downtime
+   - Auto-disable consistently failing feeds
+
+2. Category auto-detection
+   - LLM-based category classification
+   - Improve article-to-category matching
+   - Support user-defined categories
+
+3. Multi-language briefs
+   - Translate briefs to other languages
+   - Detect article language
+   - Match user preferred language
+
+4. API-Football integration
+   - Supplement RSS with fixture data
+   - Real-time scores
+   - Team/league information
+
+5. Semantic search
+   - Embed articles for similarity search
+   - Improve relevance ranking
+   - Find related articles
+
+================================================================================
+6. INTEGRATION WITH PLATFORM
+================================================================================
+
+CHAT SYSTEM INTEGRATION:
+The AI agent is seeded as a special user account in MongoDB:
+
+Script: services/ai-agent/src/scripts/seed-ai-user.ts
+User Document:
+{
+  email: "lancelot-ai@internal.system",
+  username: "Lancelot AI",
+  displayName: "לנסלוט",
+  role: "AI_ASSISTANT",
+  isAIAgent: true,
+  status: "active",
+  publicKey: "<E2EE public key if enabled>",
+  keyFingerprint: "<key fingerprint>",
+  createdAt: timestamp
+}
+
+API GATEWAY ROUTING:
+File: services/api-gateway/src/socket/chat-socket.ts
+
+When a message is sent to a private conversation:
+1. API Gateway checks if recipient is AI agent (via email match)
+2. If yes, forwards to AI_AGENT_SERVICE_URL (default: http://localhost:4001)
+3. POST /ai/chat with:
+   {
+     conversationId: string,
+     message: string,
+     userId: sender's user ID,
+     userName: sender's display name,
+     messageType: "text" | "encrypted",
+     encryption: { enabled, version, senderPublicKeyFingerprint },
+     context: { history: [...] }
+   }
+4. AI agent processes and returns response
+5. API Gateway emits response via Socket.IO to conversation participants
+
+GRAPHQL INTEGRATION:
+File: services/api-gateway/src/resolvers/ai.ts
+
+Queries:
+- aiUser: Get AI agent user info
+- aiStatus: Get agent health and capabilities
+
+Mutations:
+- sendAIMessage: Send message directly to AI (bypassing chat)
+- requestLineup: Request lineup generation
+- requestCGSpec: Request CG specification
+- requestShiftSchedule: Request shift schedule
+- getNewsBrief: Get news summary
+- getRightsBoard: Get rights information
+
+AUTHENTICATION:
+- AI agent receives user context via headers:
+  x-user-id, x-user-name, x-trace-id
+- No separate auth token needed
+- Auth is passthrough from API Gateway
+
+================================================================================
+7. LLM CONFIGURATION & MODELS
+================================================================================
+
+PROVIDER ABSTRACTION:
+File: services/ai-agent/src/llm/index.ts
+
+Supported Providers:
+1. Ollama (default): http://localhost:11434
+2. llama.cpp (configurable)
+
+PRIMARY MODELS:
+- English/General: llama3.1:8b-instruct-q4_K_M
+- Hebrew: qwen2.5:7b
+- Default: qwen2.5:7b (configured in current setup)
+
+MODEL REQUIREMENTS:
+- Instruction-tuned models (not base models)
+- Support for JSON output mode
+- 7B-8B parameter range (optimized for local inference)
+- Quantization: Q4_K_M or higher
+
+OLLAMA SETUP:
+```bash
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Pull models
+ollama pull llama3.1:8b-instruct-q4_K_M
+ollama pull qwen2.5:7b
+
+# Verify
+curl http://localhost:11434/api/tags
+```
+
+LLM PROVIDER INTERFACE:
+services/ai-agent/src/llm/provider.ts
+
+Methods:
+- generate(prompt, options): Generate text completion
+- isAvailable(): Check if LLM is accessible
+- listModels(): Get available models
+- getName(): Get provider name
+
+PROMPT TEMPLATES:
+File: services/ai-agent/src/llm/prompt-templates.ts
+
+AGENT_SYSTEM_PROMPT (Updated Feb 2026):
+Bilingual (Hebrew + English) with anti-hallucination rules:
+
+Base rules:
+- Match user language (Hebrew ↔ Hebrew, English ↔ English, never mix)
+- Short, focused responses
+- Domains: rundown, graphics, shifts, news, broadcast rights
+
+Critical anti-hallucination rules:
+- "Never guess. If info missing, say you don't have data and ask 1-2 questions."
+- "Never invent facts, dates, scores, rights, or names."
+- "Never produce content that looks factual without verified source."
+- "For operational tasks: execute tool or ask clarification. Never free-form text."
+- "If tool fails, report failure clearly. Never invent substitute result."
+
+INTENT_CLASSIFICATION_PROMPT (Updated):
+Classifies into: lineup, cg, shifts, news, rights, general, clarification
+
+New features:
+- Extracts lineupType entity for lineup intent:
+  * "items" when user requests content list with counts (e.g. "12 items", "5 sports, 3 politics")
+  * "structure" when user requests show flow with segments (intro/interview/break)
+- Extracts totalItems number when present
+- Returns JSON: { intent, confidence, entities: { lineupType?, totalItems?, ... }, reasoning }
+
+buildChatPrompt():
+Constructs conversational prompts with history and context
+Note: Only used for "general" intent; operational intents use tool-specific prompts
+
+================================================================================
+8. MESSAGE PROCESSING PIPELINE
+================================================================================
+
+ORCHESTRATOR:
+File: services/ai-agent/src/agent/orchestrator.ts
+Function: processMessage(context: MessageContext)
+
+PIPELINE STAGES (Updated Feb 2026 - Reliability Hardening):
+
+┌─────────────────────────────────────────────────────────────┐
+│ STAGE 1: LLM AVAILABILITY CHECK                              │
+│ - Check if Ollama is running                                 │
+│ - Return error if unavailable                                │
+└──────────────────┬───────────────────────────────────────────┘
+                   ▼
+┌─────────────────────────────────────────────────────────────┐
+│ STAGE 2: GREETING DETECTION (BYPASS)                         │
+│ - Pattern match: "שלום", "היי", "hello", "hi"              │
+│ - Return hardcoded greeting response                         │
+│ - Skip LLM if greeting detected                              │
+└──────────────────┬───────────────────────────────────────────┘
+                   ▼
+┌─────────────────────────────────────────────────────────────┐
+│ STAGE 3: INTENT CLASSIFICATION                               │
+│ - Quick classify (keyword patterns) OR LLM classify          │
+│ - Extract entities (dates, names, teams, lineupType, etc.)  │
+│ - Return: { primary, confidence, entities }                 │
+└──────────────────┬───────────────────────────────────────────┘
+                   ▼
+┌─────────────────────────────────────────────────────────────┐
+│ STAGE 3b: LOW-CONFIDENCE CLARIFICATION CHECK                 │
+│ - If confidence < 0.4 or intent = "clarification"           │
+│ - Generate clarification question                            │
+│ - Return without tool execution                              │
+└──────────────────┬───────────────────────────────────────────┘
+                   ▼
+┌─────────────────────────────────────────────────────────────┐
+│ STAGE 3c: OPERATIONAL HARD GATE (NEW)                        │
+│ - If isOperationalIntent(cg/lineup/shifts/news/rights)      │
+│   → Check requiredEntitiesSatisfied()                       │
+│   → If missing entities: buildClarification() and STOP      │
+│   → If tool not registered: return error and STOP           │
+│   → BLOCK free chat fallback for operational intents        │
+│ - If intent = "general": allow free chat path               │
+└──────────────────┬───────────────────────────────────────────┘
+                   ▼
+┌─────────────────────────────────────────────────────────────┐
+│ STAGE 4: TOOL EXECUTION (with validation & timeout)          │
+│ - Validate input against Zod schema (if defined)            │
+│ - Execute tool handler with context                          │
+│ - Timeout: 30 seconds (heavy planning)                       │
+│ - Record tool usage metadata                                 │
+│ - On failure: return explicit error (NEVER free chat)       │
+└──────────────────┬───────────────────────────────────────────┘
+                   ▼
+┌─────────────────────────────────────────────────────────────┐
+│ STAGE 5: RESPONSE BUILDING                                   │
+│ - Build structured response with data                        │
+│ - Include: text, structuredData, toolsUsed, citations       │
+│ - Return ChatAgentResponse                                   │
+└─────────────────────────────────────────────────────────────┘
+
+CONTROLLED FALLBACK PATH (General Intent Only):
+If intent = "general" AND no tool is registered:
+1. Build conversational prompt with history
+2. Generate LLM response (timeout: 30s)
+3. Return text response with metadata
+
+BLOCKED PATH (Operational Intents):
+If intent ∈ {cg, lineup, shifts, news, rights}:
+- Free chat is FORBIDDEN
+- Must execute tool OR ask clarification OR return error
+- Safety net: if somehow reached, returns explicit error
+
+ERROR HANDLING:
+- LLM timeout → "הבקשה לקחה יותר מדי זמן"
+- Tool timeout → "הפעולה לקחה יותר מדי זמן"
+- Tool failure → Return tool.error message
+- Unexpected error → "אירעה שגיאה בעיבוד הבקשה"
+
+TIMEOUT STRATEGY:
+Function: withTimeout<T>(promise, ms, label)
+- Uses Promise.race with setTimeout
+- Does NOT use AbortSignal (Node 18 compatibility)
+- Clears timer on completion
+- Logs timeout events with trace ID
+
+================================================================================
+9. INTENT CLASSIFICATION & ROUTING
+================================================================================
+
+INTENT CLASSIFIER:
+File: services/ai-agent/src/agent/intent-classifier.ts
+
+SUPPORTED INTENTS:
+1. lineup - Program rundowns, segments, show planning
+2. cg - Graphics requests, lower thirds, scorebugs, tickers
+3. shifts - Shift scheduling, work assignments, availability
+4. news - News briefs, breaking news, current events
+5. rights - Broadcast rights, sports fixtures, league info
+6. general - General questions, greetings, help requests
+7. clarification - Message unclear, need more information
+
+CLASSIFICATION METHODS:
+
+1. Quick Classify (Pattern Matching):
+   - Fast keyword-based classification
+   - Used before LLM for common patterns
+   - Example: "חדשות" → news, "גרפיקה" → cg
+   
+2. LLM Classification:
+   - Uses INTENT_CLASSIFICATION_PROMPT
+   - Returns JSON with intent, confidence, entities
+   - Example response:
+     {
+       "intent": "lineup",
+       "confidence": 0.85,
+       "entities": { "showType": "sports", "date": "tonight" },
+       "reasoning": "User wants to build a sports rundown"
+     }
+
+ENTITY EXTRACTION:
+Extracts relevant data from messages:
+- Dates and times (tonight, tomorrow, specific dates)
+- Names (people, teams, shows)
+- Types (sports, news, entertainment)
+- Numbers (durations, counts)
+- Locations (venues, cities)
+
+CLARIFICATION LOGIC:
+Function: needsClarification(intent)
+Returns true if:
+- confidence < 0.6
+- intent = "clarification"
+- critical entities missing
+
+Function: generateClarificationRequest(intent, message)
+Builds contextual questions:
+- "מה סוג התוכנית שאתה רוצה לבנות?" (for lineup)
+- "איזה סוג גרפיקה אתה צריך?" (for CG)
+- "על איזה תקופה אתה מדבר?" (for shifts)
+
+GREETING DETECTION:
+Function: isGreetingMessage(message)
+Patterns:
+- Hebrew: "שלום", "היי", "מה קורה", "מה המצב"
+- English: "hi", "hello", "hey", "what's up"
+- Case insensitive, trimmed
+
+Function: getGreetingResponse(message)
+Returns localized greeting:
+- Hebrew input → "היי! אני לנסלוט. איך אוכל לעזור?"
+- English input → "Hi! I'm Lancelot. How can I help?"
+
+================================================================================
+10. TOOL SYSTEM & REGISTRY
+================================================================================
+
+TOOL REGISTRY:
+File: services/ai-agent/src/tools/registry.ts
+
+TOOL DEFINITION INTERFACE:
+```typescript
+interface ToolDefinition {
+  name: string;              // Tool identifier
+  description: string;       // Human-readable description
+  intentType: string;        // Intent it responds to
+  handler: ToolHandler;      // Execution function
+  version: string;           // Tool version
+  isAsync: boolean;          // Async execution flag
+  inputSchema?: ZodSchema;   // Input validation schema
+}
+```
+
+TOOL HANDLER INTERFACE:
+```typescript
+type ToolHandler = (
+  input: Record<string, unknown>,
+  context: MessageContext
+) => Promise<{
+  success: boolean;
+  data?: unknown;
+  text: string;
+  error?: string;
+}>;
+```
+
+REGISTERED TOOLS:
+
+1. NEWS FETCHER
+   File: services/ai-agent/src/tools/news-fetcher.ts
+   Intent: "news"
+   Features:
+   - Fetches from trusted RSS sources
+   - Caches results (5-minute TTL)
+   - Deduplicates articles
+   - Offline mode support
+   Dependencies: services/ai-agent/src/data/news-cache.ts
+
+2. LINEUP BUILDER
+   File: services/ai-agent/src/tools/lineup-builder.ts
+   Intent: "lineup"
+   Features:
+   - Generates structured rundowns
+   - Allocates time segments
+   - Provides content suggestions
+   Output: LineupRundown schema
+
+3. CG SPEC GENERATOR
+   File: services/ai-agent/src/tools/cg-spec-generator.ts
+   Intent: "cg"
+   Features:
+   - Creates graphics specifications
+   - Validates against Vizrt constraints
+   - Provides preview data
+   Output: CGSpec schema
+
+4. SHIFT SOLVER
+   File: services/ai-agent/src/tools/shift-solver.ts
+   Intent: "shifts"
+   Status: PLACEHOLDER
+   Note: Intended to integrate with OR-Tools service
+   Output: ShiftSchedule schema
+
+5. RIGHTS BOARD
+   File: services/ai-agent/src/tools/rights-board.ts
+   Intent: "rights"
+   Features:
+   - Tracks broadcast rights
+   - Monitors sports fixtures
+   - Caches league data
+   Output: RightsBoard schema
+
+TOOL REGISTRATION:
+File: services/ai-agent/src/tools/index.ts
+
+Function: initializeTools()
+Called at startup, registers all tools:
+
+```typescript
+export async function initializeTools() {
+  await initializeTrustedSources();
+  await initializeNewsCache();
+  
+  registerAgentTool({
+    name: 'news-fetcher',
+    description: 'Fetch news from trusted sources',
+    intentType: 'news',
+    handler: newsFetcherHandler,
+    version: '1.0.0',
+    isAsync: true,
+    inputSchema: NewsBriefInputSchema,
+  });
+  
+  // ... register other tools
+}
+```
+
+TOOL VALIDATION:
+Each tool can define a Zod input schema for validation:
+- Schema defined in services/ai-agent/src/schemas/
+- Validated before execution in orchestrator
+- Validation errors return user-friendly messages
+- Example warning if schema missing
+
+================================================================================
+11. STRUCTURED OUTPUT SCHEMAS
+================================================================================
+
+SCHEMA LOCATION:
+Directory: services/ai-agent/src/schemas/
+
+PRIMARY SCHEMAS:
+
+1. CHAT RESPONSE (chat-response.ts)
+   Core response format from agent:
+   
+   ```typescript
+   interface ChatAgentResponse {
+     text: string;                    // Human-readable response
+     intent: Intent;                  // Classified intent
+     structuredData?: unknown;        // Tool-specific data
+     toolsUsed: ToolUsage[];         // Tools executed
+     explanation: string;             // Decision reasoning
+     metadata: {
+       modelUsed: string;
+       totalLatencyMs: number;
+       isOffline: boolean;
+       cacheHit?: boolean;
+       dataFreshness?: string;
+     };
+   }
+   
+   interface Intent {
+     primary: string;
+     confidence: number;
+     entities: Record<string, unknown>;
+     alternativeIntents?: string[];
+     reasoning?: string;
+   }
+   
+   interface ToolUsage {
+     toolName: string;
+     executionTimeMs: number;
+     input: Record<string, unknown>;
+     output?: Record<string, unknown>;
+     success: boolean;
+     error?: string;
+   }
+   ```
+
+2. LINEUP RUNDOWN (lineup-rundown.ts)
+   ```typescript
+   interface LineupRundown {
+     title: string;
+     showType: string;
+     totalDuration: number;
+     segments: Array<{
+       id: string;
+       title: string;
+       duration: number;
+       startTime?: string;
+       content: string;
+       type: string;
+       priority: number;
+     }>;
+     metadata: {
+       generatedAt: string;
+       language: string;
+     };
+   }
+   ```
+
+3. CG SPEC (cg-spec.ts)
+   ```typescript
+   interface CGSpec {
+     type: string;              // lower_third, scorebug, ticker
+     template: string;
+     fields: Array<{
+       key: string;
+       value: string;
+       type: string;
+     }>;
+     styling: {
+       theme: string;
+       colors: Record<string, string>;
+       fonts: Record<string, string>;
+     };
+     dimensions?: {
+       width: number;
+       height: number;
+     };
+     previewUrl?: string;
+   }
+   ```
+
+4. NEWS BRIEF (news-brief.ts)
+   ```typescript
+   interface NewsBrief {
+     articles: Array<{
+       title: string;
+       summary: string;
+       source: string;
+       publishedAt: string;
+       url: string;
+       category?: string;
+     }>;
+     metadata: {
+       fetchedAt: string;
+       sourcesUsed: string[];
+       isCached: boolean;
+       freshness: string;
+     };
+   }
+   ```
+
+5. RIGHTS BOARD (rights-board.ts)
+   ```typescript
+   interface RightsBoard {
+     fixtures: Array<{
+       id: string;
+       sport: string;
+       league: string;
+       homeTeam: string;
+       awayTeam: string;
+       date: string;
+       time: string;
+       broadcastRights: {
+         owned: boolean;
+         expiresAt?: string;
+         restrictions?: string[];
+       };
+     }>;
+     summary: {
+       totalFixtures: number;
+       ownedRights: number;
+     };
+   }
+   ```
+
+6. SHIFT SCHEDULE (shift-schedule.ts)
+   ```typescript
+   interface ShiftSchedule {
+     shifts: Array<{
+       id: string;
+       userId: string;
+       userName: string;
+       role: string;
+       startTime: string;
+       endTime: string;
+       status: string;
+     }>;
+     conflicts: Array<{
+       type: string;
+       description: string;
+       shiftIds: string[];
+     }>;
+     stats: {
+       totalShifts: number;
+       unassigned: number;
+       conflicts: number;
+     };
+   }
+   ```
+
+VALIDATION:
+All schemas defined with Zod for runtime validation:
+- Type-safe schema definitions
+- Parse/validate JSON from LLM
+- Safeguard against malformed outputs
+- Detailed error messages
+
+================================================================================
+12. API ENDPOINTS
+================================================================================
+
+BASE URL: http://localhost:4001
+
+HEALTH & STATUS:
+
+GET /health
+Response:
+{
+  "status": "ok",
+  "service": "Lancelot AI Agent",
+  "timestamp": "ISO-8601",
+  "llm": {
+    "available": boolean,
+    "provider": "ollama",
+    "model": string
+  }
+}
+
+GET /ai/health
+DEPRECATED alias for /health — will be removed after 2026-06-30. Use /health.
+
+GET /ai/status
+Response:
+{
+  "isOnline": boolean,
+  "modelLoaded": string | null,
+  "capabilities": string[],
+  "uptime": number,
+  "version": "1.0.0"
+}
+
+GET /metrics
+Response:
+{
+  "requests": {
+    "total": number,
+    "success": number,
+    "failed": number
+  },
+  "latency": {
+    "avg": number,
+    "p95": number,
+    "p99": number
+  },
+  "tools": {
+    "lineup": { executions: number, avgLatency: number },
+    "news": { executions: number, avgLatency: number },
+    // ... other tools
+  }
+}
+
+CHAT ENDPOINTS:
+
+POST /ai/chat
+Headers:
+  Content-Type: application/json
+  x-user-id: <user ID>
+  x-user-name: <user display name>
+  x-trace-id: <trace ID> (optional)
+
+Request Body:
+{
+  "conversationId": "uuid",
+  "message": "Build me a sports rundown",
+  "messageType": "text" | "encrypted",
+  "encryption": {
+    "enabled": boolean,
+    "version": 1,
+    "senderPublicKeyFingerprint": string (optional)
+  },
+  "context": {
+    "history": [
+      { "role": "user", "content": "..." },
+      { "role": "assistant", "content": "..." }
+    ],
+    "metadata": {}
+  }
+}
+
+Response: ChatAgentResponse (see schemas section)
+
+TOOL-SPECIFIC ENDPOINTS (Coming Soon):
+
+POST /ai/lineup
+POST /ai/cg/spec
+POST /ai/shifts/solve
+GET /ai/news/brief
+GET /ai/rights/board
+
+ROOT ENDPOINT:
+
+GET /
+Response:
+{
+  "service": "Lancelot AI Agent",
+  "version": "1.0.0",
+  "status": "running",
+  "endpoints": [
+    "GET /health (canonical)",
+    "GET /ai/health (deprecated alias, remove after 2026-06-30)",
+    "GET /ai/status",
+    "POST /ai/chat",
+    "POST /ai/lineup",
+    "POST /ai/cg/spec",
+    "POST /ai/shifts/solve",
+    "GET /ai/news/brief",
+    "GET /ai/rights/board"
+  ]
+}
+
+RATE LIMITING:
+File: services/ai-agent/src/middleware/rate-limiter.ts
+
+Chat Endpoints: 10 requests per minute per IP
+Health Endpoints: 30 requests per minute per IP
+
+Configuration:
+- chatRateLimiter: windowMs=60000, max=10
+- healthRateLimiter: windowMs=60000, max=30
+
+================================================================================
+13. CONFIGURATION & ENVIRONMENT
+================================================================================
+
+CONFIGURATION FILE:
+File: services/ai-agent/src/config/index.ts
+
+ENVIRONMENT VARIABLES:
+
+SERVICE:
+AI_AGENT_PORT=4001                  # Service HTTP port
+NODE_ENV=development|production     # Environment mode
+CORS_ORIGIN=*                       # CORS allowed origins
+
+LLM:
+LLM_PROVIDER=ollama                 # ollama | llamacpp
+OLLAMA_BASE_URL=http://localhost:11434
+LLM_PRIMARY_MODEL=qwen2.5:7b       # Primary model name
+LLM_HEBREW_MODEL=qwen2.5:7b        # Hebrew model name
+LLM_TIMEOUT=30000                   # Request timeout (ms)
+LLM_MAX_RETRIES=3                   # Retry attempts
+LLM_TEMPERATURE=0.7                 # Generation temperature
+LLM_MAX_TOKENS=2048                 # Max generation tokens
+
+MONGODB:
+MONGODB_URL=mongodb://...           # Full MongoDB URL
+MONGO_HOST=127.0.0.1               # MongoDB host
+MONGO_PORT=27017                    # MongoDB port
+MONGO_DATABASE=broadcast            # Database name
+MONGO_USERNAME=LancelotERP_DB      # Auth username
+MONGO_PASSWORD=...                  # Auth password
+
+AI AGENT IDENTITY:
+AI_AGENT_USER_ID=ai-agent-lancelot # User ID in database
+# Email and display name are hardcoded in config
+
+FEATURES:
+ENABLE_E2EE_CHAT=false             # Enable E2EE support
+E2EE_FALLBACK_WARNING=true         # Warn on E2EE fallback
+
+RSS PIPELINE (NEW in v2.1):
+RSS_PIPELINE_ENABLED=true          # Enable RSS pipeline (default: false)
+RSS_DEBUG_RANKING=false            # Log ranking details (default: false)
+RSS_CACHE_TTL_MINUTES=60           # Article TTL in minutes (default: 60)
+RSS_FETCH_TIMEOUT_MS=10000         # Per-feed timeout in ms (default: 10000)
+RSS_TIME_WINDOW_HOURS=24           # Query window in hours (default: 24)
+
+CONFIG OBJECT STRUCTURE:
+```typescript
+export const config: AIConfig = {
+  port: 4001,
+  environment: 'development',
+  
+  llm: {
+    provider: 'ollama',
+    baseUrl: 'http://localhost:11434',
+    primaryModel: 'qwen2.5:7b',
+    hebrewModel: 'qwen2.5:7b',
+    timeout: 30000,
+    maxRetries: 3,
+    temperature: 0.7,
+    maxTokens: 2048,
+  },
+  
+  performance: {
+    standardLatencyMs: 8000,
+    heavyPlanningLatencyMs: 30000,
+  },
+  
+  mongodb: {
+    url: buildMongoUrl(),
+    database: 'broadcast',
+  },
+  
+  agent: {
+    userId: 'ai-agent-lancelot',
+    email: 'lancelot-ai@internal.system',
+    displayName: 'Lancelot AI',
+  },
+  
+  features: {
+    enableE2eeChat: false,
+    e2eeFallbackWarning: true,
+  },
+};
+```
+
+TRUSTED SOURCES:
+File: services/ai-agent/src/config/trusted-sources.ts
+
+Defines allowlist of RSS sources for news fetching:
+- News websites
+- Sports feeds
+- Broadcast industry sources
+
+================================================================================
+14. DATA LAYER & PERSISTENCE
+================================================================================
+
+MONGODB ADAPTER:
+File: services/ai-agent/src/data/mongodb-adapter.ts
+
+Shared database with main platform (services/api-gateway)
+
+KEY COLLECTIONS:
+
+users:
+- AI agent user account
+- Public keys for E2EE
+- Key fingerprints
+
+privateConversations:
+- Chat conversation metadata
+- Participant mappings
+- E2EE session keys
+
+chatMessages:
+- Message history
+- Encrypted message payloads
+- Timestamps and read status
+
+newsCache (legacy - fetchedArticles):
+- Cached RSS articles (old news-fetcher tool)
+- TTL: 5 minutes
+- Schema: { url, title, summary, publishedAt, fetchedAt }
+- Status: Coexists with rssArticles, may be deprecated
+
+rssArticles (NEW - RSS Pipeline):
+- Dedicated RSS pipeline article storage
+- TTL: 60 minutes (configurable via RSS_CACHE_TTL_MINUTES)
+- Comprehensive indexes for time-window and category queries
+- Schema: See section 5 (RSS Pipeline System)
+- Independent from fetchedArticles collection
+
+trustedSources:
+- Allowlisted news sources
+- Source metadata
+- Active/inactive status
+
+vectorStore (planned):
+- Embeddings for RAG
+- Document chunks
+- Similarity search indices
+
+NEWS CACHE:
+File: services/ai-agent/src/data/news-cache.ts
+
+Functions:
+- getCachedNews(sources: string[]): Promise<Article[]>
+- cacheNews(articles: Article[]): Promise<void>
+- invalidateCache(): Promise<void>
+
+Cache Strategy:
+- In-memory + MongoDB persistence
+- 5-minute TTL (configurable)
+- Deduplication by URL
+- Offline fallback
+
+TRUSTED SOURCES STORE:
+File: services/ai-agent/src/data/trusted-sources-store.ts
+
+Functions:
+- getTrustedSources(): Promise<Source[]>
+- addTrustedSource(source: Source): Promise<void>
+- removeTrustedSource(url: string): Promise<void>
+
+Initialization:
+- initializeTrustedSources(): Loads from config on startup
+
+VECTOR STORE (FUTURE):
+File: services/ai-agent/src/data/vector-store.ts
+
+Planned for RAG (Retrieval-Augmented Generation):
+- Embed documents offline
+- Store in MongoDB with vector indices
+- Retrieve relevant context for queries
+
+================================================================================
+15. SECURITY & E2EE SUPPORT
+================================================================================
+
+END-TO-END ENCRYPTION:
+The AI agent supports E2EE as a first-class crypto participant.
+
+E2EE DESIGN DOCUMENT:
+File: Prompts/Security Prompt.txt (183 lines)
+
+KEY PRINCIPLES:
+- Messages encrypted on sender's client
+- Decrypted only on recipient's client (or AI agent service)
+- Server/database never see plaintext
+- AI agent owns cryptographic keys
+
+CRYPTOGRAPHIC APPROACH:
+- Key Exchange: X25519 (Diffie-Hellman)
+- Message Encryption: ChaCha20-Poly1305
+- Identity Keys: Long-term per-user keys
+- Session Keys: Per-conversation keys
+
+AI AGENT CRYPTO IMPLEMENTATION:
+Directory: services/ai-agent/src/crypto/
+
+e2ee.ts:
+Functions:
+- generateKeyPair(): Generate X25519 keypair
+- encryptMessage(plaintext, recipientPublicKey): Encrypt message
+- decryptMessage(ciphertext, senderPublicKey): Decrypt message
+- computeFingerprint(publicKey): SHA-256 fingerprint
+
+keyManager.ts:
+Functions:
+- initializeKeys(): Load or generate AI agent keys
+- getPublicKey(): Get AI agent public key
+- getPrivateKey(): Access private key securely
+- storeKeys(): Persist keys (encrypted at rest)
+
+KEY STORAGE:
+- Private key encrypted with env-based passphrase
+- Stored in MongoDB or filesystem (configurable)
+- Never logged or transmitted
+
+MESSAGE FLOW (E2EE):
+1. User encrypts message with AI agent's public key
+2. Sends encrypted blob via Socket.IO
+3. API Gateway routes to AI agent
+4. AI agent decrypts using private key
+5. Processes plaintext internally
+6. Encrypts response with user's public key
+7. Returns encrypted blob
+8. API Gateway forwards to user
+9. User decrypts locally
+
+FEATURE FLAG:
+Environment: ENABLE_E2EE_CHAT=true
+Config: config.features.enableE2eeChat
+
+When disabled:
+- E2EE messages rejected with error
+- Falls back to plaintext mode
+- User warned if E2EE requested
+
+SECURITY CONSTRAINTS:
+- AI agent never logs decrypted message content
+- Only logs hashes/message IDs for observability
+- Explicitly wipes decrypted buffers after use
+- Tool outputs encrypted before sending
+
+KEY FINGERPRINTS:
+- SHA-256 hash of public key
+- Displayed to users for verification
+- Detected if key changes (MITM protection)
+- Stored per user in database
+
+BACKWARD COMPATIBILITY:
+- Supports both plaintext and E2EE chats
+- Automatic negotiation based on recipient capabilities
+- Feature flag controls rollout
+- Graceful fallback with user warnings
+
+================================================================================
+16. OBSERVABILITY & MONITORING
+================================================================================
+
+LOGGING:
+File: services/ai-agent/src/utils/logger.ts
+
+Logger Implementation: Winston
+Format: JSON structured logging
+
+Log Levels:
+- error: Critical errors requiring attention
+- warn: Warnings (e.g., timeouts, fallbacks)
+- info: General operational events
+- decision: AI decision points (custom level)
+- debug: Detailed debugging information
+
+Log Fields:
+{
+  timestamp: ISO-8601,
+  level: string,
+  message: string,
+  service: "ai-agent",
+  traceId: uuid,
+  userId: string (optional),
+  conversationId: string (optional),
+  ...custom fields
+}
+
+Decision Logging:
+logger.decision(decision, reasoning, context, traceId)
+
+Used to track AI decision-making:
+- Intent classification
+- Tool selection
+- Clarification triggers
+- Fallback paths
+
+TRACING:
+Middleware: services/ai-agent/src/api/middleware.ts
+
+Trace ID Propagation:
+- Generated per request (UUID v4)
+- Passed via x-trace-id header
+- Logged with every event
+- Returned in response metadata
+
+Request Logging:
+Logs every HTTP request:
+- Method, path, status code
+- User ID, trace ID
+- Response time (ms)
+- Error details (if any)
+
+METRICS:
+File: services/ai-agent/src/middleware/monitoring.ts
+
+Tracked Metrics:
+- Request count (total, success, failed)
+- Latency (avg, p50, p95, p99)
+- Tool execution times
+- LLM inference times
+- Cache hit rates
+- Error rates
+
+Metrics Endpoint: GET /metrics
+Prometheus-compatible format
+
+Health Check:
+GET /health (canonical; /ai/health is a deprecated alias)
+
+Checks:
+- Service uptime
+- LLM availability
+- MongoDB connectivity
+- Ollama model loaded
+
+Response:
+{
+  "status": "ok" | "degraded" | "down",
+  "checks": {
+    "llm": { "status": "ok", "latency": 123 },
+    "database": { "status": "ok", "latency": 45 },
+    "cache": { "status": "ok", "entries": 150 }
+  }
+}
+
+ERROR RECOVERY:
+File: services/ai-agent/src/middleware/error-recovery.ts
+
+Error Middleware:
+- Catches unhandled errors
+- Logs with trace ID
+- Returns user-friendly error response
+- Prevents service crash
+
+Recovery Strategies:
+- LLM timeout → retry with backoff
+- MongoDB connection loss → reconnect
+- Cache miss → fetch from source
+- Tool failure → fallback response
+
+RATE LIMITING:
+File: services/ai-agent/src/middleware/rate-limiter.ts
+
+Prevents abuse:
+- Chat endpoints: 10 req/min per IP
+- Health endpoints: 30 req/min per IP
+- Returns 429 Too Many Requests when exceeded
+
+ALERTING (FUTURE):
+Planned integrations:
+- Prometheus alerts
+- Grafana dashboards
+- PagerDuty for critical errors
+- Slack notifications
+
+================================================================================
+17. PERFORMANCE TARGETS
+================================================================================
+
+LATENCY TARGETS:
+Defined in: services/ai-agent/src/config/index.ts
+
+Standard Requests:
+- Target: 2-8 seconds
+- Includes: General chat, greetings, simple queries
+- Config: performance.standardLatencyMs = 8000
+
+Heavy Planning:
+- Target: 15-30 seconds
+- Includes: Lineup building, shift solving, complex CG specs
+- Config: performance.heavyPlanningLatencyMs = 30000
+
+TIMEOUT CONFIGURATION:
+LLM Generation: 30 seconds (config.llm.timeout)
+Tool Execution: 30 seconds (per tool)
+HTTP Requests: 30 seconds (AI Agent → external APIs)
+
+OPTIMIZATION STRATEGIES:
+
+1. Greeting Bypass:
+   - Pattern match common greetings
+   - Return hardcoded response
+   - Skip LLM call (saves ~2s)
+
+2. Quick Classification:
+   - Keyword-based intent detection
+   - Fallback to LLM if uncertain
+   - Reduces latency for common intents
+
+3. Caching:
+   - News articles: 5-minute TTL
+   - Rights data: 1-hour TTL
+   - User context: In-memory cache
+
+4. Streaming (Future):
+   - Stream LLM tokens as generated
+   - Progressive UI updates
+   - Perceived latency reduction
+
+5. Model Selection:
+   - 7B-8B models (optimal size/speed)
+   - Quantized models (Q4_K_M)
+   - Local inference (no network latency)
+
+RESOURCE UTILIZATION:
+CPU: 50-80% during inference (local Ollama)
+Memory: 8-12 GB (model + context)
+Disk: 5-10 GB (models + cache)
+
+SCALABILITY:
+Current: Single instance, single model
+Future:
+- Multiple Ollama instances (load balancing)
+- Model-specific endpoints (e.g., Hebrew-only)
+- GPU acceleration (if available)
+
+BENCHMARKS:
+Greeting Response: <100ms (hardcoded)
+Intent Classification: 1-3 seconds
+Simple Chat: 2-5 seconds
+Lineup Building: 10-20 seconds
+News Fetching: 3-8 seconds (with cache: <500ms)
+
+================================================================================
+18. DEPLOYMENT & OPERATIONS
+================================================================================
+
+DEVELOPMENT:
+Location: services/ai-agent
+
+Setup:
+```bash
+# Install dependencies
+npm install
+
+# Seed AI user
+npm run seed:ai-user
+
+# Start Ollama
+ollama serve
+
+# Pull models
+ollama pull qwen2.5:7b
+
+# Start service
+npm run dev
+```
+
+Scripts (package.json):
+- npm run dev: Start with ts-node-dev (hot reload)
+- npm run dev:watch: Start with nodemon (auto-restart)
+- npm run build: Compile TypeScript
+- npm run start: Run compiled JS
+- npm test: Run Jest tests
+- npm run seed:ai-user: Create AI user in MongoDB
+- npm run rss:verify: Verify RSS feeds (NEW in v2.1)
+
+DOCKER:
+File: services/ai-agent/Dockerfile
+
+Build:
+```bash
+docker build -t lancelot-ai-agent:latest .
+```
+
+Run:
+```bash
+docker run -d \
+  --name ai-agent \
+  -p 4001:4001 \
+  -e MONGODB_URL=mongodb://... \
+  -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
+  lancelot-ai-agent:latest
+```
+
+DOCKER COMPOSE:
+Included in root docker-compose.yml
+
+Services:
+- mongodb: Shared database
+- ollama: Local LLM inference (external)
+- api-gateway: GraphQL + Socket.IO
+- ai-agent: AI service
+
+Network:
+All services on shared bridge network
+
+PRODUCTION DEPLOYMENT:
+Requirements:
+- Node.js 18+ runtime
+- MongoDB 6+ (shared or dedicated)
+- Ollama installed and running
+- Required models pulled
+
+Environment:
+- Set all required env vars
+- Use production MongoDB URL with auth
+- Configure CORS_ORIGIN to allowed domains
+- Enable E2EE if required (ENABLE_E2EE_CHAT=true)
+
+Process Management:
+- Use PM2 or systemd for process supervision
+- Configure restart policies
+- Set up log rotation
+
+Monitoring:
+- Health checks via /health (canonical)
+- Metrics via /metrics
+- Integrate with Prometheus/Grafana
+- Set up alerts for errors and latency
+
+OLLAMA DEPLOYMENT:
+On-Premises:
+- Install Ollama on GPU server (recommended)
+- Pull all required models
+- Expose API on internal network
+- Configure AI_AGENT_SERVICE_URL to Ollama host
+
+Cloud/VPS:
+- NOT RECOMMENDED (defeats offline-first design)
+- If necessary, deploy Ollama in same VPC
+- Ensure low-latency network connection
+
+MODEL MANAGEMENT:
+Updating Models:
+```bash
+# Pull new version
+ollama pull qwen2.5:14b
+
+# Update environment
+export LLM_PRIMARY_MODEL=qwen2.5:14b
+
+# Restart service
+pm2 restart ai-agent
+```
+
+Model Storage:
+- Default: ~/.ollama/models
+- Size: 4-8 GB per model (quantized)
+- Backup: Copy model directory
+
+BACKUP & RESTORE:
+Database:
+- AI agent shares MongoDB with main platform
+- Follow platform backup procedures
+- Critical collections: users, privateConversations, chatMessages
+
+Keys (E2EE):
+- Backup AI agent private key securely
+- Encrypted backup to secure storage
+- Document recovery procedures
+
+HEALTH CHECKS:
+Liveness Probe: GET /health
+Readiness Probe: GET /ai/status (check llm availability)
+Startup Probe: GET /health (allow 60s for Ollama connection)
+
+TROUBLESHOOTING:
+
+Issue: "LLM not available"
+- Check Ollama is running: curl http://localhost:11434/api/tags
+- Verify model is pulled: ollama list
+- Check OLLAMA_BASE_URL in env
+
+Issue: "MongoDB connection error"
+- Verify MONGODB_URL is correct
+- Check MongoDB is running: mongosh <url>
+- Verify auth credentials
+
+Issue: "Timeout errors"
+- Increase LLM_TIMEOUT if needed
+- Check Ollama resource usage (CPU/memory)
+- Consider smaller model or GPU acceleration
+
+Issue: "AI user not found"
+- Run seed script: npm run seed:ai-user
+- Verify user exists: mongosh > db.users.findOne({ email: "lancelot-ai@internal.system" })
+
+================================================================================
+19. FUTURE ROADMAP
+================================================================================
+
+PLANNED FEATURES:
+
+1. SHIFT SOLVER INTEGRATION (HIGH PRIORITY)
+   Status: Currently placeholder
+   Goal: Replace with OR-Tools service
+   Tasks:
+   - Deploy OR-Tools microservice
+   - Implement shift constraints API
+   - Integrate with shift-solver.ts
+   - Add scheduling optimization algorithms
+
+2. RAG / VECTOR SEARCH
+   Status: Scaffolding exists (vector-store.ts)
+   Goal: Offline document retrieval
+   Tasks:
+   - Choose embedding model (e.g., all-MiniLM-L6-v2)
+   - Implement document chunking
+   - Store embeddings in MongoDB
+   - Build similarity search
+   - Integrate with conversational context
+
+3. E2EE ROLLOUT
+   Status: Feature flag disabled
+   Goal: Enable E2EE for all chats
+   Tasks:
+   - Complete E2EE implementation (per Security Prompt.txt)
+   - Test AI agent crypto integration
+   - Add key rotation
+   - UI for key verification
+   - Gradual rollout with feature flag
+
+4. STREAMING RESPONSES
+   Status: Not implemented
+   Goal: Stream LLM tokens in real-time
+   Tasks:
+   - Add SSE/WebSocket support
+   - Implement streaming in Ollama client
+   - Update frontend to display incremental responses
+   - Handle partial JSON parsing
+
+5. TOOL IMPROVEMENTS
+   RSS Pipeline (NEW in v2.1):
+   - Add more Israeli sports sources (Walla Sports, additional Channel1 sections)
+   - Semantic article-to-category matching (beyond keyword rules)
+   - Feed health monitoring and auto-disable
+   - API-Football integration for fixture/results data
+   - Multi-language brief generation (translate to user's preferred language)
+   
+   Lineup Builder:
+   - Template library (sports, news, entertainment)
+   - Automated time allocation
+   - Conflict detection
+   - Enhanced items mode with more categories
+   
+   CG Assistant:
+   - Preview generation
+   - Template recommendations
+   - Vizrt API integration
+
+6. MULTI-MODAL SUPPORT
+   Status: Not started
+   Goal: Support image/audio inputs
+   Tasks:
+   - Integrate vision model (e.g., LLaVA)
+   - Image preprocessing
+   - Audio transcription (Whisper)
+   - Multi-modal prompt engineering
+
+7. CONVERSATION MEMORY
+   Status: Basic history support
+   Goal: Long-term memory across sessions
+   Tasks:
+   - Store conversation summaries
+   - Implement retrieval of past context
+   - User preference learning
+   - Personalized responses
+
+8. TOOL PLUGINS
+   Status: Not implemented
+   Goal: Dynamic tool loading
+   Tasks:
+   - Plugin architecture design
+   - Hot-reload tool registration
+   - Sandboxed execution
+   - Community tool marketplace
+
+9. METRICS & ANALYTICS
+   Status: Basic metrics implemented
+   Goal: Comprehensive observability
+   Tasks:
+   - Grafana dashboards
+   - Prometheus integration
+   - Custom business metrics
+   - A/B testing framework
+
+10. MULTILINGUAL EXPANSION
+    Status: Hebrew + English
+    Goal: Add more languages
+    Tasks:
+    - Integrate multilingual models
+    - Language detection
+    - Cross-language context handling
+    - RTL UI improvements
+
+================================================================================
+20. FILE STRUCTURE
+================================================================================
+
+services/ai-agent/
+├── src/
+│   ├── index.ts                    # Service entry point, Express setup
+│   │
+│   ├── config/
+│   │   ├── index.ts                # Configuration interface and exports
+│   │   └── trusted-sources.ts     # Allowlist of RSS sources
+│   │
+│   ├── llm/
+│   │   ├── index.ts                # LLM provider abstraction
+│   │   ├── ollama-client.ts       # Ollama API client
+│   │   ├── prompt-templates.ts    # System prompts and templates
+│   │   └── provider.ts             # LLM provider interface
+│   │
+│   ├── agent/
+│   │   ├── index.ts                # Agent module exports
+│   │   ├── intent-classifier.ts   # Intent classification logic
+│   │   ├── memory.ts               # Conversation memory (future)
+│   │   ├── orchestrator.ts        # Main message processing pipeline
+│   │   └── response-builder.ts    # Response formatting utilities
+│   │
+│   ├── tools/
+│   │   ├── index.ts                # Tool initialization
+│   │   ├── registry.ts             # Central tool registry
+│   │   ├── news-fetcher.ts        # RSS news aggregation
+│   │   ├── lineup-builder.ts      # Rundown generation
+│   │   ├── cg-spec-generator.ts   # Graphics specifications
+│   │   ├── shift-solver.ts        # Shift scheduling (placeholder)
+│   │   └── rights-board.ts        # Broadcast rights tracking
+│   │
+│   ├── schemas/
+│   │   ├── index.ts                # Schema exports
+│   │   ├── chat-response.ts       # Core chat response format
+│   │   ├── lineup-rundown.ts      # Lineup tool output schema
+│   │   ├── cg-spec.ts              # CG tool output schema
+│   │   ├── news-brief.ts           # News tool output schema
+│   │   ├── rss-schemas.ts          # RSS pipeline schemas (NEW)
+│   │   ├── rights-board.ts         # Rights tool output schema
+│   │   └── shift-schedule.ts       # Shift tool output schema
+│   │
+│   ├── rss/                         # RSS PIPELINE MODULE (NEW)
+│   │   ├── index.ts                # RSS module exports
+│   │   ├── rss-types.ts            # TypeScript types for RSS pipeline
+│   │   ├── rss-config.ts           # Pipeline config and feed sources
+│   │   ├── rss-client.ts           # Feed fetching and XML parsing
+│   │   ├── rss-dedup.ts            # Hash-based deduplication
+│   │   ├── rss-pipeline.ts         # Full pipeline orchestrator
+│   │   ├── rss-ranking.ts          # Article relevance scoring
+│   │   ├── rss-selection.ts        # Exact-count category selection
+│   │   └── rss-brief-generator.ts  # LLM-powered brief generation
+│   │
+│   ├── data/
+│   │   ├── index.ts                # Data layer exports
+│   │   ├── mongodb-adapter.ts     # MongoDB connection and queries
+│   │   ├── news-cache.ts           # News article caching (legacy)
+│   │   ├── rss-articles-store.ts  # RSS pipeline article storage (NEW)
+│   │   ├── trusted-sources-store.ts # Trusted sources management
+│   │   └── vector-store.ts         # Vector embeddings (future RAG)
+│   │
+│   ├── api/
+│   │   ├── index.ts                # API routes export
+│   │   ├── routes.ts               # Express route definitions
+│   │   ├── chat-handler.ts        # POST /ai/chat handler
+│   │   └── middleware.ts           # Request middleware
+│   │
+│   ├── crypto/
+│   │   ├── e2ee.ts                 # E2EE encryption/decryption
+│   │   └── keyManager.ts           # AI agent key management
+│   │
+│   ├── middleware/
+│   │   ├── index.ts                # Middleware exports
+│   │   ├── monitoring.ts           # Metrics and health checks
+│   │   ├── rate-limiter.ts         # Rate limiting logic
+│   │   └── error-recovery.ts       # Error handling middleware
+│   │
+│   ├── utils/
+│   │   ├── logger.ts               # Winston logger configuration
+│   │   └── validation.ts           # Input validation utilities
+│   │
+│   ├── scripts/
+│   │   ├── seed-ai-user.ts         # Create AI user in MongoDB
+│   │   └── verify-rss-feeds.ts     # RSS feed verification tool (NEW)
+│   │
+│   └── types/
+│       └── external.d.ts           # TypeScript type definitions
+│
+├── tests/
+│   ├── agent.test.ts               # Jest tests for agent
+│   └── rss.test.ts                 # Jest tests for RSS pipeline (NEW)
+│
+├── Dockerfile                       # Docker image definition
+├── package.json                     # Dependencies and scripts
+├── tsconfig.json                    # TypeScript configuration
+├── jest.config.js                   # Jest test configuration
+└── README.md                        # Service documentation
+
+KEY FILES BY FUNCTION:
+
+Entry Point:
+- src/index.ts: Starts Express server, initializes tools, sets up middleware
+
+Configuration:
+- src/config/index.ts: All environment variables and config
+- .env: Environment file (not in repo)
+
+Core Logic:
+- src/agent/orchestrator.ts: Main message processing pipeline
+- src/agent/intent-classifier.ts: Intent detection
+- src/agent/response-builder.ts: Response formatting
+
+LLM Integration:
+- src/llm/ollama-client.ts: Ollama API communication
+- src/llm/prompt-templates.ts: System prompts
+
+Tools:
+- src/tools/registry.ts: Tool registration system
+- src/tools/*.ts: Individual tool implementations
+
+API:
+- src/api/routes.ts: HTTP endpoint definitions
+- src/api/chat-handler.ts: Main chat endpoint
+
+Data:
+- src/data/mongodb-adapter.ts: Database queries
+- src/data/*-cache.ts: Caching layers
+- src/data/rss-articles-store.ts: RSS pipeline storage (NEW)
+
+RSS Pipeline:
+- src/rss/rss-pipeline.ts: Full orchestrator
+- src/rss/rss-config.ts: Feed sources and config
+- src/rss/rss-client.ts: Feed fetching
+- src/rss/rss-ranking.ts: Relevance scoring
+- src/rss/rss-selection.ts: Category selection
+- src/rss/rss-brief-generator.ts: LLM summaries
+- src/rss/rss-dedup.ts: Deduplication
+
+Security:
+- src/crypto/e2ee.ts: Encryption logic
+- src/crypto/keyManager.ts: Key storage
+
+Monitoring:
+- src/middleware/monitoring.ts: Metrics and health
+- src/utils/logger.ts: Logging infrastructure
+
+================================================================================
+END OF AI AGENT DOCUMENTATION
+================================================================================
+
+QUICK REFERENCE:
+
+Start Service:
+$ cd services/ai-agent && npm run dev
+
+Test Health:
+$ curl http://localhost:4001/health
+
+Send Message:
+$ curl -X POST http://localhost:4001/ai/chat \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"test","message":"שלום"}'
+
+Seed AI User:
+$ cd services/ai-agent && npm run seed:ai-user
+
+Verify RSS Feeds:
+$ cd services/ai-agent && npm run rss:verify
+
+Check Ollama:
+$ curl http://localhost:11434/api/tags
+
+Main Integration Point:
+services/api-gateway/src/socket/chat-socket.ts (line 76: sendToAIAgent)
+
+Feature Flag:
+ENABLE_E2EE_CHAT=true # Enable E2EE support
+
+Documentation:
+- Service README: services/ai-agent/README.md
+- Project Summary: docs/PROJECT_SUMMARY_DEVELOPERS.md
+- Security Design: Prompts/Security Prompt.txt
+
+Support:
+- Check logs: services/ai-agent logs
+- Metrics: http://localhost:4001/metrics
+- Status: http://localhost:4001/ai/status
+
+================================================================================
+21. RELIABILITY HARDENING - COMPLETE FUNCTION REFERENCE
+================================================================================
+
+NEW HELPER FUNCTIONS (All additive, no breaking changes):
+
+ORCHESTRATOR (orchestrator.ts):
+- isOperationalIntent(intent: string): boolean
+  → Returns true for cg/lineup/shifts/news/rights
+  
+- requiredEntitiesSatisfied(intent, entities, message): { satisfied, missing }
+  → Checks if operational intent has required data; scans message for hints
+  
+- buildMissingEntitiesClarification(intent, missing): string
+  → Returns short Hebrew clarification for missing entities
+
+INTENT CLASSIFIER (intent-classifier.ts):
+- detectLineupType(message): 'items' | 'structure' | undefined
+  → Detects whether user wants content items list or segment structure
+  
+- extractItemCount(message): number | undefined
+  → Extracts "12 פריטים" → 12
+  
+- extractCategoryCounts(message): Record<string, number> | undefined
+  → Extracts "5 כדורגל ישראלי, 3 ספורט אחר" → { "כדורגל ישראלי": 5, ... }
+
+LINEUP BUILDER (lineup-builder.ts):
+- generateItemsLineup(request & { totalItems, categoryCounts }): Promise<ItemsLineup>
+  → Fetches real articles from RSS, assigns to categories with relevance scoring
+  → Returns exactly N items with exact category distribution
+  → Real articles get source citations; unfilled slots = placeholders
+  
+- fetchAndAssignArticles(categoryRequests): Promise<Record<string, CachedArticle[]>>
+  → Global article pool → score per category → assign (no duplicates)
+  
+- scoreArticleForCategory(article, rules, category): number
+  → Scores article relevance: mustMatch, boostMatch, excludeMatch filters
+
+CG SPEC GENERATOR (cg-spec-generator.ts):
+- parseLiveCGMessage(message): LiveCGParseResult
+  → Deterministic regex extraction of teams/scores/times/names
+  → Returns: { parseSuccess, templateType, fields, missing, validationErrors }
+  → NEVER guesses; missing data explicitly listed
+  
+- isLiveCGRequest(message, mode): boolean
+  → Detects LIVE_CG mode from context or message prefix
+
+VALIDATION UTILS (validation.ts):
+- validateCGTextField(value, maxLen): { valid, error? }
+  → Validates against Viz broadcast constraints (length, control chars)
+  
+- normalizeRTL(text): string
+  → Strips bidi control chars, collapses whitespace, trims
+  
+- enforceStructuredOutput<T>(rawOutput, schema, repairFn): Promise<ValidationResult<T>>
+  → Zod validation + single repair attempt → explicit error if still invalid
+
+SHIFT SOLVER (shift-solver.ts):
+- extractShiftConstraints(message): ExtractedConstraints
+  → Extracts department, week, roles, hard constraints from natural language
+  → Returns: { department?, weekStartDate?, roles, hardConstraints, availabilityNotes, missingConstraints }
+  → NEVER produces a schedule (constraints only)
+
+SCHEMAS ADDED/EXTENDED:
+- LineupTypeSchema: 'items' | 'structure'
+- LineupItemSchema: Individual content item with isPlaceholder flag
+- ItemsLineupSchema: Complete items-based lineup output
+- LineupRequest extended with: lineupType?, totalItems?, categoryCounts?
+- LiveCGParseResult interface
+- ExtractedConstraints interface
+- MessageContext extended with optional metadata.mode and metadata.task
+
+CATEGORY MATCHING RULES:
+For items lineup, each category has:
+- mustMatch: required patterns (hard filter)
+- boostMatch: relevance boosters (soft ranking)
+- excludeMatch: rejection patterns (hard filter)
+- searchKeywords: terms for fetching candidate articles
+
+Examples:
+"כדורגל ישראלי" requires: Israeli team names OR Israeli league keywords
+AND excludes: Premier League, La Liga, Champions League
+Pre-filter: must be sports content (not politics/security)
+
+"ספורט ישראלי אחר" requires: (Israeli keywords) AND (sports keywords, not football)
+Excludes: politics keywords (כנסת, ממשלה, טילים, etc.)
+
+ANTI-HALLUCINATION ENFORCEMENT:
+1. System prompts updated with explicit rules (Hebrew + English)
+2. Operational hard gates prevent free chat
+3. Source-only policy for news/lineup items
+4. JSON repair loop with single attempt
+5. Explicit failure messages (no silent fallbacks)
+6. All placeholders clearly labeled
+
+TEST COVERAGE:
+44 tests total (all passing):
+- Original tests: 10
+- Operational hard gates: 6
+- Lineup type detection: 5
+- Items lineup generation: 5
+- LIVE CG deterministic parser: 5
+- CG field validators: 5
+- JSON repair loop: 3
+- Shift constraint extraction: 4
+
+================================================================================
+5. INTEGRATION WITH PLATFORM
+================================================================================
+
+================================================================================
+22. DOCUMENT METADATA & VERSION HISTORY
+================================================================================
+
+Document Version: 2.1
+Release: RSS Pipeline Integration (February 9, 2026)
+
+Version 1.0 (February 8, 2026):
+- Initial AI Agent documentation
+- Basic chat interface, tool system, E2EE support
+- Intent classification, tool registry, schemas
+- News fetcher, lineup builder (segments), CG generator, shifts, rights
+
+Version 2.0 (February 9, 2026) - RELIABILITY HARDENING:
+Major additions:
+✓ Operational hard gates - operational intents NEVER produce free chat
+✓ LIVE CG mode with deterministic parsing and Viz validation
+✓ Lineup items mode - fetches real articles from RSS with category matching
+✓ Anti-hallucination enforcement in system prompts + code gates
+✓ JSON repair loop with single retry attempt
+✓ Shift constraint extraction (LLM = extractor, not scheduler)
+✓ News truth boundary - no sources = explicit message, never invention
+✓ 11 new helper functions (all additive, no breaking changes)
+✓ 4 new schemas/types
+✓ 33 new tests (44 total, all passing)
+
+Version 2.1 (February 9, 2026) - RSS PIPELINE SYSTEM:
+Major additions:
+✓ Complete RSS pipeline module (src/rss/)
+  - 7-stage orchestrated workflow (fetch → dedup → store → rank → select → brief)
+  - 8 new modules: client, config, dedup, pipeline, ranking, selection, brief-generator, types
+✓ Dedicated MongoDB storage (rssArticles collection)
+  - TTL-based expiration (60 min default)
+  - 6 indexes for efficient querying
+  - Independent from legacy news-cache
+✓ Feed verification tool (npm run rss:verify)
+  - Domain allowlist validation
+  - Health checks (HTTP, XML, item count, date fields, latency)
+  - Manual feed activation workflow
+✓ RSS feed configuration system
+  - 13 pre-configured feeds (Israeli + International sports/news)
+  - Active/inactive status per feed
+  - Priority-based source ranking
+  - Language and category tagging
+✓ New dependency: fast-xml-parser (^4.5.3)
+  - Robust RSS 2.0, Atom, and RDF parsing
+  - CDATA handling, attribute extraction
+✓ Lineup builder integration
+  - Items mode now uses RSS pipeline
+  - Real article population with category matching
+  - LLM-generated briefs for selected articles
+✓ New schemas (rss-schemas.ts)
+  - ArticleCandidateSchema
+  - BriefSchema (LLM-generated summaries)
+  - RankedArticleSchema (relevance scoring)
+✓ New tests (tests/rss.test.ts)
+  - RSS parsing, deduplication, ranking, selection
+  - Pipeline orchestration
+  - Brief generation (mocked LLM)
+
+Breaking Changes: NONE
+Migration Required: NONE (all changes additive + backwards-compatible)
+
+Environment Variables Added:
+- RSS_PIPELINE_ENABLED (default: false)
+- RSS_DEBUG_RANKING (default: false)
+- RSS_CACHE_TTL_MINUTES (default: 60)
+- RSS_FETCH_TIMEOUT_MS (default: 10000)
+- RSS_TIME_WINDOW_HOURS (default: 24)
+
+Scripts Added:
+- npm run rss:verify: Verify RSS feeds before activation
+
+Collections Added:
+- rssArticles: Dedicated RSS pipeline storage (TTL-enabled)
+
+Test Results:
+- Test suites: 2 total (agent.test.ts, rss.test.ts)
+- RSS pipeline fully tested (parsing, ranking, selection, orchestration)
+- All tests passing
+
+Known Limitations (as of v2.1):
+- RSS_PIPELINE_ENABLED defaults to false (manual opt-in required)
+- Channel1/BBC Sport feeds marked inactive (URLs need verification)
+- Only 3 active feeds by default (one_sports, ynet_sports, espn_sports)
+- Brief generation depends on LLM availability (graceful fallback to rss_only)
+- Legacy news-cache.ts coexists with new rss-articles-store.ts
+
+Active RSS Feeds (as of v2.1):
+1. ONE (one_sports) - Israeli sports - https://www.one.co.il/cat/news/rss
+2. Ynet Sports (ynet_sports) - Israeli sports - https://www.ynet.co.il/Integration/StoryRss3.xml
+3. ESPN (espn_sports) - International sports - https://www.espn.com/espn/rss/news
+
+Inactive Feeds (need verification):
+- Channel1, BBC Sport, Sky Sports, Ynet News, Mako News
+
+Recommended Next Steps:
+1. Run npm run rss:verify to test all feeds
+2. Activate additional verified feeds in src/rss/rss-config.ts
+3. Set RSS_PIPELINE_ENABLED=true to enable pipeline
+4. Add more Israeli sports sources (Channel1 sections, Walla, etc.)
+5. Consider API-Football integration for fixture data
+6. Monitor rssArticles collection size and TTL effectiveness
+
+Performance Notes:
+- RSS pipeline adds 5-15s to lineup generation (items mode)
+- Caching reduces latency on subsequent requests
+- Concurrent feed fetching (5 at a time) for efficiency
+- Brief generation parallelizable (future optimization)
+
+Maintained By: Development Team
+Last Contributors: AI-assisted refactoring and RSS pipeline integration (Claude via Cursor)
+Document Status: Production-ready
+================================================================================
+END OF DOCUMENT
+================================================================================

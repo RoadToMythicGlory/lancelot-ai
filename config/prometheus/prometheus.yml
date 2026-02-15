@@ -1,0 +1,76 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'lancelot-production'
+    environment: 'production'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+rule_files:
+  - "alerts/*.yml"
+
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Node Exporter
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # API Gateway metrics
+  - job_name: 'api-gateway'
+    static_configs:
+      - targets: ['api-gateway:9091']
+    metrics_path: '/metrics'
+
+  # Routing Engine metrics
+  - job_name: 'routing-engine'
+    static_configs:
+      - targets: ['routing-engine:9092']
+    metrics_path: '/metrics'
+
+  # PostgreSQL Exporter
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+
+  # Redis Exporter
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+
+  # MongoDB Exporter
+  - job_name: 'mongodb'
+    static_configs:
+      - targets: ['mongodb-exporter:9216']
+
+  # OpenSearch Exporter
+  - job_name: 'opensearch'
+    static_configs:
+      - targets: ['opensearch:9200']
+    metrics_path: '/_prometheus/metrics'
+
+  # MinIO metrics
+  - job_name: 'minio'
+    bearer_token: 'YOUR_MINIO_TOKEN'
+    metrics_path: /minio/v2/metrics/cluster
+    scheme: http
+    static_configs:
+      - targets: ['minio:9000']
+
+  # Docker containers
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  # Traefik metrics
+  - job_name: 'traefik'
+    static_configs:
+      - targets: ['traefik:8082'] 

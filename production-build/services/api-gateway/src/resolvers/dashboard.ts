@@ -1,0 +1,653 @@
+import { Context } from '../types';
+import { ObjectId } from 'mongodb';
+import { connectMongoDB, connectMongoose } from '../config/mongodb';
+import { BroadcastEvent } from '../models/broadcast.models';
+
+// Define resolver types
+type ResolverFn = (parent: any, args: any, context: Context, info?: any) => any;
+type ResolverMap = {
+  Query?: Record<string, ResolverFn>;
+  Mutation?: Record<string, ResolverFn>;
+  Subscription?: Record<string, ResolverFn>;
+  [key: string]: any;
+};
+
+// Mock data for now - in production, these would come from the database
+const mockBulletinPosts = [
+  {
+    id: '1',
+    title: 'עדכון מערכת חדש',
+    content: 'המערכת תעודכן הלילה בשעה 02:00. צפויה השבתה של כ-30 דקות.',
+    isEmergency: false,
+    isPinned: true,
+    departmentId: 'IT',
+    departmentName: 'מחלקת IT',
+    author: {
+      id: '1',
+      displayName: 'מנהל המערכת',
+      email: 'admin@example.com'
+    },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    expiresAt: null,
+    viewCount: 45,
+    tags: ['מערכת', 'עדכון']
+  },
+  {
+    id: '2',
+    title: 'הודעת חירום - בעיה בשידור',
+    content: 'יש בעיה טכנית בערוץ 5 לייב. צוות טכני מטפל.',
+    isEmergency: true,
+    isPinned: false,
+    departmentId: 'MCR',
+    departmentName: 'מחלקת בקרה',
+    author: {
+      id: '2',
+      displayName: 'בקר ראשי',
+      email: 'mcr@example.com'
+    },
+    createdAt: new Date(Date.now() - 3600000).toISOString(),
+    updatedAt: new Date(Date.now() - 3600000).toISOString(),
+    expiresAt: null,
+    viewCount: 120,
+    tags: ['חירום', 'שידור']
+  }
+];
+
+export const dashboardResolvers = {
+  Query: {
+    // Today's broadcasts
+    todaysBroadcasts: async (_parent: any, _args: any, context: Context) => {
+      if (!context.userId) {
+        throw new Error('Unauthorized');
+      }
+
+      try {
+        // Connect with Mongoose to use the same models as broadcast planning
+        await connectMongoose();
+        
+        // Get today's date range
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+
+        // Find broadcasts for today using Mongoose model
+        const broadcasts = await BroadcastEvent.find({
+          startTime: {
+            $gte: today,
+            $lt: tomorrow
+          }
+        }).sort({ startTime: 1 }).exec();
+
+        console.log(`Found ${broadcasts.length} broadcasts for today`);
+
+        return broadcasts.map(broadcast => ({
+          id: broadcast._id.toString(),
+          eventNumber: broadcast.eventNumber,
+          title: broadcast.title || broadcast.hebrewTitle || '',
+          hebrewTitle: broadcast.hebrewTitle,
+          startTime: broadcast.startTime.toISOString(),
+          endTime: broadcast.endTime ? broadcast.endTime.toISOString() : null,
+          channel: broadcast.channel,
+          eventType: broadcast.eventType,
+          live: broadcast.live || false,
+          location: broadcast.location,
+          venue: broadcast.venue
+        }));
+      } catch (error) {
+        console.error('Error fetching today\'s broadcasts:', error);
+        return [];
+      }
+    },
+
+    // This week's shifts
+    weeklyShifts: async (_parent: any, { userId }: any, context: Context) => {
+      if (!context.userId) {
+        throw new Error('Unauthorized');
+      }
+
+      try {
+        const mongoDb = await connectMongoDB();
+        const shiftsCollection = mongoDb.collection('shifts');
+        const usersCollection = mongoDb.collection('users');
+        
+        const targetUserId = userId || context.userId;
+        
+        // Get current week's date range
+        const today = new Date();
+        const currentDay = today.getDay();
+        const weekStart = new Date(today);
+        weekStart.setDate(today.getDate() - currentDay);
+        weekStart.setHours(0, 0, 0, 0);
+        
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 7);
+
+        // Find shifts for the week
+        const shifts = await shiftsCollection.find({
+          userId: targetUserId,
+          date: {
+            $gte: weekStart,
+            $lt: weekEnd
+          },
+          status: { $ne: 'cancelled' }
+        }).sort({ date: 1, startTime: 1 }).toArray();
+        
+        // Filter out past shifts
+        const now = new Date();
+        const upcomingShifts = shifts.filter((shift: any) => {
+          const shiftDateTime = new Date(shift.date);
+          if (shift.startTime) {
+            const [hours, minutes] = shift.startTime.split(':');
+            shiftDateTime.setHours(parseInt(hours), parseInt(minutes));
+          }
+          return shiftDateTime > now;
+        });
+
+        // Get user info if needed
+        let userInfo = null;
+        if (targetUserId && upcomingShifts.length > 0) {
+          const user = await usersCollection.findOne({ _id: new ObjectId(targetUserId) });
+          userInfo = user ? {
+            id: user._id.toString(),
+            displayName: user.displayName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email
+          } : null;
+        }
+
+        return upcomingShifts.map((shift: any) => ({
+          id: shift._id.toString(),
+          date: shift.date.toISOString(),
+          startTime: shift.startTime || '09:00',
+          endTime: shift.endTime || '17:00',
+          shiftType: shift.shiftType || 'regular',
+          department: shift.department || 'General',
+          status: shift.status || 'scheduled',
+          user: userInfo || {
+            id: targetUserId,
+            displayName: 'User'
+          }
+        }));
+      } catch (error) {
+        console.error('Error fetching weekly shifts:', error);
+        return [];
+      }
+    },
+    // Bulletin board queries
+    bulletinPosts: async (_parent: any, { departmentId, limit = 10, onlyEmergency = false, onlyPinned = false }: any, context: Context) => {
+      if (!context.userId) {
+        throw new Error('Unauthorized');
+      }
+
+      try {
+        // In production, this would query MongoDB
+        let posts = [...mockBulletinPosts];
+
+        // Filter by department if specified
+        if (departmentId) {
+          posts = posts.filter(post => post.departmentId === departmentId);
+        }
+
+        // Filter by emergency status
+        if (onlyEmergency) {
+          posts = posts.filter(post => post.isEmergency);
+        }
+
+        // Filter by pinned status
+        if (onlyPinned) {
+          posts = posts.filter(post => post.isPinned);
+        }
+
+        // Sort by emergency first, then pinned, then by date
+        posts.sort((a, b) => {
+          if (a.isEmergency && !b.isEmergency) return -1;
+          if (!a.isEmergency && b.isEmergency) return 1;
+          if (a.isPinned && !b.isPinned) return -1;
+          if (!a.isPinned && b.isPinned) return 1;
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        });
+
+        // Limit results
+        return posts.slice(0, limit);
+      } catch (error) {
+        console.error('Error fetching bulletin posts:', error);
+        return [];
+      }
+    },
+
+    bulletinPost: async (_parent: any, { id }: any, context: Context) => {
+      if (!context.userId) {
+        throw new Error('Unauthorized');
+      }
+
+      return mockBulletinPosts.find(post => post.id === id) || null;
+    },
+
+    // Dashboard statistics queries
+    dashboardStats: async (_parent: any, _args: any, context: Context) => {
+      if (!context.userId) {
+        throw new Error('Unauthorized');
+      }
+
+      try {
+        // Connect with Mongoose for broadcasts
+        await connectMongoose();
+        
+        const mongoDb = await connectMongoDB();
+        const bulletinCollection = mongoDb.collection('bulletin_posts');
+        
+        // Get today's date range
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        
+        // Count today's broadcasts using Mongoose model
+        const todaysBroadcasts = await BroadcastEvent.countDocuments({
+          startTime: {
+            $gte: today,
+            $lt: tomorrow
+          }
+        });
+        
+        // Count upcoming broadcasts (next 7 days)
+        const nextWeek = new Date(today);
+        nextWeek.setDate(nextWeek.getDate() + 7);
+        const upcomingBroadcasts = await BroadcastEvent.countDocuments({
+          startTime: {
+            $gte: today,
+            $lt: nextWeek
+          }
+        });
+        
+        // Get user statistics from MongoDB
+        const usersCollection = mongoDb.collection('users');
+        const shiftsCollection = mongoDb.collection('shifts');
+        
+        // Count total users
+        const totalUsers = await usersCollection.countDocuments({ isDeleted: { $ne: true } });
+        
+        // Count active users (logged in within last 7 days)
+        const lastWeek = new Date();
+        lastWeek.setDate(lastWeek.getDate() - 7);
+        const activeUsers = await usersCollection.countDocuments({
+          isDeleted: { $ne: true },
+          lastLogin: { $gt: lastWeek }
+        });
+        
+        // Count unique departments
+        const departments = await usersCollection.distinct('department', { department: { $ne: null } });
+        const totalDepartments = departments.length;
+        
+        // Count active shifts today
+        const activeShifts = await shiftsCollection.countDocuments({
+          date: {
+            $gte: today,
+            $lt: tomorrow
+          },
+          status: { $ne: 'cancelled' }
+        });
+        
+        // Count critical alerts (emergency bulletins)
+        const criticalAlerts = await bulletinCollection.countDocuments({
+          isEmergency: true,
+          $or: [
+            { expiresAt: null },
+            { expiresAt: { $gt: new Date() } }
+          ]
+        });
+        
+        // Count open tickets (using mock data for now as tickets aren't implemented)
+        const openTickets = 0; // TODO: Implement when ticket system is ready
+        
+        return {
+          totalUsers,
+          activeUsers,
+          totalDepartments,
+          todaysBroadcasts,
+          upcomingBroadcasts,
+          activeShifts,
+          openTickets,
+          criticalAlerts
+        };
+      } catch (error) {
+        console.error('Error fetching dashboard stats:', error);
+        throw new Error('Failed to fetch dashboard statistics');
+      }
+    },
+
+    departmentStats: async (_parent: any, { departmentId }: any, context: Context) => {
+      if (!context.userId) {
+        throw new Error('Unauthorized');
+      }
+
+      try {
+        // Mock department statistics
+        const deptNames: Record<string, string> = {
+          'IT': 'מחלקת IT',
+          'News': 'חדשות',
+          'MCR': 'מחלקת בקרה',
+          'Playout': 'מחלקת שידור'
+        };
+
+        return {
+          departmentId,
+          departmentName: deptNames[departmentId] || departmentId,
+          totalEmployees: Math.floor(Math.random() * 20) + 5,
+          activeToday: Math.floor(Math.random() * 15) + 1,
+          onLeave: Math.floor(Math.random() * 3),
+          upcomingShifts: Math.floor(Math.random() * 10),
+          assignedEquipment: Math.floor(Math.random() * 30),
+          openTickets: Math.floor(Math.random() * 5)
+        };
+      } catch (error) {
+        console.error('Error fetching department stats:', error);
+        throw new Error('Failed to fetch department statistics');
+      }
+    },
+
+    myDepartmentStats: async (_parent: any, _args: any, context: Context) => {
+      if (!context.userId || !context.user?.department) {
+        throw new Error('Unauthorized or no department assigned');
+      }
+
+      // Delegate to departmentStats with user's department
+      return (dashboardResolvers as any).Query.departmentStats(
+        _parent,
+        { departmentId: context.user.department },
+        context
+      );
+    },
+
+    // Support ticket queries
+    supportTickets: async (_parent: any, { status, priority, assignedToMe, departmentId }: any, context: Context) => {
+      if (!context.userId) {
+        throw new Error('Unauthorized');
+      }
+
+      try {
+        // Mock support tickets
+        const tickets = [
+          {
+            id: '1',
+            title: 'בעיה בציוד צילום',
+            description: 'המצלמה בסטודיו 3 לא עובדת כראוי',
+            status: 'open',
+            priority: 'high',
+            category: 'ציוד',
+            departmentId: 'Cameramen',
+            departmentName: 'צלמים',
+            assignedTo: null,
+            createdBy: {
+              id: '3',
+              displayName: 'יוסי כהן',
+              email: 'yossi@example.com'
+            },
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            resolvedAt: null,
+            comments: []
+          },
+          {
+            id: '2',
+            title: 'בקשה לעדכון תוכנה',
+            description: 'נדרש עדכון לתוכנת העריכה',
+            status: 'in_progress',
+            priority: 'medium',
+            category: 'תוכנה',
+            departmentId: 'IT',
+            departmentName: 'מחלקת IT',
+            assignedTo: {
+              id: '1',
+              displayName: 'מנהל IT',
+              email: 'it@example.com'
+            },
+            createdBy: {
+              id: '4',
+              displayName: 'דני לוי',
+              email: 'dani@example.com'
+            },
+            createdAt: new Date(Date.now() - 86400000).toISOString(),
+            updatedAt: new Date(Date.now() - 3600000).toISOString(),
+            resolvedAt: null,
+            comments: []
+          }
+        ];
+
+        let filteredTickets = [...tickets];
+
+        // Apply filters
+        if (status) {
+          filteredTickets = filteredTickets.filter(t => t.status === status);
+        }
+        if (priority) {
+          filteredTickets = filteredTickets.filter(t => t.priority === priority);
+        }
+        if (assignedToMe) {
+          filteredTickets = filteredTickets.filter(t => t.assignedTo?.id === context.userId);
+        }
+        if (departmentId) {
+          filteredTickets = filteredTickets.filter(t => t.departmentId === departmentId);
+        }
+
+        return filteredTickets;
+      } catch (error) {
+        console.error('Error fetching support tickets:', error);
+        return [];
+      }
+    },
+
+    supportTicket: async (_parent: any, { id }: any, context: Context) => {
+      if (!context.userId) {
+        throw new Error('Unauthorized');
+      }
+
+      const tickets = await (dashboardResolvers as any).Query.supportTickets(_parent, {}, context);
+      return tickets.find((t: any) => t.id === id) || null;
+    },
+
+    myTickets: async (_parent: any, _args: any, context: Context) => {
+      if (!context.userId) {
+        throw new Error('Unauthorized');
+      }
+
+      const tickets = await (dashboardResolvers as any).Query.supportTickets(_parent, {}, context);
+      return tickets.filter((t: any) => t.createdBy.id === context.userId);
+    }
+  },
+
+  Mutation: {
+    // Bulletin board mutations
+    createBulletinPost: async (_parent: any, args: any, context: Context) => {
+      if (!context.userId) {
+        throw new Error('Unauthorized');
+      }
+
+      try {
+        const newPost = {
+          id: new ObjectId().toString(),
+          title: args.title,
+          content: args.content,
+          isEmergency: args.isEmergency || false,
+          isPinned: args.isPinned || false,
+          departmentId: args.departmentId || context.user?.department,
+          departmentName: args.departmentId || context.user?.department || 'כללי',
+          author: {
+            id: context.userId,
+            displayName: context.user?.displayName || 'Unknown User',
+            email: context.user?.email || ''
+          },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          expiresAt: args.expiresAt || null,
+          viewCount: 0,
+          tags: args.tags || []
+        };
+
+        // In production, save to MongoDB
+        mockBulletinPosts.unshift(newPost);
+        
+        return newPost;
+      } catch (error) {
+        console.error('Error creating bulletin post:', error);
+        throw new Error('Failed to create bulletin post');
+      }
+    },
+
+    updateBulletinPost: async (_parent: any, { id, ...updates }: any, context: Context) => {
+      if (!context.userId) {
+        throw new Error('Unauthorized');
+      }
+
+      const postIndex = mockBulletinPosts.findIndex(p => p.id === id);
+      if (postIndex === -1) {
+        throw new Error('Bulletin post not found');
+      }
+
+      const post = mockBulletinPosts[postIndex];
+      
+      // Check if user is author or admin
+      if (post.author.id !== context.userId && context.user?.systemRole !== 'SYSTEM_ADMIN') {
+        throw new Error('Not authorized to update this post');
+      }
+
+      // Update fields
+      Object.assign(post, updates, { updatedAt: new Date().toISOString() });
+      
+      return post;
+    },
+
+    deleteBulletinPost: async (_parent: any, { id }: any, context: Context) => {
+      if (!context.userId) {
+        throw new Error('Unauthorized');
+      }
+
+      const postIndex = mockBulletinPosts.findIndex(p => p.id === id);
+      if (postIndex === -1) {
+        throw new Error('Bulletin post not found');
+      }
+
+      const post = mockBulletinPosts[postIndex];
+      
+      // Check if user is author or admin
+      if (post.author.id !== context.userId && context.user?.systemRole !== 'SYSTEM_ADMIN') {
+        throw new Error('Not authorized to delete this post');
+      }
+
+      mockBulletinPosts.splice(postIndex, 1);
+      return true;
+    },
+
+    incrementBulletinViewCount: async (_parent: any, { id }: any, context: Context) => {
+      if (!context.userId) {
+        throw new Error('Unauthorized');
+      }
+
+      const post = mockBulletinPosts.find(p => p.id === id);
+      if (!post) {
+        throw new Error('Bulletin post not found');
+      }
+
+      post.viewCount += 1;
+      return post;
+    },
+
+    // Support ticket mutations
+    createSupportTicket: async (_parent: any, args: any, context: Context) => {
+      if (!context.userId) {
+        throw new Error('Unauthorized');
+      }
+
+      try {
+        const newTicket = {
+          id: new ObjectId().toString(),
+          title: args.title,
+          description: args.description,
+          status: 'open',
+          priority: args.priority,
+          category: args.category,
+          departmentId: args.departmentId || context.user?.department,
+          departmentName: args.departmentId || context.user?.department || 'כללי',
+          assignedTo: null,
+          createdBy: {
+            id: context.userId,
+            displayName: context.user?.displayName || 'Unknown User',
+            email: context.user?.email || ''
+          },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          resolvedAt: null,
+          comments: []
+        };
+
+        // In production, save to MongoDB
+        return newTicket;
+      } catch (error) {
+        console.error('Error creating support ticket:', error);
+        throw new Error('Failed to create support ticket');
+      }
+    },
+
+    updateSupportTicket: async (_parent: any, { id, ...updates }: any, context: Context) => {
+      if (!context.userId) {
+        throw new Error('Unauthorized');
+      }
+
+      // In production, this would update in the database
+      // For now, return a mock updated ticket
+      return {
+        id,
+        ...updates,
+        updatedAt: new Date().toISOString()
+      };
+    },
+
+    addTicketComment: async (_parent: any, { ticketId, content, isInternal }: any, context: Context) => {
+      if (!context.userId) {
+        throw new Error('Unauthorized');
+      }
+
+      const comment = {
+        id: new ObjectId().toString(),
+        ticketId,
+        content,
+        author: {
+          id: context.userId,
+          displayName: context.user?.displayName || 'Unknown User',
+          email: context.user?.email || ''
+        },
+        createdAt: new Date().toISOString(),
+        isInternal: isInternal || false
+      };
+
+      return comment;
+    },
+
+    resolveTicket: async (_parent: any, { id, resolution }: any, context: Context) => {
+      if (!context.userId) {
+        throw new Error('Unauthorized');
+      }
+
+      // In production, update the ticket in the database
+      return {
+        id,
+        status: 'resolved',
+        resolvedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+    },
+
+    closeTicket: async (_parent: any, { id }: any, context: Context) => {
+      if (!context.userId) {
+        throw new Error('Unauthorized');
+      }
+
+      // In production, update the ticket in the database
+      return {
+        id,
+        status: 'closed',
+        updatedAt: new Date().toISOString()
+      };
+    }
+  }
+};

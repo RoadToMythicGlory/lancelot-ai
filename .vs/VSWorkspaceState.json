@@ -1,0 +1,16 @@
+{
+  "ExpandedNodes": [
+    "",
+    "\\apps",
+    "\\apps\\web",
+    "\\apps\\web\\src",
+    "\\apps\\web\\src\\app",
+    "\\apps\\web\\src\\app\\broadcast-array",
+    "\\apps\\web\\src\\app\\dashboard",
+    "\\apps\\web\\src\\app\\employees",
+    "\\apps\\web\\src\\app\\login",
+    "\\apps\\web\\src\\app\\mcr"
+  ],
+  "SelectedNode": "\\apps\\web\\src\\app\\broadcast-array\\page.tsx",
+  "PreviewInSolutionExplorer": false
+}

@@ -1,0 +1,252 @@
+# Prompt for Building Lancelot ERP Landing Page
+
+## Overview
+Create a modern, professional landing page for Lancelot ERP - a comprehensive broadcast management solution for TV channels, YouTube channels, Twitch streamers, and any professional broadcasting operation.
+
+## Goal
+Build a sleek tech company landing page that showcases Lancelot as a flexible, scalable ERP solution for the broadcasting industry. The site should feel like a modern SaaS product presentation.
+
+## Target Audience
+- TV Channel Executives
+- YouTube Channel Managers
+- Twitch Stream Operations
+- Broadcasting IT Directors
+- Media Production Companies
+- Content Creation Studios
+- Any professional broadcasting operation
+
+## Technical Requirements
+
+### Technologies
+- Pure HTML/CSS/JavaScript (No Next.js server needed)
+- OR React with Create React App / Vite (client-side only)
+- Tailwind CSS for styling
+- GSAP for smooth animations
+- Vanilla JavaScript or React for interactivity
+- Fully responsive design
+- Single Page Application (SPA)
+
+### Language
+- English only
+- Professional tech industry copy
+- Clean, modern design language
+
+## Website Structure
+
+### 1. Hero Section
+- Main headline: "Lancelot ERP - The Complete Broadcasting Management Solution"
+- Subheadline: "Streamline your entire broadcast operation from planning to execution"
+- Call-to-action buttons:
+  - "Get a Demo"
+  - "Watch Video"
+- Modern animated dashboard preview
+- Clean, minimal navigation bar
+
+### 2. Problem Statement Section
+- "Broadcasting is Complex. Management Shouldn't Be."
+- Pain points:
+  - Juggling multiple spreadsheets
+  - Coordinating teams across departments
+  - Equipment tracking nightmares
+  - Last-minute schedule changes
+  - Manual processes eating up time
+
+### 3. Core Features (Icon Grid)
+Present the main capabilities without being too specific:
+
+#### Broadcast Planning
+- Visual schedule management
+- Drag-and-drop interface
+- Conflict detection
+- Multi-channel support
+- Import from any source
+
+#### Team Management
+- Shift scheduling
+- Role assignments
+- Availability tracking
+- Performance analytics
+- Mobile access
+
+#### Equipment & Resources
+- Real-time inventory
+- Check-in/check-out system
+- Maintenance tracking
+- Vendor management
+- Cost optimization
+
+#### Live Operations
+- Real-time dashboards
+- Status monitoring
+- Alert system
+- Communication hub
+- Quick actions
+
+#### Analytics & Reporting
+- Custom reports
+- Data visualization
+- Performance metrics
+- Trend analysis
+- Export capabilities
+
+#### Integration Hub
+- API connections
+- Third-party tools
+- Custom workflows
+- Data synchronization
+- Automation rules
+
+### 4. Why Lancelot? (Benefits Section)
+- **Save 10+ Hours Weekly**: Automate repetitive tasks
+- **Zero Double-Bookings**: Smart conflict detection
+- **100% Visibility**: Real-time status for everyone
+- **Scale Effortlessly**: From 10 to 10,000 broadcasts
+- **Work From Anywhere**: Cloud-based solution
+
+### 5. How It Works (3-Step Process)
+1. **Import Your Data**: Connect existing tools or import spreadsheets
+2. **Configure Your Workflow**: Set up your departments and processes
+3. **Start Broadcasting Smarter**: See results from day one
+
+### 6. Built for Modern Broadcasting
+Show compatibility with:
+- Traditional TV Channels
+- YouTube Operations
+- Twitch Streaming
+- Podcast Networks
+- Live Event Production
+- Multi-platform Broadcasting
+
+### 7. Customer Success Stories
+- Generic testimonials without specific company names:
+  - "Reduced scheduling conflicts by 95%"
+  - "Cut equipment management time in half"
+  - "Scaled from 50 to 500 broadcasts monthly"
+- Include avatars and titles like "Head of Operations, Major Sports Network"
+
+### 8. Pricing Section
+- "Flexible Plans for Every Operation"
+- Three tiers:
+  - **Starter**: For growing channels
+  - **Professional**: For established broadcasters
+  - **Enterprise**: For networks and multi-channel operations
+- "Contact us for custom pricing"
+
+### 9. Call to Action
+- "Ready to Transform Your Broadcasting Operation?"
+- Large "Get Started" button
+- "Schedule a personalized demo"
+- "No credit card required"
+
+### 10. Footer
+- Product links
+- Resources (Blog, Help Center, API Docs)
+- Company (About, Careers, Contact)
+- Legal (Privacy, Terms)
+- Social media icons
+
+## Design & UX Guidelines
+
+### Color Palette
+- Primary: Deep Blue (#0066CC) - Trust and professionalism
+- Secondary: Vibrant Purple (#6B46C1) - Innovation and creativity
+- Accent: Bright Green (#10B981) - Success and growth
+- Neutrals: Grays (#F3F4F6 to #111827)
+- Background: Off-white (#FAFAFA)
+
+### Typography
+- Headlines: Inter or Poppins (modern, clean)
+- Body text: Inter or System fonts
+- Monospace: Source Code Pro (for technical elements)
+
+### Visual Style
+- **Modern & Clean**: Lots of whitespace, minimal design
+- **Glass-morphism**: Subtle glass effects on cards
+- **Gradients**: Smooth gradients for backgrounds
+- **Shadows**: Soft shadows for depth
+- **Icons**: Line icons, consistent style
+- **Illustrations**: Abstract, geometric patterns
+
+### Animations (GSAP)
+- **Hero Section**: Floating dashboard elements
+- **Scroll Triggers**: Fade in content on scroll
+- **Hover Effects**: Smooth scale and color transitions
+- **Loading States**: Skeleton screens
+- **Micro-interactions**: Button clicks, form inputs
+- **Parallax**: Subtle background movements
+
+### Component Examples
+
+#### Navigation
+- Sticky header with blur backdrop
+- Smooth scroll to sections
+- Mobile hamburger menu with slide animation
+
+#### Cards
+- Hover lift effect
+- Gradient borders
+- Icon animations on hover
+
+#### Buttons
+- Primary: Solid background with hover glow
+- Secondary: Outline with fill on hover
+- CTA: Animated gradient background
+
+## Content Examples
+
+### Hero Section
+```
+Headline: "Broadcast Management Made Simple"
+Subheadline: "The all-in-one ERP solution for modern broadcasting operations"
+CTA: "See It In Action" | "Start Free Trial"
+```
+
+### Feature Headlines
+- "Plan Like a Pro" (Broadcast Planning)
+- "Team Up Efficiently" (Team Management)
+- "Track Everything" (Equipment & Resources)
+- "Go Live Confidently" (Live Operations)
+- "Insights That Matter" (Analytics)
+- "Connect Everything" (Integrations)
+
+### Social Proof
+```
+"Finally, a system that understands broadcasting. Lancelot transformed 
+how we manage our 24/7 operation." 
+- Operations Director, Leading News Network
+```
+
+## Technical Implementation Notes
+
+1. **Performance First**
+   - Lazy load images
+   - Optimize animations for 60fps
+   - Minimal JavaScript bundle
+   - CDN for assets
+
+2. **Responsive Design**
+   - Mobile-first approach
+   - Breakpoints: 640px, 768px, 1024px, 1280px
+   - Touch-friendly interactions
+
+3. **Accessibility**
+   - Keyboard navigation
+   - Screen reader support
+   - High contrast mode
+   - Focus indicators
+
+4. **SEO Optimization**
+   - Semantic HTML
+   - Meta tags
+   - Schema markup
+   - Fast loading times
+
+## Key Messages to Convey
+
+- **Flexibility**: Works for any broadcasting operation
+- **Simplicity**: Complex operations made simple
+- **Reliability**: Trusted by professionals
+- **Innovation**: Modern tech for modern broadcasting
+- **Support**: We're here to help you succeed
+
+Remember: This is a tech product landing page. Think Stripe, Linear, or Notion - clean, professional, and focused on demonstrating value quickly.

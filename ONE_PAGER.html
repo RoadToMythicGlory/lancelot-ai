@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lancelot Platform — One Pager</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+    :root {
+      --primary: #1e3a8a;
+      --secondary: #3b82f6;
+      --accent: #0ea5e9;
+      --background: #f8fafc;
+      --surface: #ffffff;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --muted: #64748b;
+      --success: #22c55e;
+      --warning: #f59e0b;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--background);
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    /* ── Hero ────────────────────────────────────────────────── */
+    .hero {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 60%, var(--accent) 100%);
+      color: #fff;
+      padding: 3rem 2rem 2.5rem;
+      text-align: center;
+    }
+    .hero img { height: 64px; margin-bottom: 1rem; filter: brightness(0) invert(1); }
+    .hero h1 { font-size: 2.6rem; font-weight: 700; letter-spacing: .5px; margin-bottom: .35rem; }
+    .hero .tagline { font-size: 1.15rem; font-weight: 300; opacity: .92; max-width: 680px; margin: 0 auto 1.5rem; }
+    .hero .pills { display: flex; flex-wrap: wrap; justify-content: center; gap: .5rem; }
+    .hero .pill {
+      background: rgba(255,255,255,.18);
+      border: 1px solid rgba(255,255,255,.30);
+      border-radius: 999px;
+      padding: .3rem .9rem;
+      font-size: .82rem;
+      font-weight: 500;
+      backdrop-filter: blur(4px);
+    }
+
+    /* ── Container ───────────────────────────────────────────── */
+    .container { max-width: 1060px; margin: 0 auto; padding: 0 1.25rem 3rem; }
+
+    /* ── Section ─────────────────────────────────────────────── */
+    section { margin-top: 2.5rem; }
+    section h2 {
+      font-size: 1.35rem;
+      font-weight: 600;
+      color: var(--primary);
+      border-bottom: 2px solid var(--border);
+      padding-bottom: .4rem;
+      margin-bottom: 1rem;
+    }
+    section p, section li { font-size: .95rem; color: var(--text); }
+    section ul { padding-left: 1.25rem; }
+    section li { margin-bottom: .35rem; }
+
+    /* ── Cards grid ──────────────────────────────────────────── */
+    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 1rem; }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.1rem 1.2rem;
+      transition: box-shadow .2s;
+    }
+    .card:hover { box-shadow: 0 4px 14px rgba(0,0,0,.07); }
+    .card h3 { font-size: 1rem; font-weight: 600; margin-bottom: .3rem; color: var(--primary); }
+    .card p { font-size: .85rem; color: var(--muted); }
+
+    /* ── Architecture SVG ────────────────────────────────────── */
+    .arch-wrapper {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.5rem;
+      overflow-x: auto;
+      text-align: center;
+    }
+    .arch-wrapper svg { max-width: 100%; height: auto; }
+
+    /* ── Table (ports) ───────────────────────────────────────── */
+    table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-top: .75rem; }
+    thead { background: var(--primary); color: #fff; }
+    th, td { padding: .6rem 1rem; text-align: left; font-size: .9rem; }
+    tbody tr:nth-child(even) { background: var(--background); }
+    tbody tr:hover { background: #eef2ff; }
+
+    /* ── Code block ──────────────────────────────────────────── */
+    pre {
+      background: #1e293b;
+      color: #e2e8f0;
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      font-size: .85rem;
+      line-height: 1.55;
+      margin-top: .75rem;
+    }
+    pre .comment { color: #94a3b8; }
+
+    /* ── Two-col layout ──────────────────────────────────────── */
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+    @media (max-width: 700px) { .two-col { grid-template-columns: 1fr; } }
+
+    /* ── Footer ──────────────────────────────────────────────── */
+    footer {
+      text-align: center;
+      font-size: .8rem;
+      color: var(--muted);
+      padding: 1.5rem 1rem;
+      border-top: 1px solid var(--border);
+    }
+
+    /* ── Print ───────────────────────────────────────────────── */
+    @media print {
+      body { background: #fff; }
+      .hero { padding: 1.5rem 1rem; }
+      .hero h1 { font-size: 1.8rem; }
+      section { break-inside: avoid; }
+      .card:hover { box-shadow: none; }
+      pre { background: #f1f5f9; color: #0f172a; border: 1px solid #cbd5e1; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════ HERO ═══════════════════ -->
+<div class="hero">
+  <img src="images/lancelot small logo.png" alt="Lancelot Logo" />
+  <h1>Lancelot Platform</h1>
+  <p class="tagline">Enterprise-grade broadcast operations ERP for real-time planning, departmental coordination, and on-prem AI assistance.</p>
+  <div class="pills">
+    <span class="pill">Broadcast Planning</span>
+    <span class="pill">MCR Control</span>
+    <span class="pill">Shift Scheduling</span>
+    <span class="pill">Warehouse &amp; Equipment</span>
+    <span class="pill">Graphics / Vizrt</span>
+    <span class="pill">Real-time Chat</span>
+    <span class="pill">On-Prem AI Agent</span>
+    <span class="pill">Excel Import</span>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- ═══════════════════ WHO IT'S FOR ═══════════════════ -->
+<section>
+  <h2>Who It's For</h2>
+  <div class="two-col">
+    <div>
+      <ul>
+        <li><strong>MCR / NOC Operators</strong> — accurate, real-time schedules &amp; bulletin boards</li>
+        <li><strong>Broadcast Planners</strong> — drag-and-drop planning with conflict detection</li>
+      </ul>
+    </div>
+    <div>
+      <ul>
+        <li><strong>Operations Managers</strong> — shift management, vacation requests, equipment tracking</li>
+        <li><strong>Broadcast Engineers</strong> — Vizrt integration, system configuration &amp; troubleshooting</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ THE PROBLEM / SOLUTION ═══════════════════ -->
+<section>
+  <h2>What It Solves</h2>
+  <ul>
+    <li><strong>Centralized planning</strong> — replaces fragmented spreadsheets and manual scheduling with a single source of truth.</li>
+    <li><strong>Deterministic scheduling</strong> — conflict / overlap detection on every event creation and Excel import.</li>
+    <li><strong>Real-time coordination</strong> — GraphQL subscriptions push updates instantly to every operator's screen.</li>
+    <li><strong>Secure integrations</strong> — backend-owned Vizrt and graphics control; no direct client access to production systems.</li>
+    <li><strong>Offline-first AI</strong> — on-prem LLM agent (Ollama) for lineup building, CG specs, shift solving, and news briefs — no cloud LLM APIs.</li>
+  </ul>
+</section>
+
+<!-- ═══════════════════ KEY MODULES ═══════════════════ -->
+<section>
+  <h2>Key Modules</h2>
+  <div class="cards">
+    <div class="card">
+      <h3>Broadcast Planning</h3>
+      <p>Event management, flight boards, rundowns, overlap detection, batch import from Excel.</p>
+    </div>
+    <div class="card">
+      <h3>MCR Control</h3>
+      <p>Calendar views, bulletin posts, activity rows, and real-time control widgets for master control rooms.</p>
+    </div>
+    <div class="card">
+      <h3>Shift Management</h3>
+      <p>Availability constraints, shift swaps, vacation requests, admin dashboard, and OR-Tools constraint solver.</p>
+    </div>
+    <div class="card">
+      <h3>Warehouse &amp; Equipment</h3>
+      <p>Equipment lifecycle tracking, barcode support, assignments, transfers, returns, and vendor management.</p>
+    </div>
+    <div class="card">
+      <h3>Graphics / Vizrt</h3>
+      <p>Template management, CG control panel, and structured graphics spec generation (backend-only execution).</p>
+    </div>
+    <div class="card">
+      <h3>Real-time Chat</h3>
+      <p>Private conversations via Socket.IO with optional end-to-end encryption (E2EE), feature-flagged per environment.</p>
+    </div>
+    <div class="card">
+      <h3>AI Agent</h3>
+      <p>On-prem LLM assistant: news briefs, lineup builder, CG assistant, shift solver, broadcast rights board.</p>
+    </div>
+    <div class="card">
+      <h3>Excel Import</h3>
+      <p>Upload .xlsx schedules, preview parsed events, then bulk-import with per-event overlap checking.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ ARCHITECTURE ═══════════════════ -->
+<section>
+  <h2>Architecture Overview</h2>
+  <div class="arch-wrapper">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 420" width="880" height="420" font-family="Inter, sans-serif">
+      <!-- Background grid -->
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <path d="M0,0 L8,3 L0,6" fill="#64748b"/>
+        </marker>
+        <marker id="arrowBlue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <path d="M0,0 L8,3 L0,6" fill="#3b82f6"/>
+        </marker>
+      </defs>
+
+      <!-- Browser -->
+      <rect x="340" y="10" width="200" height="44" rx="8" fill="#1e3a8a" />
+      <text x="440" y="38" text-anchor="middle" fill="#fff" font-size="14" font-weight="600">User Browser</text>
+
+      <!-- Web UI -->
+      <rect x="330" y="80" width="220" height="48" rx="8" fill="#3b82f6" />
+      <text x="440" y="100" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">Next.js Web UI</text>
+      <text x="440" y="118" text-anchor="middle" fill="#dbeafe" font-size="10">apps/web · :3000</text>
+
+      <!-- Arrow Browser → Web UI -->
+      <line x1="440" y1="54" x2="440" y2="80" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <!-- API Gateway -->
+      <rect x="130" y="185" width="240" height="52" rx="8" fill="#1e3a8a" />
+      <text x="250" y="207" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">API Gateway (GraphQL + Socket.IO)</text>
+      <text x="250" y="225" text-anchor="middle" fill="#93c5fd" font-size="10">services/api-gateway · :4000</text>
+
+      <!-- Arrow Web UI → API Gateway -->
+      <line x1="400" y1="128" x2="300" y2="185" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <text x="330" y="155" fill="#64748b" font-size="9">GraphQL HTTP + WS</text>
+
+      <!-- MongoDB -->
+      <rect x="155" y="295" width="190" height="44" rx="8" fill="#0f172a" />
+      <text x="250" y="322" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">MongoDB · :27017</text>
+
+      <!-- Arrow API GW → MongoDB -->
+      <line x1="250" y1="237" x2="250" y2="295" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <!-- Excel Parser -->
+      <rect x="510" y="185" width="200" height="48" rx="8" fill="#0ea5e9" />
+      <text x="610" y="205" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">Excel Parser</text>
+      <text x="610" y="222" text-anchor="middle" fill="#e0f2fe" font-size="10">services/excel-parser · :3002</text>
+
+      <!-- Arrow Web UI → Excel Parser -->
+      <line x1="490" y1="128" x2="580" y2="185" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <text x="555" y="152" fill="#64748b" font-size="9">POST .xlsx</text>
+
+      <!-- Arrow Excel Parser → API GW -->
+      <line x1="510" y1="215" x2="370" y2="215" stroke="#94a3b8" stroke-width="1" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+      <text x="440" y="210" fill="#94a3b8" font-size="8" text-anchor="middle">parsed JSON via GraphQL</text>
+
+      <!-- AI Agent -->
+      <rect x="530" y="295" width="200" height="48" rx="8" fill="#7c3aed" />
+      <text x="630" y="315" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">AI Agent</text>
+      <text x="630" y="332" text-anchor="middle" fill="#ede9fe" font-size="10">services/ai-agent · :4001</text>
+
+      <!-- Arrow API GW → AI Agent -->
+      <line x1="370" y1="230" x2="530" y2="305" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <text x="430" y="275" fill="#7c3aed" font-size="9">POST /ai/chat</text>
+
+      <!-- Ollama -->
+      <rect x="570" y="375" width="140" height="38" rx="8" fill="#4c1d95" />
+      <text x="640" y="399" text-anchor="middle" fill="#fff" font-size="12" font-weight="600">Ollama · :11434</text>
+
+      <!-- Arrow AI Agent → Ollama -->
+      <line x1="630" y1="343" x2="640" y2="375" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <!-- AI Agent → MongoDB -->
+      <line x1="530" y1="325" x2="345" y2="317" stroke="#94a3b8" stroke-width="1" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+
+      <!-- OR-Tools Solver -->
+      <rect x="760" y="295" width="110" height="48" rx="8" fill="#4338ca" />
+      <text x="815" y="315" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">OR-Tools</text>
+      <text x="815" y="332" text-anchor="middle" fill="#c7d2fe" font-size="10">:5003</text>
+
+      <!-- Arrow AI Agent → OR-Tools -->
+      <line x1="730" y1="319" x2="760" y2="319" stroke="#4338ca" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <!-- Subscriptions label -->
+      <rect x="15" y="118" width="160" height="36" rx="6" fill="#f0fdf4" stroke="#22c55e" stroke-width="1" />
+      <text x="95" y="141" text-anchor="middle" fill="#15803d" font-size="11" font-weight="500">graphql-ws subscriptions</text>
+      <line x1="175" y1="136" x2="330" y2="108" stroke="#22c55e" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+    </svg>
+  </div>
+</section>
+
+<!-- ═══════════════════ TECH STACK ═══════════════════ -->
+<section>
+  <h2>Tech Stack</h2>
+  <div class="two-col">
+    <div>
+      <p><strong>Frontend:</strong> Next.js 15, React 18, TypeScript, Apollo Client, graphql-ws, Socket.IO Client, Ant Design + Tailwind</p>
+      <p style="margin-top:.5rem"><strong>Backend:</strong> Node.js + Express, Apollo Server (GraphQL), graphql-ws subscriptions, Socket.IO chat server</p>
+    </div>
+    <div>
+      <p><strong>Data:</strong> MongoDB 7 (sole runtime datastore for all collections)</p>
+      <p style="margin-top:.5rem"><strong>AI / LLM:</strong> Ollama local inference (GGUF models), optional llama.cpp, Zod schema validation, OR-Tools constraint solver</p>
+      <p style="margin-top:.5rem"><strong>Infra:</strong> Docker Compose, optional Redis (rate limiting), Turbo monorepo</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ SECURITY ═══════════════════ -->
+<section>
+  <h2>Security &amp; Privacy</h2>
+  <ul>
+    <li><strong>JWT authentication</strong> — login mutation issues a signed token; every request is verified via context builder.</li>
+    <li><strong>bcrypt password hashing</strong> — salted hashes; no plaintext storage.</li>
+    <li><strong>CORS allowlist</strong> — configurable origin restrictions.</li>
+    <li><strong>Rate limiting</strong> — production-ready, with optional Redis backend.</li>
+    <li><strong>End-to-end encryption (E2EE)</strong> — chat encryption enabled by default in non-prod; progressive rollout in production via <code>ENABLE_E2EE_CHAT</code> flag. AI agent participates via crypto keys.</li>
+    <li><strong>On-prem / offline-first AI</strong> — all LLM inference runs locally via Ollama. <em>No data leaves the network; no cloud LLM APIs.</em></li>
+  </ul>
+</section>
+
+<!-- ═══════════════════ DEPLOYMENT ═══════════════════ -->
+<section>
+  <h2>Deployment</h2>
+  <div class="two-col">
+    <div>
+      <h3 style="font-size:1rem;margin-bottom:.5rem;">Docker Compose (recommended)</h3>
+      <pre><span class="comment"># Start the full stack</span>
+docker-compose up -d
+
+<span class="comment"># Services available at:</span>
+<span class="comment"># Web UI        → http://localhost:3000</span>
+<span class="comment"># GraphQL API   → http://localhost:4000/graphql</span>
+<span class="comment"># Excel Parser  → http://localhost:3002</span>
+<span class="comment"># AI Agent      → http://localhost:4001</span>
+<span class="comment"># OR-Tools      → http://localhost:5003</span>
+<span class="comment"># MongoDB       → localhost:27017</span></pre>
+    </div>
+    <div>
+      <h3 style="font-size:1rem;margin-bottom:.5rem;">Service Ports</h3>
+      <table>
+        <thead><tr><th>Service</th><th>Port</th></tr></thead>
+        <tbody>
+          <tr><td>Web UI (Next.js)</td><td>3000</td></tr>
+          <tr><td>API Gateway (GraphQL + Socket.IO)</td><td>4000</td></tr>
+          <tr><td>Excel Parser</td><td>3002</td></tr>
+          <tr><td>AI Agent</td><td>4001</td></tr>
+          <tr><td>OR-Tools Solver</td><td>5003</td></tr>
+          <tr><td>MongoDB</td><td>27017</td></tr>
+          <tr><td>Ollama (host)</td><td>11434</td></tr>
+        </tbody>
+      </table>
+      <p style="margin-top:.75rem;font-size:.85rem;color:var(--muted);">
+        See also: <em>ALMALINUX_VPS_DEPLOYMENT_GUIDE.md</em> and <em>CPANEL_DEPLOYMENT_GUIDE.md</em> for production VPS instructions.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ DEVELOPER QUICKSTART ═══════════════════ -->
+<section>
+  <h2>Developer Quickstart</h2>
+  <pre><span class="comment"># Prerequisites: Node.js 18+, MongoDB, Ollama running on localhost:11434</span>
+
+<span class="comment"># Install &amp; start Web UI + API Gateway (Windows)</span>
+npm install
+npm run dev:windows
+
+<span class="comment"># In separate terminals:</span>
+cd services/excel-parser &amp;&amp; npm install &amp;&amp; npm run dev   <span class="comment"># Excel Parser</span>
+cd services/ai-agent    &amp;&amp; npm install &amp;&amp; npm run dev   <span class="comment"># AI Agent</span>
+cd services/ai-agent    &amp;&amp; npm run seed:ai-user          <span class="comment"># Seed AI user in MongoDB</span></pre>
+  <p style="margin-top:.75rem;font-size:.88rem;">
+    <strong>Environment files:</strong>
+    <code>apps/web/.env.local</code> · 
+    <code>services/api-gateway/.env</code> · 
+    <code>services/excel-parser/.env</code> · 
+    <code>services/ai-agent/.env</code>
+  </p>
+</section>
+
+<!-- ═══════════════════ KEY ENTRY POINTS ═══════════════════ -->
+<section>
+  <h2>Key Files &amp; Entry Points</h2>
+  <div class="two-col">
+    <div>
+      <p><strong>Frontend</strong></p>
+      <ul>
+        <li><code>apps/web/src/app/client-providers.tsx</code></li>
+        <li><code>apps/web/src/lib/apollo-client.ts</code></li>
+        <li><code>apps/web/src/contexts/WebSocketContext.tsx</code></li>
+      </ul>
+      <p style="margin-top:.6rem"><strong>API Gateway</strong></p>
+      <ul>
+        <li><code>services/api-gateway/src/index.ts</code></li>
+        <li><code>services/api-gateway/src/schema/schema.graphql</code></li>
+        <li><code>services/api-gateway/src/socket/chat-socket.ts</code></li>
+        <li><code>services/api-gateway/src/middleware/context.ts</code></li>
+      </ul>
+    </div>
+    <div>
+      <p><strong>AI Agent</strong></p>
+      <ul>
+        <li><code>services/ai-agent/src/index.ts</code></li>
+        <li><code>services/ai-agent/src/api/chat-handler.ts</code></li>
+        <li><code>services/ai-agent/src/agent/orchestrator.ts</code></li>
+        <li><code>services/ai-agent/src/tools/index.ts</code></li>
+      </ul>
+      <p style="margin-top:.6rem"><strong>Excel Parser</strong></p>
+      <ul>
+        <li><code>services/excel-parser/src/broadcast-schedule-parser.ts</code></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ STATUS ═══════════════════ -->
+<section>
+  <h2>Current Status</h2>
+  <p>
+    <strong>Feature Complete</strong> — Core Platform, MCR, Vizrt, AI Agent, Excel Import.
+    Validation run recorded on <strong>Feb 10, 2026</strong>.
+    See <code>docs/SYSTEM_IMPACT_LEDGER.md</code> for the full flow-by-flow verification matrix.
+    A <strong>change-freeze / flow-declaration rule</strong> is in effect: every change must declare affected flows and verification performed.
+  </p>
+</section>
+
+</div><!-- /.container -->
+
+<footer>
+  &copy; 2026 Lancelot Platform &middot; Proprietary &middot; Generated from project documentation
+</footer>
+
+</body>
+</html>

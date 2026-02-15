@@ -1,0 +1,93 @@
+/* Jewish Holiday Styling */
+
+/* All Jewish holidays get special treatment */
+.mcr-calendar .rbc-event[data-jewish-holiday="true"] {
+  font-family: 'David', 'Times New Roman', serif;
+  letter-spacing: 0.5px;
+}
+
+/* Yom Tov (major holidays when work is forbidden) */
+.mcr-calendar .rbc-event[data-yom-tov="true"] {
+  background: linear-gradient(135deg, #8B4513 0%, #654321 100%) !important;
+  border: 2px solid #4A2C17 !important;
+  color: white !important;
+  font-weight: 700 !important;
+}
+
+/* Major holidays (but work is permitted) */
+.mcr-calendar .rbc-event[data-major-holiday="true"]:not([data-yom-tov="true"]) {
+  background: linear-gradient(135deg, #DAA520 0%, #B8860B 100%) !important;
+  border: 2px solid #8B6914 !important;
+  color: #333 !important;
+  font-weight: 600 !important;
+}
+
+/* Minor holidays */
+.mcr-calendar .rbc-event[data-jewish-holiday="true"]:not([data-major-holiday="true"]):not([data-yom-tov="true"]) {
+  background: linear-gradient(135deg, #F0E68C 0%, #EEE8AA 100%) !important;
+  border: 1px solid #BDB76B !important;
+  color: #555 !important;
+  font-weight: 500 !important;
+}
+
+/* Holiday event hover effect */
+.mcr-calendar .rbc-event[data-jewish-holiday="true"]:hover {
+  transform: scale(1.02);
+  box-shadow: 0 3px 6px rgba(0,0,0,0.3) !important;
+}
+
+/* Add a small Star of David icon before holiday names */
+.mcr-calendar .rbc-event[data-jewish-holiday="true"] .rbc-event-content::before {
+  content: "✡ ";
+  font-size: 0.8em;
+  margin-right: 2px;
+}
+
+/* Special styling for specific holidays */
+.mcr-calendar .rbc-event[data-holiday-type="rosh-hashana"],
+.mcr-calendar .rbc-event[data-holiday-type="yom-kippur"] {
+  background: linear-gradient(135deg, #4B0082 0%, #8B008B 100%) !important;
+  border: 2px solid #4B0082 !important;
+}
+
+.mcr-calendar .rbc-event[data-holiday-type="pesach"],
+.mcr-calendar .rbc-event[data-holiday-type="sukkot"],
+.mcr-calendar .rbc-event[data-holiday-type="shavuot"] {
+  background: linear-gradient(135deg, #228B22 0%, #006400 100%) !important;
+  border: 2px solid #006400 !important;
+}
+
+.mcr-calendar .rbc-event[data-holiday-type="chanukah"] {
+  background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%) !important;
+  border: 2px solid #FF8C00 !important;
+  color: #333 !important;
+}
+
+.mcr-calendar .rbc-event[data-holiday-type="purim"] {
+  background: linear-gradient(135deg, #9370DB 0%, #8A2BE2 100%) !important;
+  border: 2px solid #7B68EE !important;
+}
+
+/* Fast days */
+.mcr-calendar .rbc-event[data-holiday-type="fast-day"] {
+  background: linear-gradient(135deg, #696969 0%, #2F4F4F 100%) !important;
+  border: 2px solid #2F4F4F !important;
+  color: white !important;
+  opacity: 0.8 !important;
+}
+
+/* Israeli national days */
+.mcr-calendar .rbc-event[data-holiday-type="yom-hashoah"],
+.mcr-calendar .rbc-event[data-holiday-type="yom-hazikaron"] {
+  background: linear-gradient(135deg, #000000 0%, #333333 100%) !important;
+  border: 2px solid #000000 !important;
+  color: white !important;
+}
+
+.mcr-calendar .rbc-event[data-holiday-type="yom-haatzmaut"],
+.mcr-calendar .rbc-event[data-holiday-type="yom-yerushalayim"] {
+  background: linear-gradient(135deg, #0038b8 0%, #ffffff 50%, #0038b8 100%) !important;
+  border: 2px solid #0038b8 !important;
+  color: #0038b8 !important;
+  font-weight: 700 !important;
+}

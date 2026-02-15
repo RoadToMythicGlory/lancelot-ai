@@ -1,0 +1,181 @@
+/* MCR Calendar Override Styles */
+
+/* Ensure proper week view display */
+.mcr-calendar .rbc-time-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-x: hidden !important;
+}
+
+.mcr-calendar .rbc-time-header {
+  display: flex;
+  flex: 0 0 auto;
+  border-bottom: 0 !important; /* 🔥 מבטל קו תחתון */
+  box-shadow: none !important;
+}
+
+.mcr-calendar .rbc-time-content {
+  flex: 1 1 0%;
+  overflow-y: auto;
+  overflow-x: hidden !important;
+}
+
+/* Prevent horizontal scroll on the whole calendar */
+.mcr-calendar {
+  overflow-x: hidden !important;
+}
+
+/* Ensure time columns fit within view */
+.mcr-calendar .rbc-time-view .rbc-time-column {
+  min-width: 0 !important;
+}
+
+/* Make time gutter narrower */
+.mcr-calendar .rbc-time-gutter {
+  flex: 0 0 50px !important;
+  width: 50px !important;
+}
+
+/* Ensure day columns use available space */
+.mcr-calendar .rbc-day-slot {
+  min-width: 0 !important;
+}
+
+/* Ensure events are visible */
+.mcr-calendar .rbc-event {
+  opacity: 1 !important;
+}
+
+/* Remove unwanted backgrounds */
+.mcr-calendar .rbc-time-view .rbc-background-event {
+  display: none;
+}
+
+/* Ensure header text is visible */
+.mcr-calendar .rbc-header {
+  color: #333 !important;
+  font-weight: 600 !important;
+  font-size: 14px !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: block !important;
+  z-index: 10 !important;
+  border-bottom: 0 !important; /* 🔥 מבטל קו */
+  box-shadow: none !important;
+}
+
+.mcr-calendar .rbc-time-header-cell {
+  color: #333 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  border-bottom: 0 !important; /* 🔥 */
+}
+
+.mcr-calendar .rbc-header a {
+  color: #333 !important;
+  text-decoration: none !important;
+  display: block !important;
+}
+
+/* Ensure date numbers are visible */
+.mcr-calendar .rbc-date-cell {
+  color: #333 !important;
+  font-size: 14px !important;
+  opacity: 1 !important;
+}
+
+/* Remove any overlapping elements in main calendar */
+.mcr-calendar .rbc-month-view .rbc-row-bg {
+  pointer-events: none !important;
+}
+
+.mcr-calendar .rbc-day-bg {
+  pointer-events: none !important;
+}
+
+/* Fix the header accent layer specifically */
+.mcr-calendar .rbc-time-header .rbc-row {
+  height: auto !important;
+  border-bottom: 0 !important; /* 🔥 */
+}
+
+/* מוחק לחלוטין את הפס שנוצר ע"י rbc-row-bg */
+.mcr-calendar .rbc-time-header .rbc-row-bg {
+  display: none !important;
+}
+
+.mcr-calendar .rbc-time-header .rbc-header {
+  position: relative !important;
+  z-index: 10 !important;
+  background: transparent !important;
+  padding-top: 10px !important;
+  padding-bottom: 25px !important;
+  border-bottom: 0 !important; /* 🔥 */
+  box-shadow: none !important;
+}
+
+/* Ensure header content is above accent */
+.mcr-calendar .rbc-header .rbc-header-content {
+  position: relative !important;
+  z-index: 11 !important;
+}
+
+/* Ensure events can be clicked */
+.mcr-calendar .rbc-events-container .rbc-event {
+  pointer-events: auto;
+}
+
+/* Handle multiple events in the same time slot */
+.mcr-calendar .rbc-time-view .rbc-event-label {
+  display: none; /* Hide time labels in week view to save space */
+}
+
+/* Today column in week view */
+.mcr-calendar .rbc-time-view .rbc-today {
+  background-color: rgba(59, 130, 246, 0.05);
+}
+
+/* === Tight Week Header for react-big-calendar === */
+.mcr-calendar .rbc-time-header {
+  height: auto !important;
+  border-bottom: 0 !important;
+  box-shadow: none !important;
+}
+
+/* צמצום הרווחים בשורה/תאים של הכותרת */
+.mcr-calendar .rbc-time-header .rbc-row,
+.mcr-calendar .rbc-time-header-cell,
+.mcr-calendar .rbc-time-header .rbc-header {
+  min-height: 0 !important;
+  height: 40px !important;          /* ↑ תוכל לרדת ל-32px אם בא לך */
+  padding: 6px 8px !important;       /* צמצום padding */
+  margin: 0 !important;
+  line-height: 1.2 !important;
+  border-bottom: 0 !important;
+  box-shadow: none !important;
+}
+
+/* הקטנת גודל הטקסט של ימי השבוע אם צריך עוד צמצום */
+.mcr-calendar .rbc-time-header .rbc-header,
+.mcr-calendar .rbc-time-header .rbc-header a {
+  font-size: 13px !important;        /* היה 14px – אפשר לרדת/לעלות לפי טעם */
+  font-weight: 600 !important;
+}
+
+/* ביטול שורת All-day (אם אינך צריך אותה) */
+.mcr-calendar .rbc-time-header .rbc-allday-cell,
+.mcr-calendar .rbc-allday-cell,
+.mcr-calendar .rbc-allday-events {
+  display: none !important;
+  height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+}
+
+/* ליתר ביטחון – אין "accent row" שמוסיף גובה */
+.mcr-calendar .rbc-time-header .rbc-row-bg {
+  display: none !important;
+}
+

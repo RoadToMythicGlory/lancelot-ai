@@ -1,0 +1,15 @@
+query TestBroadcastEvents {
+  broadcastEvents {
+    id
+    title
+    metadata
+  }
+}
+
+query TestSingleEvent {
+  broadcastEvent(id: "68682ebf206b646c1f5581be") {
+    id
+    title
+    metadata
+  }
+} 

@@ -1,0 +1,154 @@
+we need to create the MCR PAGE
+NOTE : The MCR page needs to be half Hebrew and half English
+so whatever I write in Hebrew is Hebrew
+and what I write in English is English
+
+The components :
+-דאשבורד MCR
+--a screen with widgets and buttons :
+
+---Widget :
+	לוח שנה : a Calendar with multi options for view type (תצוגה יומית , תצוגה שבועית ,תצוגה חודשית) with all of the Broadcast events that are created in the Broadcast-Planning Page.
+		   an option to add MCR-ONLY events in the calendar
+NOTE : The UI should be as much as possible like OUTLOOK calendar since it is going to replace it in my place of work.(DO NOT ADD THE WORD OUTLOOK ANYWHERE)
+*This should be the top widget at the screen catching 60% of the page height and 100% width
+
+when clicking each even a form that will change according to the סוג שידור selection : 
+סוג שידור - a dropdown menu with the following options:
+
+SRT CALLER | SRT LISTENER | DVBS2 | DVBS2X | NS4 | NS3 | RTMP | ZIXI | PRT | LIVEU | OTHER
+
+----SRT CALLER - a fillable form:
+#7ca13d
+
+CALLER IP (NON-NULLABLE)
+CALLER PORT (NON-NULLABLE)
+PASSPHRASE (NULLABLE)
+Contact (NON-NULLABLE)
+Notes (NULLABLE)
+
+----SRT LISTENER - a fillable form
+#a8cc6a
+
+LISTENER IP (NON-NULLABLE)
+LISTENER PORT (NON-NULLABLE)
+PASSPHRASE (NULLABLE)
+Contact (NON-NULLABLE)
+Notes (NULLABLE)
+
+----DVBS2
+#ed80e8
+
+העלה מערך לוויני Button 
+a text editor with an option to drag a file into / upload a file and the file will be saved in the db as path of course and will load upon clicking it in the future and an option to write text / paste text from clipboard for details that will be inserted manually.
+make the text editor there flexible (with B/U/I options and marker options and change colour options)
+
+----DVBS2X
+#54b0c7
+
+העלה מערך לוויני Button 
+a text editor with an option to drag a file into / upload a file and the file will be saved in the db as path of course and will load upon clicking it in the future and an option to write text / paste text from clipboard for details that will be inserted manually.
+make the text editor there flexible (with B/U/I options and marker options and change colour options)
+
+----NS3
+#1b943b
+
+העלה מערך לוויני Button 
+a text editor with an option to drag a file into / upload a file and the file will be saved in the db as path of course and will load upon clicking it in the future and an option to write text / paste text from clipboard for details that will be inserted manually.
+make the text editor there flexible (with B/U/I options and marker options and change colour options)
+
+
+----NS4
+#1b943b
+
+העלה מערך לוויני Button 
+a text editor with an option to drag a file into / upload a file and the file will be saved in the db as path of course and will load upon clicking it in the future and an option to write text / paste text from clipboard for details that will be inserted manually.
+make the text editor there flexible (with B/U/I options and marker options and change colour options)
+
+----RTMP
+#d46eab
+
+a text editor with an option to drag a file into / upload a file and the file will be saved in the db as path of course and will load upon clicking it in the future and an option to write text / paste text from clipboard for details that will be inserted manually.
+make the text editor there flexible (with B/U/I options and marker options and change colour options)
+
+
+----LIVEU
+#e8ca92
+
+amount of cameras (NULLABLE - 1 by default) 
+
+----PRT
+#c2e8ed
+
+no form needed
+
+----קליטה מOU
+#b135de
+
+העלה מערך לוויני Button 
+a text editor with an option to drag a file into / upload a file and the file will be saved in the db as path of course and will load upon clicking it in the future and an option to write text / paste text from clipboard for details that will be inserted manually.
+make the text editor there flexible (with B/U/I options and marker options and change colour options)
+
+----OTHER
+#e31464
+
+a text editor with an option to drag a file into / upload a file and the file will be saved in the db as path of course and will load upon clicking it in the future and an option to write text / paste text from clipboard for details that will be inserted manually.
+make the text editor there flexible (with B/U/I options and marker options and change colour options)
+
+each סוג שידור needs to change the colour of the event in the calendar (COLUR CODES ARE ADDED TO EACH TYPE)! 
+
+
+
+---widget with buttons(100% width - 10% height)  :   
+
+----לוח פעילויות צפייה
+----לוח פעילויות עריכה
+----MCR MAP
+each button will open a new BROWSER TAB (NOT WINDOW , TAB).
+
+
+----לוח פעילויות צפייה
+	a SIMPLE static BLACK table that shows all of the events from the calendar widget for the current day with the following columns:
+		 פעילות | שעה | שעת סיום | מכשירים | גיבוי | ניתובים | ערוץ | סוג שידור | הערות 
+
+		   פעילות - the name of the event from the calendar / broadcast planning database
+		   מכשירים - data taken from the לוח פעילויות עריכה 
+		  		 גיבוי - data taken from the לוח פעילויות עריכה 
+				ניתובים - data taken from the לוח פעילויות עריכה 
+			  	ערוץ - data taken from the Broadcast-events DB if available if not than show "-"
+		   סוג שידור - this will be the only cell that changes colour according to the סוג שידור (MATCHING CALENDAR COLOURS) and ofcourse the סוג שידור needs to be written on top of that colour 
+		   סטטוס - a small column with either green check mark for מוכן לשידור
+			    a white question mark if the row is untouched (also the default for new rows) 
+			    a Yellow question mark if the status is לא מוכן לשידור
+			    a RED exclimation mark if the status is תקלה 
+			  
+----לוח פעילויות עריכה
+		MUST select a date 
+		an editable table with all of the events for the selected day from the calendar as rows
+		an option to add more rows manually
+		an הסתר שורה button 
+		
+		Table columns : 
+פעילות | מכשירים | גיבוי | ניתובים | ערוץ | סוג שידור | הערות
+
+פעילות - The event name , if it's a row for an event fetched from the calendar than it should be static (Not editable) , if it's a row created by the user it should be editable
+מכשירים - editable column (write plain text with option for B/U/I and text marker + change colour options)
+גיבויים - editable column (write plain text with option for B/U/I and text marker + change colour options)
+ניתובים - editable column (write plain text with option for B/U/I and text marker + change colour options)
+ערוץ - data taken from the Broadcast-events DB if available if not than show "-"
+סוג שידור - if available from calendar show it with the סוג שידור colour in the cell like the לוח מכשירים צפייה , if not available in the calendar add a dropdown menu with the סוגי שידור that we have (the סוג שידור needs to be nullable though)
+הערות - editable column (write plain text with option for B/U/I and text marker + change colour options)
+סטטוס - A dropdown menu with the following מוכן לשידור | לא מוכן לשידור | תקלה 
+
+----MCR MAP
+We will do this one later
+
+
+---widget : הודעות חשובות 
+(100% width - 30% height)
+
+----a bulletin for MCR ONLY
+----option do create new posts with הגבל תאריך (until when the post will stay shown)
+----option for עד הודעה חדשה selection that will keep the post until it's delete by the user that created it / MCR department admin 
+----option to delete post (MCR department admin can delete all posts and MCR department users can only delete their own posts)
+

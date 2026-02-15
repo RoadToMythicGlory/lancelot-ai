@@ -1,0 +1,115 @@
+# Vizrt Graphics Integration Schema
+
+type VizrtTemplate {
+  id: ID!
+  name: String!
+  description: String
+  category: VizrtTemplateCategory!
+  fields: [VizrtTemplateField!]!
+  previewUrl: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type VizrtTemplateField {
+  key: String!
+  label: String!
+  type: VizrtFieldType!
+  required: Boolean!
+  defaultValue: String
+  options: [String!]
+}
+
+enum VizrtTemplateCategory {
+  LOWER_THIRD
+  SCORE_BUG
+  BREAKING_NEWS
+  WEATHER
+  SPORTS_TICKER
+  ELECTION_RESULTS
+  CUSTOM
+}
+
+enum VizrtFieldType {
+  TEXT
+  NUMBER
+  BOOLEAN
+  SELECT
+  COLOR
+  IMAGE
+  VIDEO
+}
+
+type VizrtConfig {
+  id: ID!
+  name: String!
+  mode: VizrtMode!
+  baseUrl: String!
+  isActive: Boolean!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+enum VizrtMode {
+  ARC
+  PDS
+  ENGINE
+}
+
+type CGTriggerResult {
+  success: Boolean!
+  message: String
+  previewUrl: String
+  triggerId: String
+}
+
+input VizrtConfigInput {
+  name: String!
+  mode: VizrtMode!
+  baseUrl: String!
+  apiKey: String
+  headers: String # JSON string of headers
+}
+
+input CGTriggerInput {
+  templateId: ID!
+  fields: String! # JSON string of field values
+  preview: Boolean = false
+  eventId: ID
+  segmentId: ID
+}
+
+input VizrtTemplateInput {
+  name: String!
+  description: String
+  category: VizrtTemplateCategory!
+  fields: [VizrtTemplateFieldInput!]!
+}
+
+input VizrtTemplateFieldInput {
+  key: String!
+  label: String!
+  type: VizrtFieldType!
+  required: Boolean!
+  defaultValue: String
+  options: [String!]
+}
+
+extend type Query {
+  vizrtConfigs: [VizrtConfig!]!
+  vizrtTemplates(category: VizrtTemplateCategory): [VizrtTemplate!]!
+  vizrtTemplate(id: ID!): VizrtTemplate
+}
+
+extend type Mutation {
+  createVizrtConfig(input: VizrtConfigInput!): VizrtConfig!
+  updateVizrtConfig(id: ID!, input: VizrtConfigInput!): VizrtConfig!
+  deleteVizrtConfig(id: ID!): Boolean!
+  
+  createVizrtTemplate(input: VizrtTemplateInput!): VizrtTemplate!
+  updateVizrtTemplate(id: ID!, input: VizrtTemplateInput!): VizrtTemplate!
+  deleteVizrtTemplate(id: ID!): Boolean!
+  
+  triggerCG(input: CGTriggerInput!): CGTriggerResult!
+  previewCG(input: CGTriggerInput!): CGTriggerResult!
+}

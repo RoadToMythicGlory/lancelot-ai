@@ -1,0 +1,89 @@
+# Vendor Types
+type Vendor {
+  id: ID!
+  name: String!
+  hebrewName: String
+  category: VendorCategory!
+  contactName: String!
+  contactPhone: String!
+  contactEmail: String
+  alternateContactName: String
+  alternateContactPhone: String
+  address: VendorAddress!
+  website: String
+  notes: String
+  isActive: Boolean!
+  createdBy: User
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type VendorAddress {
+  street: String!
+  city: String!
+  postalCode: String
+  country: String!
+}
+
+enum VendorCategory {
+  equipment
+  services
+  both
+}
+
+# Vendor Input Types
+input CreateVendorInput {
+  name: String!
+  hebrewName: String
+  category: VendorCategory!
+  contactName: String!
+  contactPhone: String!
+  contactEmail: String
+  alternateContactName: String
+  alternateContactPhone: String
+  address: VendorAddressInput!
+  website: String
+  notes: String
+}
+
+input UpdateVendorInput {
+  name: String
+  hebrewName: String
+  category: VendorCategory
+  contactName: String
+  contactPhone: String
+  contactEmail: String
+  alternateContactName: String
+  alternateContactPhone: String
+  address: VendorAddressInput
+  website: String
+  notes: String
+  isActive: Boolean
+}
+
+input VendorAddressInput {
+  street: String!
+  city: String!
+  postalCode: String
+  country: String!
+}
+
+input VendorFilter {
+  category: VendorCategory
+  isActive: Boolean
+  searchText: String
+}
+
+# Add to Query type
+extend type Query {
+  vendors(filter: VendorFilter): [Vendor!]!
+  vendor(id: ID!): Vendor
+}
+
+# Add to Mutation type
+extend type Mutation {
+  createVendor(input: CreateVendorInput!): Vendor!
+  updateVendor(id: ID!, input: UpdateVendorInput!): Vendor!
+  deleteVendor(id: ID!): Boolean!
+  toggleVendorStatus(id: ID!): Vendor!
+}

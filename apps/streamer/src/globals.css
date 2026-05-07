@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #0F0F0F;
+  --bg-surface: #1A1A2E;
+  --bg-card: #16213E;
+  --border-color: #2A2A4A;
+  --accent-primary: #6C63FF;
+  --accent-secondary: #00D4AA;
+  --danger: #FF4757;
+  --warning: #FFA502;
+  --success: #2ED573;
+  --text-primary: #FFFFFF;
+  --text-secondary: #A0A0B0;
+  --text-muted: #6B6B80;
+  --twitch: #9146FF;
+  --youtube: #FF0000;
+  --kick: #53FC18;
+  --tiktok: #69C9D0;
+}
+
+[data-theme="light"] {
+  --bg-primary: #F8F9FC;
+  --bg-surface: #FFFFFF;
+  --bg-card: #F0F2F8;
+  --border-color: #E2E4EC;
+  --text-primary: #1A1A2E;
+  --text-secondary: #5A5A6E;
+  --text-muted: #9A9AB0;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Glow effects */
+.glow-primary {
+  box-shadow: 0 0 20px rgba(108, 99, 255, 0.15);
+}
+
+.glow-primary-hover:hover {
+  box-shadow: 0 0 25px rgba(108, 99, 255, 0.25);
+}
+
+/* Smooth transitions */
+.transition-smooth {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Platform gradient backgrounds */
+.bg-twitch-gradient { background: linear-gradient(135deg, rgba(145, 70, 255, 0.15), rgba(145, 70, 255, 0.05)); }
+.bg-youtube-gradient { background: linear-gradient(135deg, rgba(255, 0, 0, 0.15), rgba(255, 0, 0, 0.05)); }
+.bg-kick-gradient { background: linear-gradient(135deg, rgba(83, 252, 24, 0.15), rgba(83, 252, 24, 0.05)); }
+.bg-tiktok-gradient { background: linear-gradient(135deg, rgba(105, 201, 208, 0.15), rgba(105, 201, 208, 0.05)); }

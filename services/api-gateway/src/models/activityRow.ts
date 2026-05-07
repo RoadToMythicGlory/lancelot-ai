@@ -14,6 +14,7 @@ export interface IActivityRow extends Document {
   status: string;
   isHidden: boolean;
   isManual: boolean;
+  broadcastEventId?: Types.ObjectId;
   createdBy: Types.ObjectId;
   updatedBy?: Types.ObjectId;
   createdAt: Date;
@@ -88,6 +89,10 @@ const activityRowSchema = new Schema<IActivityRow>({
     type: Boolean,
     default: false
   },
+  broadcastEventId: {
+    type: Schema.Types.ObjectId,
+    ref: 'BroadcastEvent'
+  },
   createdBy: {
     type: Schema.Types.ObjectId,
     ref: 'User',
@@ -105,6 +110,7 @@ const activityRowSchema = new Schema<IActivityRow>({
 activityRowSchema.index({ date: 1, isHidden: 1 });
 activityRowSchema.index({ createdBy: 1 });
 activityRowSchema.index({ status: 1 });
+activityRowSchema.index({ broadcastEventId: 1 });
 
 // Pre-save middleware to set updatedBy
 activityRowSchema.pre('save', function(next) {

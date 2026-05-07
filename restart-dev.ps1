@@ -31,8 +31,13 @@ Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd apps\web; `$en
 Write-Host "Starting AI Agent..." -ForegroundColor Green
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd services\ai-agent; `$env:ENABLE_E2EE_CHAT='true'; `$env:E2EE_FALLBACK_WARNING='true'; `$env:RSS_PIPELINE_ENABLED='true'; npm run dev"
 
+# Start Streamer App
+Write-Host "Starting Streamer App..." -ForegroundColor Green
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd apps\streamer; npm run dev"
+
 Write-Host "Development servers are starting..." -ForegroundColor Green
-Write-Host "API Gateway: http://localhost:4000/graphql" -ForegroundColor Cyan
-Write-Host "Excel Parser: http://localhost:4002" -ForegroundColor Cyan
-Write-Host "Web App: http://localhost:3000" -ForegroundColor Cyan 
-Write-Host "AI Agent: http://localhost:4001/health" -ForegroundColor Cyan
+Write-Host "API Gateway:   http://localhost:4000/graphql" -ForegroundColor Cyan
+Write-Host "Excel Parser:  http://localhost:3002" -ForegroundColor Cyan
+Write-Host "Web App (ERP): http://localhost:3000" -ForegroundColor Cyan
+Write-Host "Streamer App:  http://localhost:3100" -ForegroundColor Cyan
+Write-Host "AI Agent:      http://localhost:4001/health" -ForegroundColor Cyan

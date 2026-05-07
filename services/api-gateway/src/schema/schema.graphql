@@ -560,6 +560,63 @@ input DepartmentSpecificDataInput {
   data: JSON
 }
 
+# External Broadcast Presets
+type ExternalBroadcastPreset {
+  id: ID!
+  name: String!
+  description: String
+  tags: [String!]
+  roles: [PresetRole!]!
+  equipment: [PresetEquipment!]!
+  createdBy: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type PresetRole {
+  roleKey: String!
+  roleLabel: String!
+  count: Int!
+  isCustom: Boolean!
+}
+
+type PresetEquipment {
+  equipmentId: String
+  name: String!
+  category: String
+  count: Int!
+}
+
+input CreateExternalBroadcastPresetInput {
+  name: String!
+  description: String
+  tags: [String!]
+  roles: [PresetRoleInput!]!
+  equipment: [PresetEquipmentInput!]
+}
+
+input UpdateExternalBroadcastPresetInput {
+  name: String
+  description: String
+  tags: [String!]
+  roles: [PresetRoleInput!]
+  equipment: [PresetEquipmentInput!]
+}
+
+input PresetRoleInput {
+  roleKey: String!
+  roleLabel: String!
+  count: Int!
+  isCustom: Boolean!
+}
+
+input PresetEquipmentInput {
+  equipmentId: String
+  name: String!
+  category: String
+  count: Int!
+}
+
 # Overlap Types
 type ChannelOverlap {
   eventId: String!
@@ -786,6 +843,10 @@ type Query {
   employees(department: String): [User!]!
   employee(id: ID!): User
   specialDays: [SpecialDay!]!
+
+  # External Broadcast Presets
+  externalBroadcastPresets: [ExternalBroadcastPreset!]!
+  externalBroadcastPreset(id: ID!): ExternalBroadcastPreset
 }
 
 type Mutation {
@@ -900,6 +961,11 @@ type Mutation {
   createEmployee(input: CreateEmployeeInput!): User!
   updateSpecialDays(input: SpecialDayInput!): SpecialDay!
   deleteSpecialDay(id: ID!): Boolean!
+
+  # External Broadcast Presets
+  createExternalBroadcastPreset(input: CreateExternalBroadcastPresetInput!): ExternalBroadcastPreset!
+  updateExternalBroadcastPreset(id: ID!, input: UpdateExternalBroadcastPresetInput!): ExternalBroadcastPreset!
+  deleteExternalBroadcastPreset(id: ID!): Boolean!
 }
 
 # Authentication types
@@ -1790,6 +1856,7 @@ type ActivityRow {
   status: ActivityStatus!
   isHidden: Boolean
   isManual: Boolean
+  broadcastEventId: ID
   createdBy: User
   updatedBy: User
   createdAt: DateTime!
@@ -2060,4 +2127,1551 @@ extend type Mutation {
   
   # Trigger news fetch
   triggerNewsFetch(sources: [String!]): JSON!
+}
+
+# ========================================================================================
+# SAAS PLATFORM EXTENSIONS
+# ========================================================================================
+
+# ==================== ORGANIZATION / MULTI-TENANCY ====================
+
+type Organization {
+  id: ID!
+  name: String!
+  slug: String!
+  hebrewName: String
+  logo: String
+  favicon: String
+  domain: String
+  plan: SubscriptionPlan!
+  planExpiresAt: DateTime
+  maxUsers: Int!
+  maxBroadcastEvents: Int!
+  maxStorageGB: Int!
+  settings: OrganizationSettings!
+  contactEmail: String
+  contactPhone: String
+  address: String
+  country: String
+  isActive: Boolean!
+  isTrial: Boolean!
+  trialEndsAt: DateTime
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type OrganizationSettings {
+  timezone: String!
+  locale: String!
+  dateFormat: String!
+  defaultChannel: String
+  brandColor: String
+  features: FeatureFlags!
+  security: SecuritySettings!
+}
+
+type FeatureFlags {
+  chat: Boolean!
+  aiAgent: Boolean!
+  warehouse: Boolean!
+  vizrt: Boolean!
+  shifts: Boolean!
+  mcr: Boolean!
+  broadcasting: Boolean!
+  liveMonitoring: Boolean!
+}
+
+type SecuritySettings {
+  mfaRequired: Boolean!
+  ssoEnabled: Boolean!
+  ssoProvider: String
+  passwordMinLength: Int!
+  sessionTimeoutMinutes: Int!
+  ipWhitelist: [String!]!
+}
+
+type OrganizationInvite {
+  id: ID!
+  organizationId: ID!
+  email: String!
+  role: String!
+  departments: [JSON!]
+  invitedBy: String!
+  status: InviteStatus!
+  expiresAt: DateTime!
+  createdAt: DateTime!
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  CANCELLED
+}
+
+enum SubscriptionPlan {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+input CreateOrganizationInput {
+  name: String!
+  slug: String!
+  hebrewName: String
+  contactEmail: String
+  contactPhone: String
+  country: String
+  plan: SubscriptionPlan
+}
+
+input UpdateOrganizationInput {
+  name: String
+  hebrewName: String
+  logo: String
+  favicon: String
+  domain: String
+  contactEmail: String
+  contactPhone: String
+  address: String
+  country: String
+}
+
+input UpdateOrganizationSettingsInput {
+  timezone: String
+  locale: String
+  dateFormat: String
+  defaultChannel: String
+  brandColor: String
+}
+
+input UpdateFeatureFlagsInput {
+  chat: Boolean
+  aiAgent: Boolean
+  warehouse: Boolean
+  vizrt: Boolean
+  shifts: Boolean
+  mcr: Boolean
+  broadcasting: Boolean
+  liveMonitoring: Boolean
+}
+
+input UpdateSecuritySettingsInput {
+  mfaRequired: Boolean
+  ssoEnabled: Boolean
+  ssoProvider: String
+  passwordMinLength: Int
+  sessionTimeoutMinutes: Int
+  ipWhitelist: [String!]
+}
+
+input InviteUserInput {
+  email: String!
+  role: String!
+  departments: [UserDepartmentInput!]
+}
+
+# ==================== BILLING & SUBSCRIPTIONS ====================
+
+type SubscriptionInfo {
+  id: ID!
+  organizationId: ID!
+  plan: SubscriptionPlan!
+  status: SubscriptionStatus!
+  billingCycle: BillingCycle!
+  currentPeriodStart: DateTime!
+  currentPeriodEnd: DateTime!
+  trialStart: DateTime
+  trialEnd: DateTime
+  limits: SubscriptionLimits!
+  currentUsage: SubscriptionUsage!
+  cancelledAt: DateTime
+  createdAt: DateTime!
+}
+
+type SubscriptionLimits {
+  maxUsers: Int!
+  maxBroadcastEvents: Int!
+  maxStorageGB: Int!
+  maxDepartments: Int!
+  maxApiCalls: Int!
+}
+
+type SubscriptionUsage {
+  users: Int!
+  broadcastEvents: Int!
+  storageUsedGB: Float!
+  departments: Int!
+  apiCalls: Int!
+}
+
+type InvoiceRecord {
+  id: ID!
+  invoiceNumber: String!
+  status: InvoiceStatus!
+  currency: String!
+  subtotal: Float!
+  tax: Float!
+  total: Float!
+  amountPaid: Float!
+  amountDue: Float!
+  lineItems: [InvoiceLineItem!]!
+  periodStart: DateTime!
+  periodEnd: DateTime!
+  dueDate: DateTime
+  paidAt: DateTime
+  invoicePdfUrl: String
+  createdAt: DateTime!
+}
+
+type InvoiceLineItem {
+  description: String!
+  quantity: Int!
+  unitAmount: Float!
+  amount: Float!
+}
+
+type PaymentMethodInfo {
+  id: ID!
+  type: String!
+  brand: String
+  last4: String
+  expiryMonth: Int
+  expiryYear: Int
+  isDefault: Boolean!
+  createdAt: DateTime!
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  TRIALING
+  PAUSED
+}
+
+enum BillingCycle {
+  MONTHLY
+  YEARLY
+}
+
+enum InvoiceStatus {
+  DRAFT
+  OPEN
+  PAID
+  VOID
+  UNCOLLECTIBLE
+}
+
+input ChangePlanInput {
+  plan: SubscriptionPlan!
+  billingCycle: BillingCycle
+}
+
+# ==================== AUDIT LOGGING ====================
+
+type AuditLogEntry {
+  id: ID!
+  userId: String!
+  userEmail: String!
+  userName: String!
+  action: String!
+  resource: String!
+  resourceId: String
+  resourceName: String
+  changes: [AuditChange!]
+  ipAddress: String
+  userAgent: String
+  graphqlOperation: String
+  severity: AuditSeverity!
+  metadata: JSON
+  createdAt: DateTime!
+}
+
+type AuditChange {
+  field: String!
+  oldValue: JSON
+  newValue: JSON
+}
+
+enum AuditSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+input AuditLogFilter {
+  userId: String
+  action: String
+  resource: String
+  resourceId: String
+  severity: AuditSeverity
+  startDate: DateTime
+  endDate: DateTime
+  searchTerm: String
+}
+
+type AuditLogConnection {
+  items: [AuditLogEntry!]!
+  totalCount: Int!
+  hasMore: Boolean!
+}
+
+# ==================== NOTIFICATIONS ====================
+
+type NotificationItem {
+  id: ID!
+  type: NotificationType!
+  title: String!
+  titleHe: String
+  message: String!
+  messageHe: String
+  resource: String
+  resourceId: String
+  actionUrl: String
+  isRead: Boolean!
+  readAt: DateTime
+  isDismissed: Boolean!
+  senderId: String
+  senderName: String
+  priority: Priority!
+  createdAt: DateTime!
+}
+
+type NotificationPreferences {
+  id: ID!
+  userId: String!
+  preferences: NotificationPreferenceMap!
+  muteAll: Boolean!
+  muteUntil: DateTime
+  quietHoursStart: String
+  quietHoursEnd: String
+}
+
+type NotificationPreferenceMap {
+  broadcast_created: NotificationChannels!
+  broadcast_updated: NotificationChannels!
+  broadcast_cancelled: NotificationChannels!
+  shift_assigned: NotificationChannels!
+  shift_swap_request: NotificationChannels!
+  shift_reminder: NotificationChannels!
+  approval_required: NotificationChannels!
+  approval_resolved: NotificationChannels!
+  equipment_assigned: NotificationChannels!
+  system_alert: NotificationChannels!
+  chat_message: NotificationChannels!
+}
+
+type NotificationChannels {
+  inApp: Boolean!
+  email: Boolean!
+  push: Boolean!
+}
+
+type NotificationConnection {
+  items: [NotificationItem!]!
+  totalCount: Int!
+  unreadCount: Int!
+  hasMore: Boolean!
+}
+
+enum NotificationType {
+  INFO
+  WARNING
+  ERROR
+  SUCCESS
+  BROADCAST
+  SHIFT
+  APPROVAL
+  SYSTEM
+}
+
+enum Priority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+input NotificationChannelsInput {
+  inApp: Boolean
+  email: Boolean
+  push: Boolean
+}
+
+input UpdateNotificationPreferencesInput {
+  broadcast_created: NotificationChannelsInput
+  broadcast_updated: NotificationChannelsInput
+  broadcast_cancelled: NotificationChannelsInput
+  shift_assigned: NotificationChannelsInput
+  shift_swap_request: NotificationChannelsInput
+  shift_reminder: NotificationChannelsInput
+  approval_required: NotificationChannelsInput
+  approval_resolved: NotificationChannelsInput
+  equipment_assigned: NotificationChannelsInput
+  system_alert: NotificationChannelsInput
+  chat_message: NotificationChannelsInput
+  muteAll: Boolean
+  muteUntil: DateTime
+  quietHoursStart: String
+  quietHoursEnd: String
+}
+
+# ==================== WORKFLOW ENGINE ====================
+
+type WorkflowTemplateItem {
+  id: ID!
+  name: String!
+  nameHe: String
+  description: String
+  triggerType: WorkflowTriggerType!
+  triggerConditions: JSON
+  steps: [WorkflowStep!]!
+  resourceType: String!
+  isActive: Boolean!
+  createdBy: String!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type WorkflowStep {
+  order: Int!
+  type: WorkflowStepType!
+  name: String!
+  config: JSON
+  assigneeType: String
+  assigneeId: String
+  timeoutMinutes: Int
+  onTimeout: String
+}
+
+type WorkflowInstanceItem {
+  id: ID!
+  templateId: ID!
+  templateName: String!
+  resourceType: String!
+  resourceId: String!
+  resourceName: String
+  status: WorkflowStatus!
+  currentStepIndex: Int!
+  stepHistory: [WorkflowStepHistory!]!
+  slaDeadline: DateTime
+  slaBreached: Boolean!
+  initiatedBy: String!
+  initiatedByName: String
+  completedAt: DateTime
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type WorkflowStepHistory {
+  stepIndex: Int!
+  stepName: String!
+  status: String!
+  assigneeId: String
+  assigneeName: String
+  completedAt: DateTime
+  comment: String
+  metadata: JSON
+}
+
+enum WorkflowTriggerType {
+  MANUAL
+  EVENT_CREATED
+  EVENT_UPDATED
+  STATUS_CHANGE
+  SCHEDULED
+  APPROVAL_NEEDED
+}
+
+enum WorkflowStepType {
+  APPROVAL
+  NOTIFICATION
+  ASSIGNMENT
+  STATUS_CHANGE
+  WEBHOOK
+  CHECKLIST
+}
+
+enum WorkflowStatus {
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  FAILED
+  WAITING
+}
+
+input CreateWorkflowTemplateInput {
+  name: String!
+  nameHe: String
+  description: String
+  triggerType: WorkflowTriggerType!
+  triggerConditions: JSON
+  steps: [WorkflowStepInput!]!
+  resourceType: String!
+}
+
+input WorkflowStepInput {
+  order: Int!
+  type: WorkflowStepType!
+  name: String!
+  config: JSON
+  assigneeType: String
+  assigneeId: String
+  timeoutMinutes: Int
+  onTimeout: String
+}
+
+input StartWorkflowInput {
+  templateId: ID!
+  resourceType: String!
+  resourceId: String!
+  resourceName: String
+}
+
+input WorkflowActionInput {
+  instanceId: ID!
+  action: String!
+  comment: String
+}
+
+# ==================== MEDIA ASSET MANAGEMENT ====================
+
+type MediaAssetItem {
+  id: ID!
+  filename: String!
+  originalFilename: String!
+  mimeType: String!
+  fileSize: Int!
+  filePath: String!
+  cdnUrl: String
+  thumbnailUrl: String
+  type: MediaType!
+  category: String
+  title: String!
+  titleHe: String
+  description: String
+  tags: [String!]!
+  duration: Float
+  width: Int
+  height: Int
+  codec: String
+  rightsHolder: String
+  licenseType: String
+  licenseExpiresAt: DateTime
+  version: Int!
+  status: MediaStatus!
+  isPublic: Boolean!
+  uploadedBy: String!
+  uploadedByName: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type MediaFolderItem {
+  id: ID!
+  name: String!
+  nameHe: String
+  parentFolderId: ID
+  path: String!
+  createdBy: String!
+  createdAt: DateTime!
+}
+
+type MediaAssetConnection {
+  items: [MediaAssetItem!]!
+  totalCount: Int!
+  hasMore: Boolean!
+}
+
+enum MediaType {
+  VIDEO
+  AUDIO
+  IMAGE
+  DOCUMENT
+  GRAPHIC
+  OTHER
+}
+
+enum MediaStatus {
+  UPLOADING
+  PROCESSING
+  READY
+  ARCHIVED
+  DELETED
+}
+
+input CreateMediaAssetInput {
+  filename: String!
+  originalFilename: String!
+  mimeType: String!
+  fileSize: Int!
+  filePath: String!
+  type: MediaType!
+  category: String
+  title: String!
+  titleHe: String
+  description: String
+  tags: [String!]
+  folderId: ID
+}
+
+input UpdateMediaAssetInput {
+  title: String
+  titleHe: String
+  description: String
+  tags: [String!]
+  category: String
+  rightsHolder: String
+  licenseType: String
+  licenseExpiresAt: DateTime
+}
+
+input MediaAssetFilter {
+  type: MediaType
+  category: String
+  status: MediaStatus
+  tags: [String!]
+  searchTerm: String
+  folderId: ID
+  uploadedBy: String
+}
+
+# ==================== RIGHTS & LICENSING ====================
+
+type BroadcastRightItem {
+  id: ID!
+  title: String!
+  titleHe: String
+  contentType: String!
+  sport: String
+  league: String
+  season: String
+  rightsHolder: String!
+  contractNumber: String
+  contactPerson: String
+  contactEmail: String
+  territories: [String!]!
+  platforms: [String!]!
+  channels: [String!]!
+  startDate: DateTime!
+  endDate: DateTime!
+  blackoutRegions: [String!]
+  maxRebroadcasts: Int
+  delayMinutes: Int
+  exclusivity: String!
+  cost: Float!
+  currency: String!
+  status: RightStatus!
+  contractDocuments: [ContractDocument!]
+  notes: String
+  createdBy: String!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type ContractDocument {
+  name: String!
+  url: String!
+  uploadedAt: DateTime!
+}
+
+enum RightStatus {
+  DRAFT
+  ACTIVE
+  EXPIRING_SOON
+  EXPIRED
+  TERMINATED
+}
+
+input CreateBroadcastRightInput {
+  title: String!
+  titleHe: String
+  contentType: String!
+  sport: String
+  league: String
+  season: String
+  rightsHolder: String!
+  contractNumber: String
+  territories: [String!]!
+  platforms: [String!]!
+  channels: [String!]
+  startDate: DateTime!
+  endDate: DateTime!
+  exclusivity: String
+  cost: Float
+  currency: String
+  notes: String
+}
+
+input UpdateBroadcastRightInput {
+  title: String
+  titleHe: String
+  rightsHolder: String
+  territories: [String!]
+  platforms: [String!]
+  channels: [String!]
+  startDate: DateTime
+  endDate: DateTime
+  exclusivity: String
+  cost: Float
+  status: RightStatus
+  notes: String
+}
+
+input BroadcastRightFilter {
+  contentType: String
+  sport: String
+  league: String
+  status: RightStatus
+  rightsHolder: String
+  searchTerm: String
+  expiringWithinDays: Int
+}
+
+# ==================== HELP & SUPPORT ====================
+
+type HelpArticleItem {
+  id: ID!
+  title: String!
+  titleHe: String
+  slug: String!
+  content: String!
+  contentHe: String
+  excerpt: String
+  excerptHe: String
+  category: String!
+  tags: [String!]!
+  order: Int!
+  isPublished: Boolean!
+  viewCount: Int!
+  helpfulCount: Int!
+  notHelpfulCount: Int!
+  authorName: String!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type SupportTicketItem {
+  id: ID!
+  ticketNumber: String!
+  subject: String!
+  description: String!
+  category: String!
+  priority: Priority!
+  status: SaasTicketStatus!
+  createdByName: String!
+  createdByEmail: String!
+  assignedToName: String
+  messages: [TicketMessage!]!
+  tags: [String!]!
+  resolvedAt: DateTime
+  closedAt: DateTime
+  satisfactionRating: Int
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type TicketMessage {
+  senderId: String!
+  senderName: String!
+  senderType: String!
+  message: String!
+  attachments: [TicketAttachment!]
+  createdAt: DateTime!
+}
+
+type TicketAttachment {
+  name: String!
+  url: String!
+}
+
+type ChangelogItem {
+  id: ID!
+  version: String!
+  title: String!
+  titleHe: String
+  description: String!
+  descriptionHe: String
+  changes: [ChangelogChange!]!
+  isPublished: Boolean!
+  publishedAt: DateTime
+  authorName: String!
+  createdAt: DateTime!
+}
+
+type ChangelogChange {
+  type: String!
+  description: String!
+  descriptionHe: String
+}
+
+enum SaasTicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_ON_CUSTOMER
+  WAITING_ON_SUPPORT
+  RESOLVED
+  CLOSED
+}
+
+input CreateSupportTicketInput {
+  subject: String!
+  description: String!
+  category: String
+  priority: Priority
+}
+
+input AddTicketMessageInput {
+  ticketId: ID!
+  message: String!
+}
+
+# ==================== API KEYS & WEBHOOKS ====================
+
+type ApiKeyItem {
+  id: ID!
+  name: String!
+  description: String
+  keyPrefix: String!
+  scopes: [String!]!
+  rateLimit: Int!
+  isActive: Boolean!
+  lastUsedAt: DateTime
+  usageCount: Int!
+  expiresAt: DateTime
+  createdByName: String!
+  createdAt: DateTime!
+}
+
+type ApiKeyCreatedResponse {
+  apiKey: ApiKeyItem!
+  secret: String!
+}
+
+type WebhookItem {
+  id: ID!
+  name: String!
+  description: String
+  url: String!
+  events: [String!]!
+  isActive: Boolean!
+  lastDeliveryAt: DateTime
+  lastDeliveryStatus: Int
+  consecutiveFailures: Int!
+  retryCount: Int!
+  timeoutSeconds: Int!
+  createdAt: DateTime!
+}
+
+type WebhookDeliveryItem {
+  id: ID!
+  event: String!
+  responseStatus: Int
+  status: String!
+  attempts: Int!
+  deliveredAt: DateTime
+  durationMs: Int
+  error: String
+  createdAt: DateTime!
+}
+
+input CreateApiKeyInput {
+  name: String!
+  description: String
+  scopes: [String!]!
+  rateLimit: Int
+  expiresAt: DateTime
+}
+
+input CreateWebhookInput {
+  name: String!
+  description: String
+  url: String!
+  events: [String!]!
+  retryCount: Int
+  timeoutSeconds: Int
+  customHeaders: [WebhookHeaderInput!]
+}
+
+input UpdateWebhookInput {
+  name: String
+  url: String
+  events: [String!]
+  isActive: Boolean
+  retryCount: Int
+  timeoutSeconds: Int
+}
+
+input WebhookHeaderInput {
+  key: String!
+  value: String!
+}
+
+# ==================== LIVE MONITORING ====================
+
+type LiveStreamStatus {
+  id: ID!
+  name: String!
+  type: String!
+  status: StreamHealthStatus!
+  url: String
+  bitrate: Float
+  frameRate: Float
+  resolution: String
+  uptime: Float
+  errorCount: Int!
+  lastErrorAt: DateTime
+  lastError: String
+  metadata: JSON
+  updatedAt: DateTime!
+}
+
+type SignalMonitorEntry {
+  id: ID!
+  sourceName: String!
+  sourceType: String!
+  signalPresent: Boolean!
+  signalStrength: Float
+  audioLevels: [Float!]
+  videoFormat: String
+  encoderStatus: String
+  networkLatency: Float
+  packetLoss: Float
+  alerts: [MonitorAlert!]
+  updatedAt: DateTime!
+}
+
+type MonitorAlert {
+  severity: String!
+  message: String!
+  timestamp: DateTime!
+}
+
+enum StreamHealthStatus {
+  HEALTHY
+  DEGRADED
+  DOWN
+  UNKNOWN
+}
+
+# ==================== SAAS QUERIES ====================
+
+extend type Query {
+  # Organization
+  myOrganization: Organization
+  organization(id: ID!): Organization
+  organizationBySlug(slug: String!): Organization
+  organizationInvites: [OrganizationInvite!]!
+  
+  # Billing
+  mySubscription: SubscriptionInfo
+  invoices(limit: Int, offset: Int): [InvoiceRecord!]!
+  paymentMethods: [PaymentMethodInfo!]!
+  
+  # Audit
+  auditLogs(filter: AuditLogFilter, limit: Int, offset: Int): AuditLogConnection!
+  
+  # Notifications
+  notifications(limit: Int, offset: Int, unreadOnly: Boolean): NotificationConnection!
+  notificationPreferences: NotificationPreferences
+  
+  # Workflows
+  workflowTemplates(resourceType: String): [WorkflowTemplateItem!]!
+  workflowTemplate(id: ID!): WorkflowTemplateItem
+  workflowInstances(status: WorkflowStatus, resourceType: String, limit: Int, offset: Int): [WorkflowInstanceItem!]!
+  workflowInstance(id: ID!): WorkflowInstanceItem
+  myPendingApprovals: [WorkflowInstanceItem!]!
+  
+  # Media Assets
+  mediaAssets(filter: MediaAssetFilter, limit: Int, offset: Int): MediaAssetConnection!
+  mediaAsset(id: ID!): MediaAssetItem
+  mediaFolders(parentFolderId: ID): [MediaFolderItem!]!
+  
+  # Rights & Licensing
+  broadcastRights(filter: BroadcastRightFilter, limit: Int, offset: Int): [BroadcastRightItem!]!
+  broadcastRight(id: ID!): BroadcastRightItem
+  expiringRights(days: Int!): [BroadcastRightItem!]!
+  
+  # Help & Support
+  helpArticles(category: String, searchTerm: String): [HelpArticleItem!]!
+  helpArticle(slug: String!): HelpArticleItem
+  saasTickets(status: SaasTicketStatus, limit: Int, offset: Int): [SupportTicketItem!]!
+  saasTicket(id: ID!): SupportTicketItem
+  mySaasTickets: [SupportTicketItem!]!
+  changelog(limit: Int): [ChangelogItem!]!
+  
+  # API Keys & Webhooks
+  apiKeys: [ApiKeyItem!]!
+  webhooks: [WebhookItem!]!
+  webhookDeliveries(webhookId: ID!, limit: Int): [WebhookDeliveryItem!]!
+  
+  # Live Monitoring
+  liveStreams: [LiveStreamStatus!]!
+  signalMonitor: [SignalMonitorEntry!]!
+  
+  # Global Search
+  globalSearch(query: String!, types: [String!], limit: Int): JSON!
+}
+
+# ==================== SAAS MUTATIONS ====================
+
+extend type Mutation {
+  # Organization
+  createOrganization(input: CreateOrganizationInput!): Organization!
+  updateOrganization(input: UpdateOrganizationInput!): Organization!
+  updateOrganizationSettings(input: UpdateOrganizationSettingsInput!): Organization!
+  updateFeatureFlags(input: UpdateFeatureFlagsInput!): Organization!
+  updateSecuritySettings(input: UpdateSecuritySettingsInput!): Organization!
+  inviteUserToOrganization(input: InviteUserInput!): OrganizationInvite!
+  acceptOrganizationInvite(token: String!): Boolean!
+  cancelOrganizationInvite(inviteId: ID!): Boolean!
+  
+  # Billing
+  changePlan(input: ChangePlanInput!): SubscriptionInfo!
+  cancelSubscription(reason: String): SubscriptionInfo!
+  resumeSubscription: SubscriptionInfo!
+  
+  # Notifications
+  markNotificationRead(id: ID!): NotificationItem!
+  markAllNotificationsRead: Boolean!
+  dismissNotification(id: ID!): Boolean!
+  updateNotificationPreferences(input: UpdateNotificationPreferencesInput!): NotificationPreferences!
+  sendSaasNotification(recipientId: String!, type: NotificationType!, title: String!, message: String!, actionUrl: String): NotificationItem!
+  
+  # Workflows
+  createWorkflowTemplate(input: CreateWorkflowTemplateInput!): WorkflowTemplateItem!
+  updateWorkflowTemplate(id: ID!, input: CreateWorkflowTemplateInput!): WorkflowTemplateItem!
+  deleteWorkflowTemplate(id: ID!): Boolean!
+  toggleWorkflowTemplate(id: ID!, isActive: Boolean!): WorkflowTemplateItem!
+  startWorkflow(input: StartWorkflowInput!): WorkflowInstanceItem!
+  processWorkflowAction(input: WorkflowActionInput!): WorkflowInstanceItem!
+  cancelWorkflow(id: ID!, reason: String): WorkflowInstanceItem!
+  
+  # Media Assets
+  createMediaAsset(input: CreateMediaAssetInput!): MediaAssetItem!
+  updateMediaAsset(id: ID!, input: UpdateMediaAssetInput!): MediaAssetItem!
+  deleteMediaAsset(id: ID!): Boolean!
+  archiveMediaAsset(id: ID!): MediaAssetItem!
+  createMediaFolder(name: String!, nameHe: String, parentFolderId: ID): MediaFolderItem!
+  deleteMediaFolder(id: ID!): Boolean!
+  
+  # Rights & Licensing
+  createBroadcastRight(input: CreateBroadcastRightInput!): BroadcastRightItem!
+  updateBroadcastRight(id: ID!, input: UpdateBroadcastRightInput!): BroadcastRightItem!
+  deleteBroadcastRight(id: ID!): Boolean!
+  
+  # Help & Support
+  createSaasTicket(input: CreateSupportTicketInput!): SupportTicketItem!
+  addTicketMessage(input: AddTicketMessageInput!): SupportTicketItem!
+  closeSupportTicket(id: ID!, satisfactionRating: Int, satisfactionComment: String): SupportTicketItem!
+  rateHelpArticle(articleId: ID!, helpful: Boolean!): HelpArticleItem!
+  
+  # API Keys & Webhooks
+  createApiKey(input: CreateApiKeyInput!): ApiKeyCreatedResponse!
+  revokeApiKey(id: ID!): Boolean!
+  createWebhook(input: CreateWebhookInput!): WebhookItem!
+  updateWebhook(id: ID!, input: UpdateWebhookInput!): WebhookItem!
+  deleteWebhook(id: ID!): Boolean!
+  testWebhook(id: ID!): Boolean!
+}
+
+# ==================== SAAS SUBSCRIPTIONS ====================
+
+extend type Subscription {
+  # Notification real-time
+  notificationReceived: NotificationItem!
+  
+  # Workflow updates
+  workflowUpdated(instanceId: ID): WorkflowInstanceItem!
+  
+  # Live monitoring
+  liveStreamStatusChanged: LiveStreamStatus!
+  signalMonitorUpdated: SignalMonitorEntry!
+}
+
+# ========================================================================================
+# STREAMER + PODCAST PLATFORM
+# ========================================================================================
+
+type StreamEventItem {
+  id: ID!
+  userId: String!
+  title: String!
+  description: String
+  platforms: [String!]!
+  scheduledDate: String!
+  startTime: String
+  endTime: String
+  category: String
+  tags: [String!]!
+  status: String!
+  streamType: String!
+  goLiveReminder: Int!
+  equipmentChecklist: [String!]!
+  collaborators: [StreamCollaborator!]
+  notes: String
+  thumbnailUrl: String
+  vodUrl: String
+  isRecurring: Boolean!
+  metrics: StreamMetrics
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type StreamCollaborator {
+  name: String!
+  platform: String
+  role: String
+}
+
+type StreamMetrics {
+  peakViewers: Int
+  avgViewers: Int
+  chatMessages: Int
+  newFollowers: Int
+  revenue: Float
+}
+
+type PodcastEpisodeItem {
+  id: ID!
+  userId: String!
+  title: String!
+  description: String
+  showName: String
+  showId: String
+  episodeNumber: Int
+  seasonNumber: Int
+  scheduledRecordDate: String
+  scheduledPublishDate: String
+  recordStartTime: String
+  recordEndTime: String
+  status: String!
+  format: String!
+  guests: [EpisodeGuest!]
+  topics: [String!]!
+  showNotes: String
+  script: String
+  recordingFileUrl: String
+  editedFileUrl: String
+  coverArtUrl: String
+  durationMinutes: Int
+  platformsPublished: [EpisodePlatform!]
+  tags: [String!]!
+  metrics: EpisodeMetrics
+  monetization: EpisodeMonetization
+  relatedStreamId: String
+  notes: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type EpisodeGuest {
+  name: String!
+  title: String
+  email: String
+  socialHandle: String
+  confirmed: Boolean!
+}
+
+type EpisodePlatform {
+  platform: String!
+  url: String
+  publishedAt: DateTime
+}
+
+type EpisodeMetrics {
+  downloads: Int
+  listens: Int
+  avgListenDuration: Float
+  completionRate: Float
+  reviews: Int
+  rating: Float
+}
+
+type EpisodeMonetization {
+  hasSponsor: Boolean!
+  sponsorName: String
+  sponsorReadType: String
+  sponsorAmount: Float
+  adRevenue: Float
+}
+
+type PodcastShowItem {
+  id: ID!
+  userId: String!
+  name: String!
+  description: String
+  coverArtUrl: String
+  category: String!
+  language: String!
+  authorName: String
+  websiteUrl: String
+  rssFeedUrl: String
+  platforms: [ShowPlatform!]
+  isActive: Boolean!
+  totalEpisodes: Int!
+  frequency: String!
+  averageDurationMinutes: Int
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type ShowPlatform {
+  platform: String!
+  profileUrl: String
+  subscriberCount: Int
+}
+
+type GuestContactItem {
+  id: ID!
+  userId: String!
+  name: String!
+  email: String
+  phone: String
+  title: String
+  company: String
+  bio: String
+  socialLinks: GuestSocialLinks
+  avatarUrl: String
+  topicsExpertise: [String!]!
+  previousAppearances: [GuestAppearance!]
+  status: String!
+  rating: Int
+  notes: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type GuestSocialLinks {
+  twitter: String
+  linkedin: String
+  instagram: String
+  website: String
+}
+
+type GuestAppearance {
+  episodeId: String
+  date: String
+  topic: String
+}
+
+type ClipItem {
+  id: ID!
+  userId: String!
+  title: String!
+  sourceType: String!
+  sourceStreamId: String
+  sourceEpisodeId: String
+  platform: String
+  clipUrl: String
+  thumbnailUrl: String
+  startTimestamp: Int
+  endTimestamp: Int
+  duration: Int
+  tags: [String!]!
+  status: String!
+  clipType: String!
+  publishedTo: [ClipPublish!]
+  viewCount: Int!
+  likeCount: Int!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type ClipPublish {
+  platform: String!
+  url: String
+  publishedAt: DateTime
+}
+
+type RevenueEntryItem {
+  id: ID!
+  userId: String!
+  date: String!
+  source: String!
+  amount: Float!
+  currency: String!
+  platform: String
+  notes: String
+  relatedStreamId: String
+  relatedEpisodeId: String
+  createdAt: DateTime!
+}
+
+type StreamerActivityItem {
+  id: ID!
+  userId: String!
+  action: String!
+  entityType: String!
+  entityId: String
+  description: String!
+  metadata: JSON
+  createdAt: DateTime!
+}
+
+# ---- Inputs ----
+
+input CreateStreamEventInput {
+  title: String!
+  description: String
+  platforms: [String!]
+  scheduledDate: String!
+  startTime: String
+  endTime: String
+  category: String
+  tags: [String!]
+  status: String
+  streamType: String
+  goLiveReminder: Int
+  equipmentChecklist: [String!]
+  collaborators: [StreamCollaboratorInput!]
+  notes: String
+  thumbnailUrl: String
+  isRecurring: Boolean
+  recurringPattern: String
+}
+
+input UpdateStreamEventInput {
+  title: String
+  description: String
+  platforms: [String!]
+  scheduledDate: String
+  startTime: String
+  endTime: String
+  category: String
+  tags: [String!]
+  status: String
+  streamType: String
+  goLiveReminder: Int
+  equipmentChecklist: [String!]
+  collaborators: [StreamCollaboratorInput!]
+  notes: String
+  thumbnailUrl: String
+  vodUrl: String
+  metrics: StreamMetricsInput
+}
+
+input StreamCollaboratorInput {
+  name: String!
+  platform: String
+  role: String
+}
+
+input StreamMetricsInput {
+  peakViewers: Int
+  avgViewers: Int
+  chatMessages: Int
+  newFollowers: Int
+  revenue: Float
+}
+
+input CreatePodcastEpisodeInput {
+  title: String!
+  description: String
+  showName: String
+  showId: String
+  episodeNumber: Int
+  seasonNumber: Int
+  scheduledRecordDate: String
+  scheduledPublishDate: String
+  recordStartTime: String
+  recordEndTime: String
+  status: String
+  format: String
+  guests: [EpisodeGuestInput!]
+  topics: [String!]
+  showNotes: String
+  script: String
+  coverArtUrl: String
+  tags: [String!]
+  equipmentChecklist: [String!]
+  relatedStreamId: String
+  notes: String
+}
+
+input UpdatePodcastEpisodeInput {
+  title: String
+  description: String
+  showName: String
+  showId: String
+  episodeNumber: Int
+  seasonNumber: Int
+  scheduledRecordDate: String
+  scheduledPublishDate: String
+  recordStartTime: String
+  recordEndTime: String
+  status: String
+  format: String
+  guests: [EpisodeGuestInput!]
+  topics: [String!]
+  showNotes: String
+  script: String
+  recordingFileUrl: String
+  editedFileUrl: String
+  coverArtUrl: String
+  durationMinutes: Int
+  tags: [String!]
+  notes: String
+}
+
+input EpisodeGuestInput {
+  name: String!
+  title: String
+  email: String
+  socialHandle: String
+  confirmed: Boolean
+}
+
+input CreatePodcastShowInput {
+  name: String!
+  description: String
+  coverArtUrl: String
+  category: String
+  language: String
+  authorName: String
+  websiteUrl: String
+  rssFeedUrl: String
+  frequency: String
+}
+
+input UpdatePodcastShowInput {
+  name: String
+  description: String
+  coverArtUrl: String
+  category: String
+  language: String
+  authorName: String
+  websiteUrl: String
+  rssFeedUrl: String
+  frequency: String
+  isActive: Boolean
+}
+
+input CreateGuestContactInput {
+  name: String!
+  email: String
+  phone: String
+  title: String
+  company: String
+  bio: String
+  topicsExpertise: [String!]
+  status: String
+  notes: String
+}
+
+input UpdateGuestContactInput {
+  name: String
+  email: String
+  phone: String
+  title: String
+  company: String
+  bio: String
+  topicsExpertise: [String!]
+  status: String
+  rating: Int
+  notes: String
+}
+
+input CreateClipInput {
+  title: String!
+  sourceType: String
+  sourceStreamId: String
+  sourceEpisodeId: String
+  platform: String
+  clipUrl: String
+  thumbnailUrl: String
+  startTimestamp: Int
+  endTimestamp: Int
+  duration: Int
+  tags: [String!]
+  clipType: String
+}
+
+input UpdateClipInput {
+  title: String
+  status: String
+  tags: [String!]
+  clipUrl: String
+  thumbnailUrl: String
+}
+
+input CreateRevenueEntryInput {
+  date: String!
+  source: String!
+  amount: Float!
+  currency: String
+  platform: String
+  notes: String
+  relatedStreamId: String
+  relatedEpisodeId: String
+}
+
+# ---- Streamer Queries ----
+
+extend type Query {
+  # Stream events
+  streamerEvents(limit: Int, offset: Int, status: String): [StreamEventItem!]!
+  streamerEvent(id: ID!): StreamEventItem
+
+  # Podcast episodes
+  podcastEpisodes(limit: Int, offset: Int, status: String, showId: String): [PodcastEpisodeItem!]!
+  podcastEpisode(id: ID!): PodcastEpisodeItem
+
+  # Podcast shows
+  podcastShows: [PodcastShowItem!]!
+  podcastShow(id: ID!): PodcastShowItem
+
+  # Guest contacts
+  guestContacts(status: String, searchTerm: String): [GuestContactItem!]!
+  guestContact(id: ID!): GuestContactItem
+
+  # Clips
+  streamerClips(status: String, sourceType: String, limit: Int): [ClipItem!]!
+  streamerClip(id: ID!): ClipItem
+
+  # Revenue
+  revenueEntries(limit: Int, offset: Int): [RevenueEntryItem!]!
+
+  # Activity log
+  streamerActivities(limit: Int): [StreamerActivityItem!]!
+
+  # Streamer profile (me)
+  streamerMe: User
+}
+
+# ---- Streamer Mutations ----
+
+extend type Mutation {
+  # Stream events
+  createStreamEvent(input: CreateStreamEventInput!): StreamEventItem!
+  updateStreamEvent(id: ID!, input: UpdateStreamEventInput!): StreamEventItem!
+  deleteStreamEvent(id: ID!): Boolean!
+
+  # Podcast episodes
+  createPodcastEpisode(input: CreatePodcastEpisodeInput!): PodcastEpisodeItem!
+  updatePodcastEpisode(id: ID!, input: UpdatePodcastEpisodeInput!): PodcastEpisodeItem!
+  deletePodcastEpisode(id: ID!): Boolean!
+
+  # Podcast shows
+  createPodcastShow(input: CreatePodcastShowInput!): PodcastShowItem!
+  updatePodcastShow(id: ID!, input: UpdatePodcastShowInput!): PodcastShowItem!
+  deletePodcastShow(id: ID!): Boolean!
+
+  # Guest contacts
+  createGuestContact(input: CreateGuestContactInput!): GuestContactItem!
+  updateGuestContact(id: ID!, input: UpdateGuestContactInput!): GuestContactItem!
+  deleteGuestContact(id: ID!): Boolean!
+
+  # Clips
+  createClip(input: CreateClipInput!): ClipItem!
+  updateClip(id: ID!, input: UpdateClipInput!): ClipItem!
+  deleteClip(id: ID!): Boolean!
+
+  # Revenue
+  createRevenueEntry(input: CreateRevenueEntryInput!): RevenueEntryItem!
+  deleteRevenueEntry(id: ID!): Boolean!
+
+  # OAuth registration (streamer self-serve)
+  registerStreamer(email: String!, password: String!, displayName: String!): AuthPayload!
 }

@@ -232,7 +232,7 @@ export default function DebugAuthPage() {
             <li>Try to access the dashboard at <a href="/">Home</a></li>
             <li>If you get redirected to login, come back to this page</li>
             <li>The logs will show what happened during the authentication check</li>
-            <li>Look for "NO_VALID_TOKEN" or "REDIRECT_TO_LOGIN" events</li>
+            <li>Look for &quot;NO_VALID_TOKEN&quot; or &quot;REDIRECT_TO_LOGIN&quot; events</li>
             <li><strong>NEW:</strong> Apollo authentication errors will show which GraphQL query failed</li>
           </ol>
         </Card>

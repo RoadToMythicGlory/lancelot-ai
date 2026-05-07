@@ -136,7 +136,7 @@ if (typeof window !== 'undefined') {
 
 const authLink = setContext((operation, { headers }) => {
   // Get the authentication token from local storage if it exists
-  let token = typeof window !== 'undefined' ? localStorage.getItem('auth-token') : null;
+  const token = typeof window !== 'undefined' ? localStorage.getItem('auth-token') : null;
   
   console.log('[Apollo Client] Setting auth header for', operation.operationName, ':', {
     hasToken: !!token,
@@ -205,7 +205,11 @@ const client = new ApolloClient({
       BroadcastEvent: {
         fields: {
           metadata: {
-            merge: true,
+            merge(_existing: any, incoming: any) {
+              // Always prefer incoming metadata - don't deep-merge,
+              // as it can corrupt nested departments/broadcastArray structure
+              return incoming;
+            },
           }
         }
       },

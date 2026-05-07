@@ -21,6 +21,8 @@ import { vendorResolvers } from './resolvers/vendor';
 import { mcrResolvers } from './resolvers/mcrResolvers';
 import { aiResolvers } from './resolvers/ai';
 import { authResolvers } from './resolvers/auth';
+import { saasResolvers } from './resolvers/saas';
+import { streamerResolvers } from './resolvers/streamer';
 import { apiLimiter, graphqlLimiter, websocketLimiter } from './middleware/rateLimiter';
 import { sanitizeError, expressErrorHandler } from './middleware/errorHandler';
 import { securityMiddleware } from './middleware/security';
@@ -29,6 +31,9 @@ import { jwtService } from './services/jwtService';
 import { setupChatSocket, getE2eeFallbackCount } from './socket/chat-socket';
 import { buildGraphQLContext } from './middleware/context';
 import { pubsub } from './utils/pubsub';
+import { startScheduler, stopScheduler } from './services/jobScheduler';
+import { metrics } from './services/metrics';
+import { oauthRouter } from './services/oauthService';
 
 // Load GraphQL schema
 const typeDefs = readFileSync(join(__dirname, 'schema/schema.graphql'), 'utf8');
@@ -44,6 +49,8 @@ const resolvers = {
     equipmentAssignmentsByEvent: broadcastResolvers.Query.equipmentAssignmentsByEvent,
     equipmentAssignments: broadcastResolvers.Query.equipmentAssignments,
     equipmentHistory: broadcastResolvers.Query.equipmentHistory,
+    externalBroadcastPresets: broadcastResolvers.Query.externalBroadcastPresets,
+    externalBroadcastPreset: broadcastResolvers.Query.externalBroadcastPreset,
     // Add shifts queries
     ...shiftsResolvers.Query,
     // Add user queries (overriding users from shifts)
@@ -60,6 +67,10 @@ const resolvers = {
     ...mcrResolvers.Query,
     // Add AI queries
     ...aiResolvers.Query,
+    // Add SaaS Platform queries
+    ...saasResolvers.Query,
+    // Add Streamer + Podcast queries
+    ...streamerResolvers.Query,
     health: () => ({
       status: 'OK',
       timestamp: new Date().toISOString(),
@@ -84,6 +95,9 @@ const resolvers = {
     disableEquipment: broadcastResolvers.Mutation.disableEquipment,
     enableEquipment: broadcastResolvers.Mutation.enableEquipment,
     undoEquipmentTransfer: broadcastResolvers.Mutation.undoEquipmentTransfer,
+    createExternalBroadcastPreset: broadcastResolvers.Mutation.createExternalBroadcastPreset,
+    updateExternalBroadcastPreset: broadcastResolvers.Mutation.updateExternalBroadcastPreset,
+    deleteExternalBroadcastPreset: broadcastResolvers.Mutation.deleteExternalBroadcastPreset,
     // Add shifts mutations
     ...shiftsResolvers.Mutation,
     // Add user mutations
@@ -101,7 +115,11 @@ const resolvers = {
     // Add AI mutations
     ...aiResolvers.Mutation,
     // Authentication mutation - MongoDB only
-    ...authResolvers.Mutation
+    ...authResolvers.Mutation,
+    // SaaS Platform mutations
+    ...saasResolvers.Mutation,
+    // Streamer + Podcast mutations
+    ...streamerResolvers.Mutation
   },
   Subscription: {
     ...enhancedBroadcastResolvers.Subscription,
@@ -109,6 +127,8 @@ const resolvers = {
     ...(shiftsResolvers.Subscription || {}),
     // Add MCR subscriptions
     ...(mcrResolvers.Subscription || {}),
+    // Add SaaS subscriptions
+    ...(saasResolvers.Subscription || {}),
   },
   // Type resolvers - removed as they're not needed for the simplified schema
   // Scalar resolvers
@@ -165,6 +185,20 @@ async function startServer() {
           ? { e2eeFallbackCount: e2eeFallbacks }
           : undefined,
       });
+    });
+
+    // OAuth routes for Streamer app (social login)
+    app.use('/auth', oauthRouter);
+
+    // Prometheus metrics endpoint
+    app.get('/metrics', (req, res) => {
+      res.set('Content-Type', 'text/plain');
+      res.send(metrics.getPrometheusOutput());
+    });
+
+    // JSON metrics endpoint (for dashboard)
+    app.get('/metrics/json', (req, res) => {
+      res.json(metrics.getJsonMetrics());
     });
 
     // Debug endpoint to check JWT token
@@ -302,6 +336,12 @@ async function startServer() {
         console.log(`🏥 Health check: http://localhost:${PORT}/health`);
         console.log(`📦 Loaded resolvers: broadcasts, broadcasts-enhanced`);
         console.log(`🍃 MongoDB: Connected to broadcast collections`);
+        console.log(`📊 Metrics endpoint: http://localhost:${PORT}/metrics`);
+        
+        // Start background job scheduler
+        startScheduler();
+        console.log(`⏰ Background job scheduler started`);
+        
         resolve();
       });
     });
@@ -309,6 +349,7 @@ async function startServer() {
     // Graceful shutdown
     process.on('SIGTERM', async () => {
       console.log('SIGTERM signal received: closing HTTP server');
+      stopScheduler();
       await server.stop();
       await closeMongoDB();
       httpServer.close(() => {

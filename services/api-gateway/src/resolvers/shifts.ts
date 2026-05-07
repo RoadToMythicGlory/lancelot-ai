@@ -1566,6 +1566,14 @@ export const shiftsResolvers = {
       
       if (!template) throw new Error('Template not found');
       if (!template.active) throw new Error('Template is not active');
+
+      // Look up department config to get the correct start/end times for this shift type
+      const departmentConfig = await db.collection('department_shift_configs').findOne({
+        departmentId: template.department
+      });
+      const shiftTypeConfig = departmentConfig?.shiftTypes?.find((st: any) =>
+        st.type === template.shiftType
+      );
       
       const shifts = [];
       const startDate = new Date(args.startDate);
@@ -1582,6 +1590,8 @@ export const shiftsResolvers = {
             requiredWorkers: template.requiredWorkers,
             assignedWorkers: [],
             templateId: template._id.toString(),
+            startTime: template.startTime || shiftTypeConfig?.defaultStartTime || null,
+            endTime: template.endTime || shiftTypeConfig?.defaultEndTime || null,
             createdAt: new Date(),
             updatedAt: new Date()
           };
@@ -2789,7 +2799,13 @@ export const shiftsResolvers = {
   // Field resolvers
   Shift: {
     id: (parent: any) => parent._id || parent.id,
-    date: (parent: any) => parent.date.toISOString(),
+    date: (parent: any) => {
+      if (!parent.date) return new Date().toISOString();
+      if (typeof parent.date === 'string') return parent.date;
+      if (parent.date instanceof Date) return parent.date.toISOString();
+      // Fallback: try to construct a Date
+      return new Date(parent.date).toISOString();
+    },
     assignedWorkers: async (parent: any, _: any, context: any) => {
       const db = await getDB();
       const workers = [];

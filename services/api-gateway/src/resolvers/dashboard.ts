@@ -124,30 +124,21 @@ export const dashboardResolvers = {
         const weekEnd = new Date(weekStart);
         weekEnd.setDate(weekStart.getDate() + 7);
 
-        // Find shifts for the week
+        // Find shifts for the week for this user.
+        // IMPORTANT: shifts are assigned via `assignedWorkers` array (not a top-level `userId` field).
+        // Support both common shapes: assignedWorkers.userId and assignedWorkers.user.id.
         const shifts = await shiftsCollection.find({
-          userId: targetUserId,
-          date: {
-            $gte: weekStart,
-            $lt: weekEnd
-          },
-          status: { $ne: 'cancelled' }
+          date: { $gte: weekStart, $lt: weekEnd },
+          status: { $ne: 'cancelled' },
+          $or: [
+            { 'assignedWorkers.userId': targetUserId },
+            { 'assignedWorkers.user.id': targetUserId },
+          ],
         }).sort({ date: 1, startTime: 1 }).toArray();
-        
-        // Filter out past shifts
-        const now = new Date();
-        const upcomingShifts = shifts.filter((shift: any) => {
-          const shiftDateTime = new Date(shift.date);
-          if (shift.startTime) {
-            const [hours, minutes] = shift.startTime.split(':');
-            shiftDateTime.setHours(parseInt(hours), parseInt(minutes));
-          }
-          return shiftDateTime > now;
-        });
 
         // Get user info if needed
         let userInfo = null;
-        if (targetUserId && upcomingShifts.length > 0) {
+        if (targetUserId && shifts.length > 0) {
           const user = await usersCollection.findOne({ _id: new ObjectId(targetUserId) });
           userInfo = user ? {
             id: user._id.toString(),
@@ -155,19 +146,43 @@ export const dashboardResolvers = {
           } : null;
         }
 
-        return upcomingShifts.map((shift: any) => ({
-          id: shift._id.toString(),
-          date: shift.date.toISOString(),
-          startTime: shift.startTime || '09:00',
-          endTime: shift.endTime || '17:00',
-          shiftType: shift.shiftType || 'regular',
-          department: shift.department || 'General',
-          status: shift.status || 'scheduled',
-          user: userInfo || {
-            id: targetUserId,
-            displayName: 'User'
+        // Build a map of department configs so we can resolve default start/end times
+        // for shifts that don't have them stored directly.
+        const deptConfigsCollection = mongoDb.collection('department_shift_configs');
+        const uniqueDepts = [...new Set(shifts.map((s: any) => s.department).filter(Boolean))];
+        const deptConfigDocs = uniqueDepts.length > 0
+          ? await deptConfigsCollection.find({ departmentId: { $in: uniqueDepts } }).toArray()
+          : [];
+        const deptConfigMap = new Map(deptConfigDocs.map((d: any) => [d.departmentId, d]));
+
+        // Return all shifts for the week (UI will dim past shifts if needed)
+        return shifts.map((shift: any) => {
+          const shiftDate: Date = shift.date instanceof Date ? shift.date : new Date(shift.date);
+
+          // Resolve start/end time: prefer stored values, then look up department shift-type config
+          let startTime = shift.startTime;
+          let endTime = shift.endTime;
+          if (!startTime || !endTime) {
+            const config = deptConfigMap.get(shift.department);
+            const stConfig = config?.shiftTypes?.find((st: any) => st.type === shift.shiftType);
+            if (!startTime) startTime = stConfig?.defaultStartTime || null;
+            if (!endTime) endTime = stConfig?.defaultEndTime || null;
           }
-        }));
+
+          return ({
+            id: shift._id.toString(),
+            date: shiftDate.toISOString(),
+            startTime: startTime || '',
+            endTime: endTime || '',
+            shiftType: shift.shiftType || 'regular',
+            department: shift.department || 'General',
+            status: shift.status || 'scheduled',
+            user: userInfo || {
+              id: targetUserId,
+              displayName: 'User'
+            }
+          });
+        });
       } catch (error) {
         console.error('Error fetching weekly shifts:', error);
         return [];

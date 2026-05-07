@@ -15,8 +15,20 @@ import {
   XMarkIcon,
   ChevronDoubleLeftIcon,
   ChevronDoubleRightIcon,
-  ChartBarIcon
+  ChartBarIcon,
+  Cog6ToothIcon,
+  CreditCardIcon,
+  ShieldCheckIcon,
+  PhotoIcon,
+  DocumentCheckIcon,
+  ArrowPathIcon,
+  QuestionMarkCircleIcon,
+  UserCircleIcon,
+  GlobeAltIcon,
 } from '@heroicons/react/24/outline'
+import NotificationCenter from './NotificationCenter'
+import InboxCenter from './InboxCenter'
+import GlobalSearch from './GlobalSearch'
 
 export default function Sidebar() {
   const { user, logout } = useAuth()
@@ -30,14 +42,30 @@ export default function Sidebar() {
     router.push('/login')
   }
 
-  const navigation = [
+  const mainNavigation = [
     { name: 'דף הבית', href: '/', icon: HomeIcon },
     { name: 'משתמשים', href: '/users', icon: UsersIcon },
     { name: 'משמרות', href: '/shifts', icon: CalendarIcon },
     { name: 'תכנונית', href: '/broadcast-planning', icon: CalendarIcon },
+    { name: 'שידורי חוץ', href: '/external-broadcasts', icon: GlobeAltIcon },
     { name: 'MCR', href: '/MCR', icon: ChartBarIcon },
     { name: 'מחסן', href: '/warehouse', icon: CubeIcon },
   ]
+
+  const saasNavigation = [
+    { name: 'מדיה (DAM)', href: '/media', icon: PhotoIcon },
+    { name: 'זכויות שידור', href: '/rights', icon: DocumentCheckIcon },
+    { name: 'תהליכים', href: '/workflows', icon: ArrowPathIcon },
+  ]
+
+  const bottomNavigation = [
+    { name: 'הגדרות', href: '/settings', icon: Cog6ToothIcon },
+    { name: 'חיוב', href: '/billing', icon: CreditCardIcon },
+    { name: 'יומן ביקורת', href: '/audit-log', icon: ShieldCheckIcon },
+    { name: 'עזרה', href: '/help', icon: QuestionMarkCircleIcon },
+  ]
+
+  const navigation = mainNavigation
 
   const isActiveRoute = (href: string) => {
     return pathname === href
@@ -106,9 +134,81 @@ export default function Sidebar() {
             </div>
           </div>
 
+          {/* Search, Inbox & Notifications */}
+          {!isCollapsed && (
+            <div className="px-4 py-2 border-b border-gray-200 flex items-center gap-1">
+              <GlobalSearch />
+              <InboxCenter />
+              <NotificationCenter />
+            </div>
+          )}
+
           {/* Navigation links */}
           <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+            {/* Main navigation */}
             {navigation.map((item) => (
+              <Link
+                key={item.name}
+                href={item.href}
+                onClick={() => setIsMobileOpen(false)}
+                className={`
+                  flex items-center px-3 py-2 rounded-lg transition-colors
+                  ${isActiveRoute(item.href)
+                    ? 'bg-blue-100 text-blue-700 font-medium'
+                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                  }
+                `}
+              >
+                <item.icon className={`h-5 w-5 flex-shrink-0 ${!isCollapsed && 'ml-3'}`} />
+                {!isCollapsed && (
+                  <span className="mr-3">{item.name}</span>
+                )}
+                {isCollapsed && (
+                  <span className="sr-only">{item.name}</span>
+                )}
+              </Link>
+            ))}
+
+            {/* SaaS Features separator */}
+            {!isCollapsed && (
+              <div className="pt-3 pb-1">
+                <p className="px-3 text-xs font-semibold text-gray-400 uppercase">ניהול</p>
+              </div>
+            )}
+
+            {/* SaaS navigation */}
+            {saasNavigation.map((item) => (
+              <Link
+                key={item.name}
+                href={item.href}
+                onClick={() => setIsMobileOpen(false)}
+                className={`
+                  flex items-center px-3 py-2 rounded-lg transition-colors
+                  ${isActiveRoute(item.href)
+                    ? 'bg-blue-100 text-blue-700 font-medium'
+                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                  }
+                `}
+              >
+                <item.icon className={`h-5 w-5 flex-shrink-0 ${!isCollapsed && 'ml-3'}`} />
+                {!isCollapsed && (
+                  <span className="mr-3">{item.name}</span>
+                )}
+                {isCollapsed && (
+                  <span className="sr-only">{item.name}</span>
+                )}
+              </Link>
+            ))}
+
+            {/* Bottom separator */}
+            {!isCollapsed && (
+              <div className="pt-3 pb-1">
+                <p className="px-3 text-xs font-semibold text-gray-400 uppercase">מערכת</p>
+              </div>
+            )}
+
+            {/* Bottom navigation */}
+            {bottomNavigation.map((item) => (
               <Link
                 key={item.name}
                 href={item.href}
@@ -135,12 +235,17 @@ export default function Sidebar() {
           {/* User info and logout */}
           <div className="p-4 border-t border-gray-200">
             {!isCollapsed && (
-              <div className="mb-3 px-3 py-2">
-                <p className="text-sm font-medium text-gray-900">
-                  {user.displayName || user.email}
-                </p>
-                <p className="text-xs text-gray-500">{user.email}</p>
-              </div>
+              <Link href="/profile" className="block mb-3 px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors">
+                <div className="flex items-center gap-2">
+                  <UserCircleIcon className="h-5 w-5 text-gray-400" />
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">
+                      {user.displayName || user.email}
+                    </p>
+                    <p className="text-xs text-gray-500">{user.email}</p>
+                  </div>
+                </div>
+              </Link>
             )}
             
             <button

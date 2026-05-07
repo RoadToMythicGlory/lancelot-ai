@@ -4,7 +4,7 @@ A modern broadcast planning and scheduling system for managing TV broadcast even
 
 ## One-Pager
 
-Open **[ONE_PAGER.html](ONE_PAGER.html)** in a browser for a visual, single-page overview of the platform (architecture, modules, security, deployment, and developer quickstart).
+Open **[ONE_PAGER.html](docs/root-guides/ONE_PAGER.html)** in a browser for a visual, single-page overview of the platform (architecture, modules, security, deployment, and developer quickstart).
 
 ## Features
 

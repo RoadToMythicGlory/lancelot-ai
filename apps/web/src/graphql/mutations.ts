@@ -601,4 +601,59 @@ export const UPDATE_SHIFT = gql`
       updatedAt
     }
   }
-`; 
+`;
+
+// External Broadcast Preset Mutations
+export const CREATE_EXTERNAL_BROADCAST_PRESET = gql`
+  mutation CreateExternalBroadcastPreset($input: CreateExternalBroadcastPresetInput!) {
+    createExternalBroadcastPreset(input: $input) {
+      id
+      name
+      description
+      tags
+      roles {
+        roleKey
+        roleLabel
+        count
+        isCustom
+      }
+      equipment {
+        equipmentId
+        name
+        category
+        count
+      }
+      createdAt
+    }
+  }
+`;
+
+export const UPDATE_EXTERNAL_BROADCAST_PRESET = gql`
+  mutation UpdateExternalBroadcastPreset($id: ID!, $input: UpdateExternalBroadcastPresetInput!) {
+    updateExternalBroadcastPreset(id: $id, input: $input) {
+      id
+      name
+      description
+      tags
+      roles {
+        roleKey
+        roleLabel
+        count
+        isCustom
+      }
+      equipment {
+        equipmentId
+        name
+        category
+        count
+      }
+      updatedAt
+    }
+  }
+`;
+
+export const DELETE_EXTERNAL_BROADCAST_PRESET = gql`
+  mutation DeleteExternalBroadcastPreset($id: ID!) {
+    deleteExternalBroadcastPreset(id: $id)
+  }
+`;

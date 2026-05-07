@@ -40,8 +40,11 @@ export interface BroadcastDetails {
   cameraCount?: number;
 }
 
+export type ActivityStatus = 'READY' | 'NOT_READY' | 'ERROR' | 'UNKNOWN';
+
 export interface ActivityRow {
   id: string;
+  date?: string;
   activityName: string;
   time: string;
   endTime: string;
@@ -51,9 +54,14 @@ export interface ActivityRow {
   channel: string;
   broadcastType?: BroadcastType;
   notes: string;
-  status: 'ready' | 'not_ready' | 'error' | 'unknown';
+  status: ActivityStatus;
   isHidden?: boolean;
   isManual?: boolean;
+  broadcastEventId?: string;
+  createdBy?: { id: string; displayName: string };
+  updatedBy?: { id: string; displayName: string };
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface MCRBulletinPost {

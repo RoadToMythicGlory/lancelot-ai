@@ -1,12 +1,13 @@
 {
   "name": "lancelot-platform",
   "version": "1.0.0",
-  "description": "Channel1 Broadcast & Employee Operations Platform",
+  "description": "Lancelot Operations Platform - Broadcast ERP & Streamer Tools",
   "private": true,
   "scripts": {
     "dev": "concurrently --kill-others --prefix \"[{name}]\" --names \"web,api\" --prefix-colors \"cyan,yellow\" \"npm --prefix apps/web run dev\" \"npm --prefix services/api-gateway run start:dev\"",
     "dev:windows": "concurrently --kill-others --prefix \"[{name}]\" --names \"web,api\" --prefix-colors \"cyan,yellow\" \"powershell -Command 'cd apps/web; npm run dev'\" \"powershell -Command 'cd services/api-gateway; npm run start:dev'\"",
     "dev:web": "npm --prefix apps/web run dev",
+    "dev:streamer": "npm --prefix apps/streamer run dev",
     "dev:api": "npm --prefix services/api-gateway run start:dev",
     "build": "npm run build:web",
     "build:web": "cd apps/web && npm run build",

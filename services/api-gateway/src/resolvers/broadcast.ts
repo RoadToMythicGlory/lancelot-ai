@@ -1,6 +1,7 @@
 import { connectMongoose } from '../config/mongodb';
 import { BroadcastEvent, RoutingConfig } from '../models/broadcast.models';
 import { Equipment, generateBarcode, EquipmentAssignment, EquipmentHistory } from '../models/equipment.models';
+import { ExternalBroadcastPreset } from '../models/externalBroadcastPreset.models';
 import mongoose from 'mongoose';
 import { authenticateUser } from '../middleware/auth';
 
@@ -59,11 +60,44 @@ interface BroadcastEventInput {
 
 export const broadcastResolvers = {
   Query: {
-    departments: async () => {
+    departments: async (_: any, __: any, context: any) => {
       try {
-        // TODO: Implement actual department data from database
-        console.error('❌ Department data not implemented yet - returning empty array');
-        return [];
+        // Require authenticated user (departments are used for staff assignment dropdowns)
+        authenticateUser(context);
+        await ensureMongoConnection();
+
+        // Departments are stored in MongoDB "departments" collection (seed scripts populate it)
+        const db = mongoose.connection.db;
+        if (!db) {
+          console.error('❌ MongoDB connection not ready (db undefined)');
+          return [];
+        }
+        const collection = db.collection('departments');
+        const docs = await collection
+          .find({ isActive: { $ne: false } })
+          .sort({ category: 1, name: 1 })
+          .toArray();
+
+        // Important: users.filter.departmentId expects the department *code* (not Mongo _id).
+        // We therefore expose Department.id as the department code for consistent filtering.
+        return docs
+          .filter((d: any) => d && (d.code || d._id))
+          .map((d: any) => {
+            const code = d.code ? String(d.code) : null;
+            const now = new Date();
+            return {
+              id: code || d._id.toString(),
+              name: d.name ? String(d.name) : (code || 'Unknown'),
+              hebrewName: d.hebrewName ?? d.hebrew_name ?? null,
+              code: code,
+              createdAt: d.createdAt || now,
+              category: d.category ? String(d.category) : 'General',
+              roles: Array.isArray(d.roles) ? d.roles : [],
+              description: d.description ?? null,
+              isActive: d.isActive !== false,
+              updatedAt: d.updatedAt || d.createdAt || now,
+            };
+          });
       } catch (error) {
         console.error('Error fetching departments:', error);
         return [];
@@ -433,6 +467,33 @@ export const broadcastResolvers = {
       } catch (error) {
         console.error('Error fetching equipment history:', error);
         return [];
+      }
+    },
+
+    // External Broadcast Presets
+    externalBroadcastPresets: async () => {
+      try {
+        await ensureMongoConnection();
+        const presets = await ExternalBroadcastPreset.find().sort({ name: 1 }).exec();
+        return presets.map((doc: any) => ({
+          id: doc._id.toString(),
+          ...doc.toObject(),
+        }));
+      } catch (error) {
+        console.error('Error fetching external broadcast presets:', error);
+        return [];
+      }
+    },
+
+    externalBroadcastPreset: async (_: any, { id }: { id: string }) => {
+      try {
+        await ensureMongoConnection();
+        const doc = await ExternalBroadcastPreset.findById(id).exec();
+        if (!doc) return null;
+        return { id: doc._id.toString(), ...doc.toObject() };
+      } catch (error) {
+        console.error('Error fetching external broadcast preset:', error);
+        return null;
       }
     },
   },
@@ -1796,6 +1857,47 @@ export const broadcastResolvers = {
       } catch (error) {
         console.error('Error undoing equipment transfer:', error);
         throw new Error('Failed to undo equipment transfer');
+      }
+    },
+
+    // External Broadcast Presets
+    createExternalBroadcastPreset: async (_: any, { input }: { input: any }) => {
+      try {
+        await ensureMongoConnection();
+        const preset = new ExternalBroadcastPreset(input);
+        const saved = await preset.save();
+        return { id: saved._id.toString(), ...saved.toObject() };
+      } catch (error) {
+        console.error('Error creating external broadcast preset:', error);
+        throw new Error('Failed to create external broadcast preset');
+      }
+    },
+
+    updateExternalBroadcastPreset: async (_: any, { id, input }: { id: string; input: any }) => {
+      try {
+        await ensureMongoConnection();
+        const updated = await ExternalBroadcastPreset.findByIdAndUpdate(id, input, {
+          new: true,
+          runValidators: true,
+        }).exec();
+        if (!updated) {
+          throw new Error('External broadcast preset not found');
+        }
+        return { id: updated._id.toString(), ...updated.toObject() };
+      } catch (error) {
+        console.error('Error updating external broadcast preset:', error);
+        throw new Error('Failed to update external broadcast preset');
+      }
+    },
+
+    deleteExternalBroadcastPreset: async (_: any, { id }: { id: string }) => {
+      try {
+        await ensureMongoConnection();
+        const result = await ExternalBroadcastPreset.findByIdAndDelete(id).exec();
+        return result !== null;
+      } catch (error) {
+        console.error('Error deleting external broadcast preset:', error);
+        throw new Error('Failed to delete external broadcast preset');
       }
     },
   },

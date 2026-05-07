@@ -1,0 +1,1231 @@
+================================================================================
+              LANCELOT AI — SYSTEM DOCUMENTATION
+              Excel Parsers | Broadcast Batch Creation | Chat System
+              Generated: March 24, 2026
+================================================================================
+
+
+================================================================================
+SECTION 1: ALL EXCEL PARSERS IN THE APPLICATION
+================================================================================
+
+The application contains several Excel-related components spread across the
+excel-parser microservice, the api-gateway, and the web frontend. Below is a
+complete inventory of every parser, where it lives, what it does, and how data
+flows through it.
+
+--------------------------------------------------------------------------------
+1.1  BROADCAST SCHEDULE PARSER (Primary / Active Parser)
+--------------------------------------------------------------------------------
+
+FILE:  services/excel-parser/src/broadcast-schedule-parser.ts
+CLASS: BroadcastScheduleParser
+STATUS: Active — this is the main Excel parser used in production.
+
+PURPOSE:
+  Reads an uploaded .xlsx or .xls file containing a Hebrew broadcast schedule
+  (typically from Channel 1 / Sport Channel operations), extracts every row into
+  a structured ParsedBroadcastEvent object, and returns them as JSON.
+
+LIBRARY USED:
+  - xlsx (SheetJS) v0.18.0  — imported as `import * as XLSX from 'xlsx'`
+  - No other Excel libraries are used (no exceljs, papaparse, csv-parse, etc.)
+
+HOW IT WORKS (STEP-BY-STEP):
+
+  1. READING THE WORKBOOK
+     The parser receives a raw Buffer (from multer memory storage).
+     It calls XLSX.read() with options:
+       - type: 'buffer'
+       - cellDates: true         (parse date cells as JS Date objects)
+       - dateNF: 'dd/mm/yyyy'    (date number format for Israeli dates)
+       - cellNF: true             (preserve cell number formats)
+       - raw: false               (return formatted strings, not raw values)
+
+  2. SELECTING THE SHEET
+     Only the FIRST worksheet is used: workbook.SheetNames[0].
+
+  3. CONVERTING TO JSON
+     XLSX.utils.sheet_to_json() converts the sheet into an array of objects.
+     Each object's keys are the header row values (Hebrew column names).
+     Options: raw: false, dateNF: 'dd/mm/yyyy', defval: '' (empty default).
+
+  4. ROW-BY-ROW PARSING (parseRow method)
+     For each row, the parser:
+
+     a) COLUMN MAPPING — Maps Hebrew column headers to English field names:
+        Hebrew Header            ->  English Field
+        ─────────────────────────────────────────────
+        שעה (Hour)               ->  time
+        תאריך (Date)             ->  date
+        ערוץ (Channel)           ->  channel
+        סוג (Type)               ->  eventType
+        אירוע (Event)            ->  eventName
+        מיקום (Location)         ->  location
+        הערות (Notes)            ->  notes
+        יום (Day)                ->  day
+        שבוע (Week)              ->  week
+        KO / TO                  ->  koTime
+        ענף (Sport)              ->  sport
+        ליגה/ענף (League/Sport)  ->  league
+        ליגה/תחרות (League/Comp) ->  league
+        שלב (Stage)              ->  stage
+        מארחת / מאירח (Host)     ->  homeTeam
+        אורחת (Away)             ->  awayTeam
+        ישיר (Live)              ->  live
+        סיום (End)               ->  endTime
+        כ"ס / פטיליות            ->  subtitles
+        ערוץ מקביל               ->  parallelChannel
+        5 SPORT 4K / CHANNEL 1 4K  ->  channel1_4k
+        שעת שידור (Broadcast hr) ->  time
+        שידור (Broadcast)        ->  eventName
+        משחק (Game)              ->  gameName
+        מקום שידור               ->  location
+        עורך (Editor)            ->  editor
+        מפיק (Producer)          ->  producer
+        איש VTR (ריפליי)         ->  vtrOperator
+        טכנאי שידור / במאי       ->  technicalDirector
+        שדר + פרשן               ->  commentators
+        שדר קוים                 ->  lineCommentator
+
+     b) HEBREW METADATA COLLECTION
+        Any column NOT in the mapping table is preserved as "Hebrew metadata."
+        Empty values, dashes, nulls are skipped. This metadata is stored in
+        metadata.rawHebrewData and metadata.raw for the UI.
+
+     c) TIME EXTRACTION (extractTime / parseTimeValue)
+        Supports multiple formats:
+        - Excel decimal time (0.0-1.0, fraction of day → HH:MM)
+        - String "HH:MM" format
+        - Hebrew time ("14:30 שעה")
+        - AM/PM format ("2:30 PM")
+        - JavaScript Date objects (from cellDates: true)
+
+     d) DATE EXTRACTION (extractDate / normalizeDate)
+        Supports:
+        - String dates: DD/MM/YYYY, DD.MM.YYYY, DD-MM-YYYY (2 or 4 digit year)
+        - Excel serial date numbers (days since 1899-12-30)
+        - JavaScript Date objects
+        - Falls back to today's date if no date found
+
+     e) CHANNEL EXTRACTION (extractChannel / normalizeChannelToHebrew)
+        Maps English channel names to Hebrew:
+          5 SPORT / SPORT / CHANNEL1         ->  CHANNEL 1
+          5 LIVE / LIVE / SPORT LIVE       ->  CHANNEL 4
+          5 PLUS / PLUS / SPORT PLUS       ->  CHANNEL 2
+          5 STARS / STARS / SPORT STARS     ->  CHANNEL 5
+          5 GOLD / GOLD / SPORT GOLD       ->  CHANNEL 3
+          5 SPORT 4K / SPORT 4K            ->  CHANNEL 1 4K
+        Default channel: CHANNEL 1
+
+     f) TITLE BUILDING
+        Constructs a title from: sport + league + stage + "homeTeam vs awayTeam"
+        Falls back to the raw event name or "אירוע ללא שם" (Untitled Event)
+
+     g) DEPARTMENT METADATA CATEGORIZATION (categorizeHebrewMetadata)
+        Distributes Hebrew columns into department buckets based on keywords:
+          broadcastArray:     שידור, מערך, עורך, מפיק, טכנאי, שדר, VTR, במאי, פרשן
+          mcr:                מקור, גיבוי, מכשירים, ניתובים, MCR, ניתוב
+          externalBroadcasts: הפקה, צוות, ציוד, צילום, חוץ
+          closedCaptions:     כתוביות, תרגום, נגישות, כ"ס
+          warehouse:          מחסן, ציוד, פריטים, ברקוד
+          playout:            קליטה, GMT, סינופסיס, פלייאאוט, שידור חוזר
+        Unmatched columns go to ALL departments to avoid data loss.
+
+  5. OUTPUT STRUCTURE (ParsedBroadcastEvent)
+     {
+       title: string,                    // Built from sport/league/teams
+       startTime: "HH:MM",              // Parsed time
+       koTime?: "HH:MM",                // Kick-off / Tip-off time
+       endTime?: "HH:MM",               // End time
+       date: "DD/MM/YYYY",              // Normalized date
+       channel: "CHANNEL 1",              // Hebrew channel name
+       eventType: "live" | "recorded",  // Based on "ישיר" column
+       location?: string,               // Studio/stadium
+       notes?: string,                  // Free text
+       metadata: {
+         departments: {
+           broadcastArray: { customData: {...} },
+           mcr: { customData: {...} },
+           externalBroadcasts: { customData: {...} },
+           closedCaptions: { customData: {...} },
+           warehouse: { customData: {...} },
+           playout: { customData: {...} }
+         },
+         rawHebrewData: { ... all unmapped Hebrew columns },
+         raw: { ... alias for rawHebrewData },
+         eventDetails: {
+           sport, league, stage, homeTeam, awayTeam,
+           koTime, endTime, subtitles, parallelChannel,
+           channel1_4k (boolean), live
+         }
+       }
+     }
+
+  6. DEBUG OUTPUT
+     After parsing, saves all events as JSON to:
+       services/excel-parser/temp/broadcast-events-{timestamp}.json
+
+  7. ERROR HANDLING
+     - Per-row errors are collected into an errors[] array
+     - Rows without time or date are skipped (not errors)
+     - Full file-level parsing errors return success: false
+
+--------------------------------------------------------------------------------
+1.2  EXCEL PARSER MICROSERVICE (HTTP Server)
+--------------------------------------------------------------------------------
+
+FILE:  services/excel-parser/src/main.ts
+PORT:  4002 (configurable via PORT env variable)
+FRAMEWORK: Express.js
+
+ENDPOINTS:
+
+  POST /parse-broadcast-schedule
+    - Accepts: multipart/form-data with field name "file"
+    - File types: .xlsx, .xls
+    - Max size: 10 MB
+    - Uses multer with memoryStorage (file kept in RAM)
+    - Calls BroadcastScheduleParser.parseExcelFile(req.file.buffer)
+    - Returns: { success, events[], errors[], tempJsonPath, message }
+
+  POST /parse-hebrew-excel
+    - STATUS: NOT IMPLEMENTED (stub endpoint)
+    - Returns: { message: "Hebrew Excel parsing endpoint ready", status: "not_implemented" }
+
+  GET /health
+    - Returns: { status: "healthy", timestamp, service: "excel-parser" }
+
+  GET /status
+    - Returns: { message, version: "1.0.0", timestamp }
+
+CORS:
+  Allowed origins: localhost:3000, www.lanceloterp.io, lanceloterp.io
+
+--------------------------------------------------------------------------------
+1.3  HEBREW PARSER SERVICE (Legacy / Excluded)
+--------------------------------------------------------------------------------
+
+FILE:   services/excel-parser/src/hebrew-parser.service.ts
+STATUS: EXCLUDED from TypeScript build (listed in tsconfig.json exclude array).
+        NOT imported by main.ts. NOT connected to any endpoint.
+
+PURPOSE (if it were active):
+  Parses Excel files containing EMPLOYEE SHIFT SCHEDULES (not broadcast events).
+  Uses NestJS-style service architecture with a DatabaseService dependency.
+
+HOW IT WOULD WORK:
+  - Reads first sheet with XLSX.read()
+  - Identifies date columns from headers (Hebrew day names, DD/MM patterns)
+  - Parses employee rows with shift cells
+  - Validates shifts
+  - Output: ParsedShift[] with employee info and shift assignments
+
+NOTE: This is legacy code that was likely replaced by a different shift
+management system. It exists in the codebase but does not run.
+
+--------------------------------------------------------------------------------
+1.4  DEBUG COLUMNS SCRIPT (CLI Tool)
+--------------------------------------------------------------------------------
+
+FILE:   services/excel-parser/debug-columns.ts
+STATUS: Developer utility, not part of the running application.
+
+PURPOSE:
+  Command-line tool to inspect an Excel file's structure:
+  - Lists all sheet names
+  - Prints column headers for each sheet
+  - Shows first row data as JSON
+  - Lists all unique column keys
+
+USAGE: Run directly with ts-node to debug Excel file column structures
+before modifying the parser.
+
+--------------------------------------------------------------------------------
+1.5  TEST SCRIPTS
+--------------------------------------------------------------------------------
+
+FILE: services/excel-parser/test-excel-parsing.ts
+  - Creates an in-memory test workbook with XLSX.utils.json_to_sheet
+  - Writes it to a buffer with XLSX.write
+  - Runs it through BroadcastScheduleParser to verify parsing
+
+FILE: services/excel-parser/test-hebrew-metadata.ts
+  - Similar pattern, tests Hebrew metadata extraction
+
+FILE: services/excel-parser/test-real-excel.ts
+  - Reads a real .xlsx file from services/excel-parser/schedules/
+  - Tests against actual production data
+
+--------------------------------------------------------------------------------
+1.6  "EXPORT TO EXCEL" (Actually CSV Export)
+--------------------------------------------------------------------------------
+
+FILE:   apps/web/src/app/warehouse/page.tsx
+FUNCTION: exportToExcel (misleading name)
+
+PURPOSE:
+  Exports warehouse equipment allocation data as a CSV file (NOT actual Excel).
+
+HOW IT WORKS:
+  1. Takes export data as an array of objects
+  2. Builds CSV manually with:
+     - UTF-8 BOM (\ufeff) for Hebrew character support
+     - Comma-separated headers from object keys
+     - Proper escaping of commas, quotes, and newlines
+  3. Creates a Blob with type 'text/csv;charset=utf-8'
+  4. Downloads as: "רשימות ציוד שהוקצה תאריכים - DD.MM.YYYY-DD.MM.YYYY.csv"
+
+NOTE: No xlsx library is used. This is pure string-based CSV generation.
+
+--------------------------------------------------------------------------------
+1.7  API GATEWAY — EXCEL EVENT BULK CREATION (Post-Parse)
+--------------------------------------------------------------------------------
+
+FILE: services/api-gateway/src/resolvers/broadcast-enhanced.ts
+
+These are NOT Excel parsers per se, but they accept pre-parsed Excel data
+(already converted to JSON) and persist it to MongoDB:
+
+  MUTATION: createBroadcastEventsFromExcel
+    - Accepts: events[] (pre-parsed JSON, not raw Excel)
+    - For each event: parses date "DD/MM/YYYY" and startTime "HH:MM"
+    - Creates BroadcastEvent documents in MongoDB
+    - Sets metadata.importedFromExcel = true
+    - Publishes 'BROADCAST_EVENT_UPDATED' via PubSub
+
+  MUTATION: createBroadcastEventsFromExcelWithOverlapCheck
+    - Same as above but first checks for channel time overlaps
+    - If overlaps found and forceCreate=false: returns requiresConfirmation=true
+    - If forceCreate=true: creates anyway
+
+NOTE: These resolvers exist in the API gateway but are currently NOT called
+by the web frontend. The web app uses a different path (see Section 2).
+
+--------------------------------------------------------------------------------
+1.8  SUMMARY: WHERE EXCEL PARSERS APPEAR
+--------------------------------------------------------------------------------
+
+  LOCATION                                          STATUS    TYPE
+  ────────────────────────────────────────────────────────────────────────
+  services/excel-parser/src/broadcast-schedule-     ACTIVE    .xlsx/.xls parser
+    parser.ts                                                 (SheetJS)
+
+  services/excel-parser/src/main.ts                 ACTIVE    HTTP endpoint for
+                                                              upload + parse
+
+  services/excel-parser/src/hebrew-parser.          LEGACY    Shift schedule
+    service.ts                                      EXCLUDED  parser (unused)
+
+  services/excel-parser/debug-columns.ts            DEV TOOL  Column inspector
+
+  services/excel-parser/test-*.ts                   TEST      Test scripts
+
+  apps/web/src/app/warehouse/page.tsx               ACTIVE    CSV export
+    (exportToExcel function)                                  (misnamed)
+
+  services/api-gateway/src/resolvers/               ACTIVE    Post-parse
+    broadcast-enhanced.ts                           (unused   bulk create
+    (createBroadcastEventsFromExcel*)                by web)
+
+  apps/web/src/app/broadcast-planning/page.tsx      ACTIVE    UI upload trigger
+    (Upload component with beforeUpload)                      (calls parser)
+
+
+================================================================================
+SECTION 2: BROADCAST EVENT BATCH CREATION — UI + BACKEND
+================================================================================
+
+The system supports two ways to batch-create broadcast events:
+  A) Manual grid entry (BatchEventCreator — spreadsheet-like UI)
+  B) Excel file import (upload .xlsx → parse → create)
+
+Both paths converge on the same backend save mechanism.
+
+--------------------------------------------------------------------------------
+2.1  DATA MODEL (MongoDB)
+--------------------------------------------------------------------------------
+
+FILE: services/api-gateway/src/models/broadcast.models.ts
+
+Interface: IBroadcastEvent extends Document
+  - eventNumber: number (auto-incremented, unique)
+  - title: string (max 500 chars)
+  - hebrewTitle?: string
+  - description?: string
+  - eventType: 'live' | 'recorded' | 'remote' | 'studio'
+  - status: 'planned' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled'
+  - startTime: Date (required)
+  - endTime: Date (required)
+  - koTime?: Date (kick-off / tip-off time)
+  - channel: string
+  - parallelChannel?: string
+  - channel1_4k: boolean (default false)
+  - live: boolean (default false)
+  - metadata: Mixed (flexible JSON — stores department data, import info, etc.)
+  - (many more fields: sport, league, teams, etc.)
+
+Collection: broadcastEvents (MongoDB, with timestamps: true)
+
+--------------------------------------------------------------------------------
+2.2  GRAPHQL SCHEMA
+--------------------------------------------------------------------------------
+
+FILE: services/api-gateway/src/schema/schema.graphql
+
+TYPES:
+  - BroadcastEvent: Full event type with all fields
+  - CreateBroadcastEventInput: Input for single event creation
+  - ExcelBroadcastEventInput: Input for bulk import (includes rowIndex, importBatchId)
+  - BulkCreateResponse: { success, eventsCreated, errors[], events[], overlapCheck, requiresConfirmation }
+  - CreateBroadcastEventResponse: { success, event, overlapCheck, requiresConfirmation }
+  - OverlapCheckResult: { hasOverlaps, overlaps[], message }
+
+MUTATIONS:
+  - createBroadcastEventWithOverlapCheck(input, forceCreate): Creates ONE event
+  - createBroadcastEventsFromExcel(events[]): Bulk create (no overlap check)
+  - createBroadcastEventsFromExcelWithOverlapCheck(events[], forceCreate): Bulk + overlap
+  - deleteBroadcastEventsByDateRange(startDate, endDate): Bulk delete by dates
+  - deleteImportedBroadcastEvents: Delete all events where metadata.importedFromExcel=true
+
+--------------------------------------------------------------------------------
+2.3  PATH A: MANUAL GRID ENTRY (BatchEventCreator)
+--------------------------------------------------------------------------------
+
+FILE: apps/web/src/components/broadcast/BatchEventCreator.tsx
+
+This is an Excel-like spreadsheet UI inside a modal for manually entering
+multiple broadcast events at once.
+
+UI LAYOUT:
+  - Modal titled "יצירה בקבצים - Excel UI" (Batch Creation - Excel UI)
+  - Width: 1400px, max height: 60vh
+  - Scrollable table with fixed column headers
+
+COLUMNS (Hebrew labels):
+  Column Key       | Label           | Width | Type    | Required
+  ─────────────────┼─────────────────┼───────┼─────────┼─────────
+  startDate        | תאריך התחלה     | 120px | date    | YES
+  startTime        | שעת התחלה       | 100px | time    | YES
+  endDate          | תאריך סיום      | 120px | date    | no
+  endTime          | שעת סיום        | 100px | time    | no
+  koDate           | תאריך KO/TO     | 120px | date    | no
+  koTime           | שעת KO/TO       | 100px | time    | no
+  sport            | ענף              | 100px | text    | no
+  league           | ליגה/ענף         | 120px | text    | no
+  stage            | שלב              | 100px | text    | no
+  homeTeam         | מארחת            | 120px | text    | no
+  awayTeam         | אורחת            | 120px | text    | no
+  channel          | ערוץ             | 140px | select  | no (default: 5 SPORT)
+  parallelChannel  | ערוץ מקביל       | 140px | select  | no
+  channel1_4k        | CHANNEL 1 4K      | 100px | boolean | no
+  live             | שידור חי         | 100px | boolean | no
+  subtitles        | כתוביות          | 100px | select  | no
+  notes            | הערות            | 200px | text    | no
+
+Channel options: 5 SPORT, 5 LIVE, 5 PLUS, 5 GOLD, 5 STARS, 5 SPORT 4K
+Subtitles options: CC, Sign Language, None
+
+FEATURES:
+  - Starts with 5 empty rows
+  - Add Row button to append more rows
+  - Delete button per row
+  - Drag-to-fill: drag a cell downward to copy its value to rows below
+  - Cell selection highlighting (blue for selected, light blue for drag range)
+  - Basic formula support: =ROW(), =A1+1 (date add), =B1+60 (time add)
+  - Smart fill: dates and times copy as-is; numbers increment
+
+CELL TYPES:
+  - date: HTML <input type="date">
+  - time: HTML <input type="time">
+  - text: HTML <input type="text">
+  - select: HTML <select> with predefined options
+  - boolean: HTML <input type="checkbox">
+
+SAVE FLOW (convertToEvents):
+  1. Filters rows that have BOTH startDate AND startTime filled
+  2. Combines date + time into ISO datetime strings:
+     - startTime: "{startDate}T{startTime}"
+     - endTime: "{endDate or startDate}T{endTime}"  (uses startDate if endDate empty)
+     - koTime: "{koDate or startDate}T{koTime}"
+  3. Normalizes channel names to Hebrew (via normalizeChannelToHebrew)
+  4. Returns array of event objects
+  5. Calls onSave(events) which is handleBatchSave from the parent page
+
+--------------------------------------------------------------------------------
+2.4  PATH B: EXCEL FILE IMPORT
+--------------------------------------------------------------------------------
+
+FILE: apps/web/src/app/broadcast-planning/page.tsx (Upload component)
+
+UI:
+  - Inside a "File Import Selection Modal"
+  - Ant Design Upload component
+  - Accepts: .xlsx, .xls files
+  - Shows upload card with icon and text
+
+FLOW:
+  1. User selects an Excel file
+  2. beforeUpload handler fires (prevents default upload behavior)
+  3. Creates FormData with the file under key "file"
+  4. POSTs to: {NEXT_PUBLIC_EXCEL_PARSER_URL}/parse-broadcast-schedule
+     (defaults to http://localhost:4002)
+  5. Excel Parser microservice parses the file (see Section 1.1)
+  6. Response: { success, events[], errors[] }
+  7. If successful, maps each parsed event to the format expected by the backend:
+     - Converts date "DD/MM/YYYY" + startTime "HH:MM" → ISO datetime using
+       dayjs with 'Asia/Jerusalem' timezone
+     - Calculates endTime (from KO + 2 hours, or startTime + 2 hours)
+     - Maps channel, sport, league, teams, and all metadata
+     - Stores original parsed event as metadata.customData
+  8. Shows a confirmation modal with event count
+  9. On confirm: calls handleBatchSave(eventsToCreate, true)
+     (forceCreate=true bypasses the overlap confirmation step)
+
+--------------------------------------------------------------------------------
+2.5  BACKEND SAVE MECHANISM (handleBatchSave)
+--------------------------------------------------------------------------------
+
+FILE: apps/web/src/app/broadcast-planning/page.tsx
+
+The handleBatchSave function is the SHARED save path for both grid entry
+and Excel import.
+
+ALGORITHM:
+  1. Loops through ALL events SEQUENTIALLY (one at a time)
+  2. For each event:
+     a. Builds an input object with:
+        - title (from sport + league + teams, or "שידור חי/מוקלט DD/MM HH:MM")
+        - eventType: defaults to 'recorded'
+        - startTime: ISO string
+        - endTime: ISO string (or startTime + 2 hours)
+        - koTime: ISO string (if available)
+        - channel: Hebrew channel name
+        - parallelChannel, sport, league, stage, homeTeam, awayTeam
+        - channel1_4k, live, subtitles
+        - metadata: any extra data from the parsed event
+     b. Calls GraphQL mutation: CREATE_BROADCAST_EVENT_WITH_OVERLAP_CHECK
+        with variables: { input, forceCreate }
+     c. Passes refetchQueries: ['GetBroadcastEvents', 'GetBroadcastEventsCalendar']
+     d. awaitRefetchQueries: true
+     e. Collects result into results[]
+     f. WAITS 800ms between each event (setTimeout) to avoid rate limiting
+  3. After all events processed:
+     a. Checks if any result has overlaps (overlapCheck.hasOverlaps)
+     b. If overlaps exist AND forceCreate was false:
+        - Shows a modal: "נמצאו חפיפות בזמנים, האם ליצור בכל זאת?"
+        - On confirm: re-calls handleBatchSave(events, true) with forceCreate=true
+     c. If no overlaps or forceCreate was true:
+        - Shows success message: "נוצרו בהצלחה N אירועים"
+        - Refetches broadcast events
+
+IMPORTANT NOTES:
+  - Each event is created with a SEPARATE GraphQL mutation call (not bulk)
+  - The 800ms delay means 100 events take ~80 seconds to create
+  - The web app does NOT use the bulk mutations (createBroadcastEventsFromExcel)
+    that exist in the API gateway — it uses per-event creation instead
+  - Excel imports use forceCreate=true by default (overlap prompt was already
+    shown during the Excel import confirmation)
+
+--------------------------------------------------------------------------------
+2.6  BACKEND: OVERLAP CHECK ENGINE
+--------------------------------------------------------------------------------
+
+FILE: services/api-gateway/src/resolvers/broadcast-enhanced.ts
+FUNCTION: checkChannelOverlaps
+
+PURPOSE: Before creating an event, checks if any EXISTING events overlap
+on the same channel(s) during the same time window.
+
+ALGORITHM:
+  1. Collects channels to check (main channel + parallelChannel)
+  2. Queries MongoDB for BroadcastEvent documents where:
+     - channel is in channelsToCheck
+     - startTime < newEvent.endTime AND endTime > newEvent.startTime
+     - status is NOT 'cancelled'
+     - Excludes the current event ID (for updates)
+  3. Returns array of ChannelOverlap objects with details about conflicts
+
+--------------------------------------------------------------------------------
+2.7  BACKEND: PER-EVENT CREATION (createBroadcastEventWithOverlapCheck)
+--------------------------------------------------------------------------------
+
+FILE: services/api-gateway/src/resolvers/broadcast-enhanced.ts
+
+FLOW:
+  1. Validates input (title, startTime, endTime required)
+  2. Runs checkChannelOverlaps()
+  3. If overlaps found AND forceCreate=false:
+     - Returns: { success: false, event: null, overlapCheck, requiresConfirmation: true }
+  4. If no overlaps OR forceCreate=true:
+     - Creates new BroadcastEvent document
+     - Sets auto-incrementing eventNumber
+     - Saves to MongoDB
+     - Publishes 'BROADCAST_EVENT_UPDATED' via PubSub (for live subscriptions)
+     - Returns: { success: true, event, overlapCheck, requiresConfirmation: false }
+
+--------------------------------------------------------------------------------
+2.8  BACKEND: BULK MUTATIONS (Defined but not used by web UI)
+--------------------------------------------------------------------------------
+
+FILE: services/api-gateway/src/resolvers/broadcast-enhanced.ts
+
+MUTATION: createBroadcastEventsFromExcel(events[])
+  - Loops events, parses DD/MM/YYYY date + HH:MM time
+  - Creates BroadcastEvent per event, saves to MongoDB
+  - Sets metadata.importedFromExcel=true, metadata.importedAt=now
+  - Publishes PubSub notification per event
+  - Returns: { success, eventsCreated, errors[], events[] }
+
+MUTATION: createBroadcastEventsFromExcelWithOverlapCheck(events[], forceCreate)
+  - Pre-checks overlaps for ALL events before creating any
+  - If overlaps and !forceCreate: returns requiresConfirmation=true, no saves
+  - If forceCreate: creates all events
+  - Returns: same shape + overlapCheck details
+
+These mutations are DEFINED in mutations.ts on the client side but are NOT
+imported or called by any .tsx component. The web app uses the per-event
+mutation in a loop instead.
+
+--------------------------------------------------------------------------------
+2.9  END-TO-END BATCH CREATION FLOW SUMMARY
+--------------------------------------------------------------------------------
+
+  PATH A: GRID ENTRY
+  ┌──────────────┐   ┌────────────────────┐   ┌─────────────────────┐
+  │ User fills   │──>│ BatchEventCreator   │──>│ handleBatchSave()   │
+  │ spreadsheet  │   │ convertToEvents()   │   │ loop: 800ms delay   │
+  │ grid rows    │   │ → event[]           │   │ per-event mutation  │
+  └──────────────┘   └────────────────────┘   └─────────┬───────────┘
+                                                         │
+                                                         v
+                                              ┌─────────────────────┐
+                                              │ createBroadcastEvent│
+                                              │ WithOverlapCheck    │
+                                              │ (GraphQL mutation)  │
+                                              └─────────┬───────────┘
+                                                         │
+                                                         v
+                                              ┌─────────────────────┐
+                                              │ checkChannelOverlaps│
+                                              │ → save to MongoDB   │
+                                              │ → PubSub notify     │
+                                              └─────────────────────┘
+
+  PATH B: EXCEL IMPORT
+  ┌──────────────┐   ┌─────────────────────┐   ┌────────────────────┐
+  │ User uploads │──>│ POST /parse-         │──>│ BroadcastSchedule  │
+  │ .xlsx file   │   │ broadcast-schedule   │   │ Parser.parseExcel  │
+  │ via UI       │   │ (excel-parser:4002)  │   │ File(buffer)       │
+  └──────────────┘   └─────────────────────┘   └─────────┬──────────┘
+                                                          │
+                         ┌────────────────────────────────┘
+                         v
+  ┌─────────────────────────────┐   ┌─────────────────────┐
+  │ Map parsed events to ISO    │──>│ handleBatchSave()   │
+  │ datetimes with dayjs        │   │ forceCreate=true    │
+  │ (Asia/Jerusalem timezone)   │   │ (same loop as above)│
+  └─────────────────────────────┘   └─────────────────────┘
+
+
+================================================================================
+SECTION 3: CHAT SYSTEM — UI + BACKEND (COMPLETE GUIDE)
+================================================================================
+
+The Lancelot chat system is a real-time private messaging system supporting
+user-to-user and user-to-AI conversations. It uses Socket.IO for real-time
+communication and GraphQL for data persistence and queries.
+
+--------------------------------------------------------------------------------
+3.1  ARCHITECTURE OVERVIEW
+--------------------------------------------------------------------------------
+
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │                         WEB FRONTEND (Next.js)                      │
+  │                                                                     │
+  │  ┌──────────────┐  ┌───────────────┐  ┌──────────────────────────┐ │
+  │  │ ChatManager   │  │ ContactsOverlay│  │ ConversationOverlay      │ │
+  │  │ (bubble +     │  │ (user list)    │  │ (message window)         │ │
+  │  │ orchestrator) │  │                │  │                          │ │
+  │  └───────┬───────┘  └───────────────┘  └──────────┬───────────────┘ │
+  │          │                                         │                │
+  │          ├─────── Socket.IO (send/receive) ────────┤                │
+  │          ├─────── GraphQL (history/conversations) ─┤                │
+  │          │                                         │                │
+  │  ┌───────┴───────────────────────────────────────┐                  │
+  │  │ WebSocketContext (Socket.IO client)            │                  │
+  │  │ ChatContext (conversation handler registration)│                  │
+  │  └──────────────────────────────────────────────┘                   │
+  └────────────────────────────────┬────────────────────────────────────┘
+                                   │
+                   Socket.IO (polling/websocket)
+                   GraphQL (HTTP)
+                                   │
+  ┌────────────────────────────────┴────────────────────────────────────┐
+  │                     API GATEWAY (Node.js/Express)                    │
+  │                                                                     │
+  │  ┌───────────────────┐  ┌───────────────────────────────────┐      │
+  │  │ chat-socket.ts     │  │ chat.ts (GraphQL resolvers)       │      │
+  │  │ (Socket.IO server) │  │ privateConversations, messages,   │      │
+  │  │ send/receive/AI    │  │ create, markRead                  │      │
+  │  └─────────┬──────────┘  └──────────────────────────────────┘      │
+  │            │                                                        │
+  │            │ (if AI conversation)                                    │
+  │            v                                                        │
+  │  ┌───────────────────┐                                              │
+  │  │ AI Agent Service   │                                              │
+  │  │ POST /ai/chat      │                                              │
+  │  │ (localhost:4001)   │                                              │
+  │  └───────────────────┘                                              │
+  │                                                                     │
+  │  ┌───────────────────────────────────────────────────────────┐      │
+  │  │ MongoDB Collections:                                       │      │
+  │  │   - privateConversations  (conversation metadata)          │      │
+  │  │   - chatMessages          (message storage)                │      │
+  │  │   - users                 (user profiles + public keys)    │      │
+  │  └───────────────────────────────────────────────────────────┘      │
+  └─────────────────────────────────────────────────────────────────────┘
+
+--------------------------------------------------------------------------------
+3.2  MONGODB COLLECTIONS
+--------------------------------------------------------------------------------
+
+COLLECTION: privateConversations
+  {
+    id: string (UUID),
+    participant1Id: string,         // Sorted: smaller ID is always participant1
+    participant2Id: string,
+    unreadCounts: {
+      participant1: number,
+      participant2: number
+    },
+    isActive: boolean,
+    lastMessageAt: Date,
+    lastMessage: {                  // Updated on each new message (via GraphQL path)
+      id: string,
+      fromUserId: string,
+      message: string,
+      messageType: string,
+      createdAt: Date
+    },
+    createdAt: Date,
+    updatedAt: Date
+  }
+
+COLLECTION: chatMessages
+  {
+    id: string (msg-{timestamp}-{random} or ai-{timestamp}),
+    conversationId: string,
+    fromUserId: string,
+    message: string,                // Plaintext or JSON-stringified encrypted payload
+    messageType: string,            // 'text', 'encrypted', 'ai_response'
+    messageId?: string,             // E2EE message ID for replay detection
+    isRead: boolean,
+    encryption?: {                  // Present if E2EE
+      enabled: boolean,
+      version: number,
+      senderPublicKeyFingerprint?: string,
+      fallbackReason?: string
+    },
+    metadata?: any,                 // AI response metadata
+    createdAt: Date,
+    updatedAt: Date
+  }
+
+--------------------------------------------------------------------------------
+3.3  GRAPHQL SCHEMA (Chat Types)
+--------------------------------------------------------------------------------
+
+FILE: services/api-gateway/src/schema/schema.graphql
+
+  type PrivateConversation {
+    id: ID!
+    participant1: User!
+    participant2: User!
+    unreadCount: Int!
+    lastMessageAt: DateTime
+  }
+
+  type PrivateMessage {
+    id: ID!
+    conversationId: ID!
+    message: String!
+    messageType: String
+    fromUser: User!
+    isRead: Boolean!
+    createdAt: DateTime!
+  }
+
+  QUERIES:
+    privateConversations: [PrivateConversation!]!
+      → Returns all conversations for the authenticated user
+      → Calculates unread counts per conversation
+
+    conversationMessages(conversationId, limit=50, offset=0): [PrivateMessage!]!
+      → Returns paginated messages for a conversation
+      → Sorted by createdAt descending, then reversed for chronological order
+
+  MUTATIONS:
+    createOrGetConversation(userId): PrivateConversation!
+      → Creates a new conversation or returns existing one
+      → Participant IDs are sorted for consistent lookup
+      → Cannot create conversation with yourself
+
+    sendPrivateMessage(conversationId, message, messageType): PrivateMessage!
+      → Inserts message into chatMessages
+      → Updates conversation's lastMessage, lastMessageAt
+      → Increments unreadCounts for the other participant
+
+    markMessagesAsRead(conversationId): Boolean!
+      → Marks all unread messages from the other user as read
+      → Resets unreadCount for the current user to 0
+
+--------------------------------------------------------------------------------
+3.4  GRAPHQL CLIENT QUERIES (Frontend)
+--------------------------------------------------------------------------------
+
+FILE: apps/web/src/graphql/chat-queries.ts
+
+  GET_MY_CONVERSATIONS → privateConversations query
+    Returns: id, participant1 {id,firstName,lastName,displayName,email,department},
+             participant2 {...same}, unreadCount, lastMessageAt
+
+  CREATE_PRIVATE_CONVERSATION → createOrGetConversation mutation
+    Variables: userId
+    Returns: id, participant1, participant2
+
+  GET_CONVERSATION_MESSAGES → conversationMessages query
+    Variables: conversationId, limit, offset
+    Returns: id, conversationId, message, messageType, fromUser{...}, isRead, createdAt
+
+  SEND_PRIVATE_MESSAGE → sendPrivateMessage mutation
+    Variables: conversationId, message, messageType
+    Returns: id, message, messageType, fromUser{...}, createdAt
+
+  MARK_MESSAGES_AS_READ → markMessagesAsRead mutation
+    Variables: conversationId
+    Returns: Boolean
+
+--------------------------------------------------------------------------------
+3.5  SOCKET.IO SERVER (Real-Time Backend)
+--------------------------------------------------------------------------------
+
+FILE: services/api-gateway/src/socket/chat-socket.ts
+
+SETUP:
+  - Created with setupChatSocket(httpServer) in api-gateway/src/index.ts
+  - Path: /socket.io
+  - Transports: websocket + polling
+  - CORS: Dynamic based on CORS_ALLOWED_ORIGINS config
+  - Ping interval: 25s, Ping timeout: 60s
+
+AUTHENTICATION MIDDLEWARE:
+  - Extracts JWT from socket.handshake.auth.token or Authorization header
+  - Verifies with jwtService.verify()
+  - Attaches user object to socket: { userId, email, displayName }
+  - Rejects connection if no token or invalid token
+
+ON CONNECTION:
+  - User automatically joins room: "user:{userId}" (personal room)
+  - This room receives messages even when conversation window is not open
+
+SOCKET EVENTS (Client → Server):
+
+  'join-private-conversation' (conversationId: string)
+    → Joins socket to room "conversation:{conversationId}"
+    → Validates conversationId is non-empty
+
+  'leave-private-conversation' (conversationId: string)
+    → Leaves room "conversation:{conversationId}"
+
+  'send-private-message' (data: {conversationId, message, messageType?, messageId?, encryption?})
+    → FULL FLOW:
+      1. Validates all inputs (non-empty, message length <= 10000 chars)
+      2. Looks up conversation in MongoDB to verify user is a participant
+      3. If messageType='encrypted' and E2EE is disabled → rejects
+      4. TRIPWIRE CHECK: If encryption.fallbackReason present and not encrypted,
+         increments e2eeFallbackCount counter and logs warning
+      5. REPLAY CHECK: For encrypted messages with messageId, checks if
+         messageId already exists in chatMessages → rejects duplicates
+      6. Creates message document with unique ID: "msg-{timestamp}-{random6}"
+      7. Inserts into chatMessages collection
+      8. Emits 'new-private-message' to:
+         - Room "conversation:{conversationId}" (all participants in the window)
+         - Room "user:{otherUserId}" (personal room, for unread badge updates)
+      9. AI CHECK: If the other participant is the AI agent (lancelot-ai@internal.system):
+         a. Emits 'user-private-typing' to show AI typing indicator
+         b. POSTs to AI_AGENT_SERVICE_URL/ai/chat with:
+            - conversationId, message, messageType, encryption, messageId
+            - Headers: x-user-id, x-user-email, x-trace-id
+            - 30-second timeout
+         c. Emits 'user-private-stop-typing'
+         d. Creates AI response message with ID: "ai-{timestamp}"
+         e. Inserts AI message into chatMessages
+         f. Emits 'new-private-message' with AI response to conversation room
+
+  'private-typing-start' (data: {conversationId})
+    → Emits 'user-private-typing' to other users in the conversation room
+    → Includes userId, userName, conversationId
+
+  'private-typing-stop' (data: {conversationId})
+    → Emits 'user-private-stop-typing' to other users in the conversation room
+
+  'disconnect'
+    → Logs user disconnection
+
+AI AGENT CONFIGURATION:
+  - Email: lancelot-ai@internal.system
+  - Service URL: AI_AGENT_URL env var or http://localhost:4001
+  - AI user ID is cached after first lookup
+  - Timeout: 30 seconds
+  - Fallback responses in Hebrew if AI service is down
+
+--------------------------------------------------------------------------------
+3.6  SOCKET.IO CLIENT (WebSocket Context)
+--------------------------------------------------------------------------------
+
+FILE: apps/web/src/contexts/WebSocketContext.tsx
+
+PURPOSE: Provides a shared Socket.IO connection to all chat components.
+
+SETUP:
+  - Creates Socket.IO client when user logs in
+  - URL: NEXT_PUBLIC_CHAT_WS_URL or NEXT_PUBLIC_API_URL or localhost:4000
+  - Path: /socket.io/
+  - Auth: { token } from localStorage('auth-token')
+  - Initial transport: polling only (for proxy compatibility)
+  - Fallback: If websocket transport fails, retries with polling-only
+  - Reconnection: 5 attempts
+  - Timeout: 15 seconds
+
+CONTEXT VALUE:
+  - socket: The Socket.IO client instance
+  - isConnected: boolean connection state
+  - connected: alias for isConnected
+  - sendMessage(payload): emits generic 'message' event (NOT used for chat)
+
+LIFECYCLE:
+  - Connects when user is authenticated
+  - Disconnects when user logs out
+  - Cleans up on unmount
+
+--------------------------------------------------------------------------------
+3.7  CHAT CONTEXT
+--------------------------------------------------------------------------------
+
+FILE: apps/web/src/contexts/ChatContext.tsx
+
+PURPOSE: Allows any component in the app to open a conversation window
+programmatically (e.g., from the Inbox or user profile).
+
+PROVIDES:
+  - registerConversationHandler(handler): ChatManager registers its
+    handleStartConversation function here
+  - openConversation(user, conversationId): Any component can call this
+    to open a chat window
+
+--------------------------------------------------------------------------------
+3.8  UI COMPONENT: ChatManager (Main Orchestrator)
+--------------------------------------------------------------------------------
+
+FILE: apps/web/src/components/chat/ChatManager.tsx
+RENDERED BY: apps/web/src/components/ChatWrapper.tsx (dynamic import, no SSR)
+MOUNTED IN: apps/web/src/app/layout.tsx (global — always visible when logged in)
+
+ROLE: The central chat controller that manages all chat state and rendering.
+
+STATE:
+  - showContacts: boolean — contacts overlay visibility
+  - onlineUsers: User[] — all users (AI + regular)
+  - openConversations: OpenConversation[] — currently open chat windows
+  - conversations: PrivateConversation[] — all user's conversations
+  - typingUsers: TypingUser[] — currently typing indicators
+
+GRAPHQL QUERIES:
+  - GET_USERS (all active users)
+  - GET_PRIVATE_CONVERSATIONS (user's conversations with unread counts)
+  - GET_AI_AGENT_USER (AI agent profile)
+  - GET_AI_AGENT_STATUS (AI online status, polled every 30s)
+
+GRAPHQL MUTATIONS:
+  - CREATE_PRIVATE_CONVERSATION (create/get conversation)
+
+SOCKET EVENT LISTENERS (registered in useEffect):
+  - 'new-private-message': Updates conversation list, handles E2EE decryption,
+    replay detection, key fingerprint verification, refetches conversations
+  - 'user-private-typing': Adds user to typingUsers state
+  - 'user-private-stop-typing': Removes user from typingUsers state
+
+USER LOADING:
+  1. Fetches AI agent user from GraphQL → adds to user list first
+  2. Fetches all regular users → filters out current user and AI email
+  3. Determines online status: "online" if lastLogin within 24 hours
+
+CONVERSATION LOADING:
+  - Loads from privateConversations GraphQL query
+  - Maps participant data and determines "other user" for each
+
+OPENING A CONVERSATION (handleStartConversation):
+  1. If no conversationId: calls createOrGetConversation mutation
+  2. If conversation already open: un-minimizes it
+  3. Calculates position (Facebook Messenger style: bottom-right, stacking left)
+  4. Adds to openConversations array
+  5. Clears unread count for that conversation
+  6. Closes contacts overlay
+
+SENDING A MESSAGE (handleSendMessage):
+  1. Checks E2EE eligibility:
+     a. If E2EE enabled AND recipient has publicKey:
+        - Gets/creates sender's key pair
+        - Verifies recipient's key fingerprint against stored fingerprint
+        - If fingerprint mismatch: falls back to plaintext, records reason
+        - Encrypts payload with NaCl box (sender secret + recipient public)
+        - Emits 'send-private-message' with messageType='encrypted' and
+          JSON-stringified encrypted payload
+     b. If E2EE enabled but recipient has no publicKey:
+        - Falls back to plaintext, shows warning toast
+     c. If E2EE not enabled:
+        - Sends plaintext
+  2. Emits 'send-private-message' via Socket.IO with message data
+  3. Includes fallback metadata if E2EE failed (for server-side tripwire logging)
+
+TYPING INDICATORS (handleTyping):
+  - Emits 'private-typing-start' or 'private-typing-stop' via Socket.IO
+
+UI RENDERING:
+  1. CHAT BUBBLE: Fixed position bottom-left corner
+     - Blue gradient button with message icon
+     - Green/red status indicator dot
+     - Unread count badge (animated pulse, shows "99+" for large counts)
+     - Disabled when not connected
+
+  2. CONTACTS OVERLAY: Opened by clicking the bubble
+     - ContactsOverlay component
+
+  3. CONVERSATION WINDOWS: Multiple draggable windows
+     - One ConversationOverlay per open conversation
+     - Non-minimized windows are rendered
+     - Position calculated to stack from bottom-right
+
+  4. MINIMIZED BAR: Facebook Messenger-style
+     - Shows avatar circles at bottom-right
+     - Click to un-minimize
+     - Shows unread dot indicator
+
+  5. CONNECTION WARNING: Yellow banner at top when disconnected
+
+--------------------------------------------------------------------------------
+3.9  UI COMPONENT: ContactsOverlay (User List)
+--------------------------------------------------------------------------------
+
+FILE: apps/web/src/components/chat/ContactsOverlay.tsx
+
+ROLE: Shows searchable list of all users, with AI assistant at the top.
+
+FEATURES:
+  - Search bar: filters by name, email, or department
+  - AI Assistant section (purple themed):
+    - Shows Lancelot AI with Bot icon and Sparkles
+    - Online/offline status badge
+    - Click to start AI conversation
+  - Regular users grouped by department:
+    - Alphabetically sorted within each department
+    - Avatar with initials
+    - Online status dot (green/yellow/red/gray)
+    - Email shown below name
+  - Closes when clicking outside
+  - Position: next to chat bubble (bottom-left offset)
+
+LAYOUT:
+  - Card: 320px wide, 450px tall
+  - Rounded corners, shadow
+  - Scrollable content area
+  - Gradient header (blue to indigo)
+
+--------------------------------------------------------------------------------
+3.10  UI COMPONENT: ConversationOverlay (Chat Window)
+--------------------------------------------------------------------------------
+
+FILE: apps/web/src/components/chat/ConversationOverlay.tsx
+
+ROLE: Individual chat window for one conversation. Multiple can be open.
+
+FEATURES:
+  - DRAGGABLE: Custom drag implementation on the header
+  - RESIZABLE: Fixed 384px wide, 500px tall
+  - MINIMIZABLE: Collapse to header bar
+  - E2EE INDICATOR: Lock icon shows encryption status
+  - AI DETECTION: Purple theme for AI conversations
+
+HEADER:
+  - Gradient background (purple for AI, blue for humans)
+  - Avatar (Bot icon for AI, initials for humans)
+  - User name and status ("מקליד..." when typing, "פעיל עכשיו" when online)
+  - E2EE status badge
+  - Minimize and close buttons
+
+MESSAGE AREA:
+  - Scrollable div with gradient background
+  - Empty state:
+    - AI: Bot icon with suggestions (רנדאון, גרפיקה, משמרות, חדשות)
+    - Human: Message icon with "Start a conversation" text
+  - Messages:
+    - Own messages: right-aligned, blue gradient bubble
+    - Other messages: left-aligned, white bubble (purple tint for AI)
+    - AI label shown on AI messages with Bot icon
+    - Timestamp in Hebrew format (HH:MM)
+    - Read receipts (double checkmark in blue)
+  - Typing indicator: Three animated bouncing dots
+
+INPUT AREA:
+  - Auto-resizing TextArea (1-4 rows)
+  - Enter to send, Shift+Enter for newline
+  - Round send button (blue when message present, gray when empty)
+  - Typing indicator fires on keypress, auto-stops after 2 seconds
+
+DATA LOADING:
+  1. On mount: GraphQL query GET_CONVERSATION_MESSAGES (last 50 messages)
+  2. On mount: Socket.IO emit 'join-private-conversation'
+  3. Real-time: Socket.IO listener for 'new-private-message'
+  4. On new message from other user: auto-marks as read after 500ms
+  5. On open: marks all messages as read after 1 second
+
+LIFECYCLE:
+  - join room on mount → leave room on unmount
+  - Auto-scroll to bottom on new messages
+  - Focus text area on mount
+
+--------------------------------------------------------------------------------
+3.11  END-TO-END CHAT FLOW
+--------------------------------------------------------------------------------
+
+STARTING A CONVERSATION:
+  1. User clicks chat bubble → ContactsOverlay opens
+  2. User clicks on a contact (or AI agent)
+  3. ChatManager.handleStartConversation(user)
+  4. GraphQL: createOrGetConversation(userId) → returns conversationId
+  5. ConversationOverlay mounts at calculated position
+  6. Socket: emits 'join-private-conversation' with conversationId
+  7. GraphQL: GET_CONVERSATION_MESSAGES loads chat history
+
+SENDING A MESSAGE (User-to-User):
+  1. User types in TextArea → typing indicator sent via Socket.IO
+  2. User presses Enter → ChatManager.handleSendMessage called
+  3. E2EE check: encrypt if available, else plaintext
+  4. Socket: emit 'send-private-message' with message data
+  5. Server (chat-socket.ts):
+     a. Validates inputs and conversation membership
+     b. Inserts message into chatMessages collection
+     c. Broadcasts 'new-private-message' to conversation room + other user's room
+  6. Both clients receive 'new-private-message':
+     a. ConversationOverlay appends to messages[]
+     b. ChatManager updates conversation list
+
+SENDING A MESSAGE TO AI:
+  1-5. Same as user-to-user
+  6. Server detects other participant is AI agent
+  7. Emits typing indicator for AI
+  8. POSTs to AI service at /ai/chat
+  9. Receives AI response (with optional encryption)
+  10. Stores AI message in chatMessages
+  11. Emits 'new-private-message' with AI response
+  12. Client renders AI response with purple theme
+
+READING MESSAGES:
+  1. ConversationOverlay opens → marks all as read after 1s
+  2. New message arrives from other user → marks as read after 500ms
+  3. GraphQL: MARK_MESSAGES_AS_READ mutation
+  4. Server: updates chatMessages.isRead = true, resets unreadCounts
+
+--------------------------------------------------------------------------------
+3.12  E2EE (END-TO-END ENCRYPTION) SYSTEM
+--------------------------------------------------------------------------------
+
+FILES:
+  - apps/web/src/utils/crypto/e2ee.ts      (encrypt/decrypt, key management)
+  - apps/web/src/utils/crypto/keys.ts       (key generation, fingerprints)
+  - apps/web/src/utils/crypto/keyStore.ts   (IndexedDB key storage)
+  - services/shared/crypto/replay.ts        (replay detection)
+  - services/api-gateway/src/config/index.ts (ENABLE_E2EE_CHAT flag)
+
+FEATURE FLAGS:
+  - ENABLE_E2EE_CHAT (server): enables/disables E2EE on the API gateway
+  - NEXT_PUBLIC_ENABLE_E2EE_CHAT (client): enables E2EE UI
+  - NEXT_PUBLIC_E2EE_FALLBACK_WARNING (client): shows toast on fallback
+
+HOW IT WORKS:
+  1. Each user generates a NaCl key pair (public + secret) stored in IndexedDB
+  2. Public key + fingerprint are stored in the user's profile
+  3. When sending a message:
+     a. Sender encrypts with: their secret key + recipient's public key
+     b. Payload includes: text, conversationId, senderId, messageId, createdAt
+     c. Encrypted result is JSON-stringified and sent as message body
+     d. messageType is set to 'encrypted'
+  4. When receiving a message:
+     a. Recipient decrypts with: their secret key + sender's public key
+     b. Verifies senderId and conversationId match the envelope
+     c. Checks messageId for replay attacks
+     d. Verifies sender's key fingerprint hasn't changed
+  5. Fallback scenarios (recorded as tripwires on server):
+     a. Recipient has no public key → plaintext
+     b. Key fingerprint mismatch → plaintext (possible key compromise)
+     c. Encryption error → plaintext
+
+TRIPWIRE SYSTEM:
+  - Server tracks e2eeFallbackCount when clients fall back to plaintext
+  - Logged with reason (key_fingerprint_mismatch, encryption_error, etc.)
+  - Exposed via /health endpoint for monitoring
+
+--------------------------------------------------------------------------------
+3.13  ALL CHAT-RELATED FILES (COMPLETE LIST)
+--------------------------------------------------------------------------------
+
+  FRONTEND (apps/web/src/):
+  ─────────────────────────────────────────────────────────────────────
+  components/ChatWrapper.tsx           Dynamic import wrapper (no SSR)
+  components/chat/ChatManager.tsx      Main orchestrator
+  components/chat/ContactsOverlay.tsx  Contact list
+  components/chat/ConversationOverlay.tsx  Chat window
+  components/chat/ChatOverlay.tsx      Modal-style chat (legacy/alternate)
+  components/InboxCenter.tsx           Inbox popover (uses ChatContext)
+  contexts/WebSocketContext.tsx         Socket.IO client provider
+  contexts/ChatContext.tsx             Conversation handler registration
+  graphql/chat-queries.ts             GraphQL operations for chat
+  graphql/ai-queries.ts               GraphQL operations for AI agent
+  utils/crypto/e2ee.ts                E2EE encrypt/decrypt
+  utils/crypto/keys.ts                Key generation/fingerprints
+  utils/crypto/keyStore.ts            IndexedDB key storage
+  app/layout.tsx                       Mounts ChatWrapper globally
+  app/client-providers.tsx             Provider tree (WebSocket + Chat)
+
+  BACKEND (services/api-gateway/src/):
+  ─────────────────────────────────────────────────────────────────────
+  socket/chat-socket.ts               Socket.IO server + AI bridge
+  resolvers/chat.ts                   GraphQL resolvers for chat
+  resolvers/ai.ts                     AI agent queries/mutations
+  schema/schema.graphql               Chat types + queries + mutations
+  config/index.ts                     ENABLE_E2EE_CHAT flag
+  services/metrics.ts                 CHAT_MESSAGES_SENT counter
+  models/notification.models.ts       chat_message notification channel
+  index.ts                            Merges chat resolvers + socket setup
+
+  AI AGENT (services/ai-agent/src/):
+  ─────────────────────────────────────────────────────────────────────
+  api/chat-handler.ts                 POST /ai/chat handler
+  schemas/chat-response.ts            Zod schemas for AI chat response
+  agent/memory.ts                     AI conversation memory (MongoDB)
+  workers/free-chat-worker.ts         AI free chat processing worker
+
+  SHARED (services/shared/):
+  ─────────────────────────────────────────────────────────────────────
+  crypto/replay.ts                    Replay detection for E2EE
+  crypto/types                        EncryptedMessage, MessagePayload types
+
+  DATABASE SCHEMAS (services/database/mongodb/):
+  ─────────────────────────────────────────────────────────────────────
+  chat-schemas.js                     Documentation-style Mongo shapes
+
+
+================================================================================
+END OF DOCUMENTATION
+================================================================================

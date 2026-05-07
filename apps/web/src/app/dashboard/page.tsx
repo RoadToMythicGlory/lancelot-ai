@@ -85,6 +85,22 @@ const GET_TODAYS_BROADCASTS = gql`
   }
 `;
 
+// For "my assignments" we reuse broadcastEvents + filter by broadcastArray crewAssignments in metadata
+const GET_BROADCAST_EVENTS_FOR_ASSIGNMENTS = gql`
+  query GetBroadcastEventsForAssignments($startDate: DateTime, $endDate: DateTime) {
+    broadcastEvents(startDate: $startDate, endDate: $endDate) {
+      id
+      title
+      hebrewTitle
+      channel
+      startTime
+      endTime
+      live
+      metadata
+    }
+  }
+`;
+
 const GET_WEEKLY_SHIFTS = gql`
   query GetWeeklyShifts($userId: String) {
     weeklyShifts(userId: $userId) {
@@ -108,6 +124,15 @@ const LancelotDashboard: React.FC = () => {
   const { user, loading: authLoading } = useAuth();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [broadcastsModalVisible, setBroadcastsModalVisible] = useState(false);
+
+  const assignmentsDateRange = useMemo(() => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 7);
+    end.setHours(23, 59, 59, 999);
+    return { startDate: start.toISOString(), endDate: end.toISOString() };
+  }, []);
 
   // Update current time every minute
   useEffect(() => {
@@ -140,6 +165,14 @@ const LancelotDashboard: React.FC = () => {
     pollInterval: 300000 // Refresh every 5 minutes
   });
 
+  // Query for broadcasts in the next week (to extract "my assignments" from broadcast array)
+  const { data: assignmentsSourceData, loading: assignmentsLoading } = useQuery(GET_BROADCAST_EVENTS_FOR_ASSIGNMENTS, {
+    variables: assignmentsDateRange,
+    skip: !user,
+    errorPolicy: 'all',
+    pollInterval: 300000
+  });
+
   // Query for weekly shifts
   const { data: shiftsData, loading: shiftsLoading } = useQuery(GET_WEEKLY_SHIFTS, {
     variables: { userId: user?.id },
@@ -163,6 +196,101 @@ const LancelotDashboard: React.FC = () => {
   const bulletinPosts = bulletinData?.bulletinPosts || [];
   const todaysBroadcasts = broadcastsData?.todaysBroadcasts || [];
   const weeklyShifts = shiftsData?.weeklyShifts || [];
+  const upcomingBroadcastEventsForAssignments = assignmentsSourceData?.broadcastEvents || [];
+
+  const upcomingWorkItems = useMemo(() => {
+    const now = new Date();
+    const userId = user?.id;
+    if (!userId) return [];
+
+    const parseShiftDateTime = (shift: any, time: string | undefined) => {
+      const base = new Date(shift.date);
+      if (time) {
+        const [h, m] = time.split(':').map((n: string) => parseInt(n, 10));
+        if (!Number.isNaN(h) && !Number.isNaN(m)) {
+          base.setHours(h, m, 0, 0);
+        }
+      }
+      return base;
+    };
+
+    const shiftItems = (weeklyShifts || []).map((shift: any) => {
+      const start = parseShiftDateTime(shift, shift.startTime);
+      let end = parseShiftDateTime(shift, shift.endTime);
+      if (end < start) end = new Date(end.getTime() + 24 * 60 * 60 * 1000); // overnight
+
+      return {
+        kind: 'shift' as const,
+        id: String(shift.id),
+        start,
+        end,
+        shift,
+      };
+    });
+
+    // Helper: ensure metadata is an object (GraphQL JSON scalar may return a string)
+    const ensureObject = (val: any): any => {
+      if (!val) return null;
+      if (typeof val === 'string') {
+        try { return JSON.parse(val); } catch { return null; }
+      }
+      return val;
+    };
+
+    const broadcastItems = (upcomingBroadcastEventsForAssignments || []).flatMap((event: any) => {
+      const meta = ensureObject(event?.metadata);
+      if (!meta?.departments) return [];
+
+      const dept = meta.departments.broadcastArray
+        || meta.departments['broadcast-array']
+        || null;
+      if (!dept) return [];
+
+      // crewAssignments can live at multiple levels depending on how the save happened
+      const crewAssignments: any[] =
+        (Array.isArray(dept.crewAssignments) ? dept.crewAssignments : null)
+        || (Array.isArray(dept.broadcastArray?.crewAssignments) ? dept.broadcastArray.crewAssignments : null)
+        || [];
+      if (crewAssignments.length === 0) return [];
+
+      const matched = crewAssignments.filter((a: any) => a?.userId === userId);
+      if (matched.length === 0) return [];
+
+      const start = new Date(event.startTime);
+      const end = new Date(event.endTime);
+
+      const place = dept.מקוםשידור || dept.customData?.מקוםשידור || '';
+
+      return matched.map((a: any, idx: number) => ({
+        kind: 'broadcast' as const,
+        id: `${event.id}:${a.role || 'role'}:${idx}`,
+        start,
+        end,
+        event,
+        role: a.role || a.userName || 'תפקיד',
+        place,
+      }));
+    });
+
+    console.log('[Dashboard] upcomingWorkItems debug:', {
+      userId,
+      totalShifts: shiftItems.length,
+      totalBroadcastEvents: (upcomingBroadcastEventsForAssignments || []).length,
+      broadcastAssignmentsFound: broadcastItems.length,
+      sampleEvent: (upcomingBroadcastEventsForAssignments || [])[0] ? {
+        id: (upcomingBroadcastEventsForAssignments || [])[0]?.id,
+        metadataType: typeof (upcomingBroadcastEventsForAssignments || [])[0]?.metadata,
+        departments: Object.keys(ensureObject((upcomingBroadcastEventsForAssignments || [])[0]?.metadata)?.departments || {}),
+        broadcastArray: ensureObject((upcomingBroadcastEventsForAssignments || [])[0]?.metadata)?.departments?.broadcastArray,
+      } : 'no events',
+    });
+
+    const combined = [...shiftItems, ...broadcastItems]
+      .filter((item) => item.end > now) // upcoming or currently active
+      .sort((a, b) => a.start.getTime() - b.start.getTime());
+
+    return combined;
+  }, [weeklyShifts, upcomingBroadcastEventsForAssignments, user?.id]);
 
   // Sort broadcasts by relevance (on-air first, then coming soon, then by start time)
   const sortedBroadcasts = useMemo(() => {
@@ -515,32 +643,70 @@ const LancelotDashboard: React.FC = () => {
               title={
                 <Space>
                   <CalendarOutlined />
-                  <span>המשמרות שלי השבוע</span>
+                  <span>המשמרות והשיבוצים שלי</span>
                 </Space>
               }
-              loading={shiftsLoading}
+              loading={shiftsLoading || assignmentsLoading}
               extra={
                 <Button type="link" onClick={() => router.push('/shifts')}>
                   הצג הכל
                 </Button>
               }
             >
-              {weeklyShifts.length > 0 ? (
+              {upcomingWorkItems.length > 0 ? (
                 <div className="overflow-x-auto">
                   <Space direction="vertical" className="w-full">
-                    {weeklyShifts.slice(0, 5).map((shift: any) => {
-                      const shiftDate = new Date(shift.date);
-                      const isToday = shiftDate.toDateString() === new Date().toDateString();
-                      const isPast = shiftDate < new Date();
-                      
+                    {upcomingWorkItems.slice(0, 5).map((item) => {
+                      const isToday = item.start.toDateString() === new Date().toDateString();
+                      const isPast = item.end < new Date();
+
+                      if (item.kind === 'shift') {
+                        const shift = item.shift;
+                        return (
+                          <div key={item.id} className={`border rounded-lg p-3 ${isToday ? 'border-blue-500 bg-blue-50' : ''} ${isPast ? 'opacity-60' : ''}`}>
+                            <Row align="middle" gutter={16}>
+                              <Col xs={24} sm={8}>
+                                <Space>
+                                  <CalendarOutlined />
+                                  <Text strong>
+                                    {item.start.toLocaleDateString('he-IL', { 
+                                      weekday: 'short', 
+                                      day: 'numeric', 
+                                      month: 'numeric' 
+                                    })}
+                                  </Text>
+                                  {isToday && <Badge status="processing" text="היום" />}
+                                </Space>
+                              </Col>
+                              <Col xs={24} sm={8}>
+                                <Text>
+                                  {shift.startTime} - {shift.endTime}
+                                </Text>
+                              </Col>
+                              <Col xs={24} sm={8}>
+                                <Space wrap>
+                                  <Tag color="blue">משמרת</Tag>
+                                  <Badge 
+                                    status={shift.status === 'scheduled' || shift.status === 'active' ? 'success' : 'warning'} 
+                                    text={shift.shiftType || 'משמרת רגילה'} 
+                                  />
+                                </Space>
+                              </Col>
+                            </Row>
+                          </div>
+                        );
+                      }
+
+                      // broadcast assignment
+                      const ev = item.event;
                       return (
-                        <div key={shift.id} className={`border rounded-lg p-3 ${isToday ? 'border-blue-500 bg-blue-50' : ''} ${isPast ? 'opacity-60' : ''}`}>
+                        <div key={item.id} className={`border rounded-lg p-3 ${isToday ? 'border-purple-500 bg-purple-50' : ''} ${isPast ? 'opacity-60' : ''}`}>
                           <Row align="middle" gutter={16}>
                             <Col xs={24} sm={8}>
                               <Space>
-                                <CalendarOutlined />
+                                <VideoCameraOutlined />
                                 <Text strong>
-                                  {shiftDate.toLocaleDateString('he-IL', { 
+                                  {item.start.toLocaleDateString('he-IL', { 
                                     weekday: 'short', 
                                     day: 'numeric', 
                                     month: 'numeric' 
@@ -550,15 +716,23 @@ const LancelotDashboard: React.FC = () => {
                               </Space>
                             </Col>
                             <Col xs={24} sm={8}>
-                              <Text>
-                                {shift.startTime} - {shift.endTime}
-                              </Text>
+                              <Space direction="vertical" size={0}>
+                                <Text>
+                                  {item.start.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })} -{' '}
+                                  {item.end.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}
+                                </Text>
+                                <Text type="secondary" className="text-xs">
+                                  {ev.title || ev.hebrewTitle}
+                                </Text>
+                              </Space>
                             </Col>
                             <Col xs={24} sm={8}>
-                              <Badge 
-                                status={shift.status === 'scheduled' ? 'success' : 'warning'} 
-                                text={shift.shiftType || 'משמרת רגילה'} 
-                              />
+                              <Space wrap>
+                                <Tag color="purple">שיבוץ שידור</Tag>
+                                <Tag color="geekblue">{item.role}</Tag>
+                                {ev.channel && <Tag>{ev.channel}</Tag>}
+                                {item.place && <Tag>{item.place}</Tag>}
+                              </Space>
                             </Col>
                           </Row>
                         </div>
@@ -570,7 +744,7 @@ const LancelotDashboard: React.FC = () => {
                 <div className="text-center py-8">
                   <CalendarOutlined className="text-4xl text-gray-400 mb-2" />
                   <br />
-                  <Text type="secondary">אין משמרות מתוכננות השבוע</Text>
+                  <Text type="secondary">אין משמרות או שיבוצים קרובים</Text>
                 </div>
               )}
             </Card>

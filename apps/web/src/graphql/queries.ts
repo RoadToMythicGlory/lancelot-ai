@@ -547,4 +547,57 @@ export const GET_MY_DEPARTMENT_SHIFT_CONFIG = gql`
       }
     }
   }
-`; 
+`;
+
+// External Broadcast Presets
+export const GET_EXTERNAL_BROADCAST_PRESETS = gql`
+  query GetExternalBroadcastPresets {
+    externalBroadcastPresets {
+      id
+      name
+      description
+      tags
+      roles {
+        roleKey
+        roleLabel
+        count
+        isCustom
+      }
+      equipment {
+        equipmentId
+        name
+        category
+        count
+      }
+      createdBy
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const GET_EXTERNAL_BROADCAST_PRESET = gql`
+  query GetExternalBroadcastPreset($id: ID!) {
+    externalBroadcastPreset(id: $id) {
+      id
+      name
+      description
+      tags
+      roles {
+        roleKey
+        roleLabel
+        count
+        isCustom
+      }
+      equipment {
+        equipmentId
+        name
+        category
+        count
+      }
+      createdBy
+      createdAt
+      updatedAt
+    }
+  }
+`;

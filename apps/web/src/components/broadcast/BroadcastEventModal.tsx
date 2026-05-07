@@ -554,7 +554,6 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
           visible={true}
           event={event}
           onClose={handleDepartmentModalClose}
-          onSave={handleDepartmentSave}
           onDataSaved={onDataSaved}
         />
       )}

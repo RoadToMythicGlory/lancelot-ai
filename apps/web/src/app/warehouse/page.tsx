@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Alert, List, Card, Input, Button, Space, Tag, Row, Col, Badge, Empty, App, Breadcrumb, Select, Statistic, Tabs, DatePicker } from 'antd';
+import React, { useState } from 'react';
+import { Alert, List, Card, Input, Button, Space, Tag, Row, Col, Empty, App, Breadcrumb, Select, Statistic, Tabs, DatePicker } from 'antd';
 import { 
   InboxOutlined,
   CheckCircleOutlined,
@@ -19,7 +19,7 @@ import {
   PhoneOutlined
 } from '@ant-design/icons';
 import { useQuery } from '@apollo/client';
-import { GET_WAREHOUSE_EQUIPMENT, GET_BROADCAST_EVENTS, GET_EQUIPMENT_ASSIGNMENTS_BY_EVENT } from '../../graphql/queries';
+import { GET_WAREHOUSE_EQUIPMENT, GET_BROADCAST_EVENTS } from '../../graphql/queries';
 import Link from 'next/link';
 import EquipmentRegistrationModal from '../../components/warehouse/EquipmentRegistrationModal';
 import EquipmentReturnModal from '../../components/warehouse/EquipmentReturnModal';
@@ -62,6 +62,21 @@ interface Equipment {
   disabledReason?: string;
 }
 
+/** Avoid crashes when metadata lists are missing or not arrays */
+function asArray<T = unknown>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function legacyEquipmentStrings(equipmentList: unknown): string[] {
+  if (Array.isArray(equipmentList)) {
+    return equipmentList.filter((x): x is string => typeof x === 'string');
+  }
+  if (typeof equipmentList === 'string' && equipmentList.trim()) {
+    return [equipmentList];
+  }
+  return [];
+}
+
 const WarehousePage: React.FC = () => {
   const { message } = App.useApp();
   const [searchText, setSearchText] = useState('');
@@ -79,17 +94,19 @@ const WarehousePage: React.FC = () => {
     dayjs().add(30, 'days')
   ]);
 
+  const dateRangeValid = Boolean(dateRange[0] && dateRange[1]);
+
   // Query for warehouse equipment
   const { data: equipmentData, loading: equipmentLoading, error: equipmentError, refetch } = useQuery(GET_WAREHOUSE_EQUIPMENT);
   const equipment: Equipment[] = equipmentData?.warehouseEquipment || [];
 
-  // Query for broadcast events with equipment
+  // Query for broadcast events with equipment (skip if tab inactive or range cleared — avoids huge unbounded fetches and stale-cache confusion)
   const { data: eventsData, loading: eventsLoading, error: eventsError } = useQuery(GET_BROADCAST_EVENTS, {
     variables: {
-      startDate: dateRange[0]?.toISOString(),
-      endDate: dateRange[1]?.toISOString()
+      startDate: dateRangeValid ? dateRange[0]!.toISOString() : undefined,
+      endDate: dateRangeValid ? dateRange[1]!.toISOString() : undefined
     },
-    skip: activeTab !== 'history'
+    skip: activeTab !== 'history' || !dateRangeValid
   });
 
   // Get unique categories for filter
@@ -102,10 +119,11 @@ const WarehousePage: React.FC = () => {
       return false;
     }
     
-    const matchesSearch = !searchText || 
-      item.name.toLowerCase().includes(searchText.toLowerCase()) ||
-      item.barcode.toLowerCase().includes(searchText.toLowerCase()) ||
-      item.brand.toLowerCase().includes(searchText.toLowerCase());
+    const q = searchText.toLowerCase();
+    const matchesSearch = !searchText ||
+      String(item.name ?? '').toLowerCase().includes(q) ||
+      String(item.barcode ?? '').toLowerCase().includes(q) ||
+      String(item.brand ?? '').toLowerCase().includes(q);
     
     const matchesCategory = selectedCategory === 'all' || item.category === selectedCategory;
     const matchesStatus = selectedStatus === 'all' || 
@@ -154,22 +172,21 @@ const WarehousePage: React.FC = () => {
     
     eventsWithEquipment.forEach((event: any) => {
       // Extract equipment data from various sources
-      let equipmentItems: any[] = [];
-      
+      const equipmentItems: any[] = [];
+
       // From warehouse metadata (permanent history)
       const warehouseData = event.metadata?.departments?.warehouse;
       const warehouseCustomData = warehouseData?.customData || {};
       
       // First check equipmentHistory (permanent record)
-      const equipmentHistory = warehouseCustomData.equipmentHistory || 
-                             warehouseData?.equipmentHistory || 
-                             [];
-      
+      const equipmentHistory = asArray(
+        warehouseCustomData.equipmentHistory ?? warehouseData?.equipmentHistory
+      );
+
       // If no history, fall back to current assignedItems
-      const assignedItems = equipmentHistory.length > 0 ? equipmentHistory :
-                           (warehouseCustomData.assignedItems || 
-                            warehouseData?.assignedItems || 
-                            []);
+      const assignedItems = equipmentHistory.length > 0
+        ? equipmentHistory
+        : asArray(warehouseCustomData.assignedItems ?? warehouseData?.assignedItems);
       
       // Add items from history or current assignments
       assignedItems.forEach((item: any) => {
@@ -186,9 +203,9 @@ const WarehousePage: React.FC = () => {
       // From external broadcasts (requested equipment)
       const externalBroadcastsData = event.metadata?.departments?.externalBroadcasts;
       const externalCustomData = externalBroadcastsData?.customData || {};
-      const requestedEquipment = externalCustomData.equipmentList || 
-                               externalBroadcastsData?.equipmentList || 
-                               [];
+      const requestedEquipment = asArray(
+        externalCustomData.equipmentList ?? externalBroadcastsData?.equipmentList
+      );
       
       // Add requested equipment
       requestedEquipment.forEach((item: any) => {
@@ -200,21 +217,19 @@ const WarehousePage: React.FC = () => {
         });
       });
       
-      // From legacy equipment_list field
-      if (event.equipment_list && event.equipment_list.length > 0) {
-        event.equipment_list.forEach((item: string) => {
-          equipmentItems.push({
-            name: item,
-            type: 'legacy'
-          });
+      // From legacy equipment_list field (string or string[])
+      legacyEquipmentStrings(event.equipment_list).forEach((item: string) => {
+        equipmentItems.push({
+          name: item,
+          type: 'legacy'
         });
-      }
+      });
       
       // Check backward compatibility location
       const rootWarehouseData = event.metadata?.warehouseData;
       if (rootWarehouseData) {
         // Check history first
-        const rootHistory = rootWarehouseData.equipmentHistory || [];
+        const rootHistory = asArray(rootWarehouseData.equipmentHistory);
         if (rootHistory.length > 0) {
           rootHistory.forEach((item: any) => {
             equipmentItems.push({
@@ -228,7 +243,7 @@ const WarehousePage: React.FC = () => {
           });
         } else if (rootWarehouseData.assignedItems) {
           // Fall back to assigned items if no history
-          rootWarehouseData.assignedItems.forEach((item: any) => {
+          asArray(rootWarehouseData.assignedItems).forEach((item: any) => {
             equipmentItems.push({
               name: item.name || 'ציוד',
               type: 'scanned',
@@ -245,17 +260,27 @@ const WarehousePage: React.FC = () => {
           'מספר אירוע': event.eventNumber || '',
           'שם האירוע': event.title || event.hebrewTitle || '',
           'ערוץ': event.channel || '',
-          'תאריך אירוע': dayjs(event.startTime).format('DD/MM/YYYY'),
-          'שעת התחלה': dayjs(event.startTime).format('HH:mm'),
-          'שעת סיום': event.endTime ? dayjs(event.endTime).format('HH:mm') : '',
+          'תאריך אירוע': event.startTime && dayjs(event.startTime).isValid()
+            ? dayjs(event.startTime).format('DD/MM/YYYY')
+            : '',
+          'שעת התחלה': event.startTime && dayjs(event.startTime).isValid()
+            ? dayjs(event.startTime).format('HH:mm')
+            : '',
+          'שעת סיום': event.endTime && dayjs(event.endTime).isValid()
+            ? dayjs(event.endTime).format('HH:mm')
+            : '',
           'מיקום': event.location || event.venue || '',
           'שם ציוד': item.name || '',
           'ברקוד': item.barcode || '',
           'קטגוריה': item.category || '',
           'כמות': item.quantity || 1,
           'סטטוס': item.type === 'returned' ? 'הוחזר' : item.type === 'requested' ? 'מבוקש' : 'מוקצה',
-          'תאריך הקצאה': item.assignedAt ? dayjs(item.assignedAt).format('DD/MM/YYYY HH:mm') : '',
-          'תאריך החזרה': item.returnedAt ? dayjs(item.returnedAt).format('DD/MM/YYYY HH:mm') : ''
+          'תאריך הקצאה': item.assignedAt && dayjs(item.assignedAt).isValid()
+            ? dayjs(item.assignedAt).format('DD/MM/YYYY HH:mm')
+            : '',
+          'תאריך החזרה': item.returnedAt && dayjs(item.returnedAt).isValid()
+            ? dayjs(item.returnedAt).format('DD/MM/YYYY HH:mm')
+            : ''
         });
       });
     });
@@ -283,10 +308,10 @@ const WarehousePage: React.FC = () => {
       ).join('\n');
     
     // Create filename with date range
-    const startDateStr = dayjs(dateRange[0]).format('DD.MM.YYYY');
-    const endDateStr = dayjs(dateRange[1]).format('DD.MM.YYYY');
+    const startDateStr = (dateRange[0] ?? dayjs().subtract(30, 'days')).format('DD.MM.YYYY');
+    const endDateStr = (dateRange[1] ?? dayjs().add(30, 'days')).format('DD.MM.YYYY');
     const filename = `רשימות ציוד שהוקצה תאריכים - ${startDateStr}-${endDateStr}.csv`;
-    
+
     // Create blob and download
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
@@ -298,7 +323,8 @@ const WarehousePage: React.FC = () => {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+
       message.success(`הקובץ "${filename}" יורד כעת`);
     }
   };
@@ -526,58 +552,58 @@ const WarehousePage: React.FC = () => {
   );
 
   const renderHistoryTab = () => {
-    const events = eventsData?.broadcastEvents || [];
-    
+    const events = !dateRangeValid ? [] : (eventsData?.broadcastEvents || []);
+
     // Filter events that have equipment - check multiple sources
     const eventsWithEquipment = events.filter((event: any) => {
       // Check warehouse department data in metadata (this is where WarehouseModal saves data)
       const warehouseData = event.metadata?.departments?.warehouse;
       const warehouseCustomData = warehouseData?.customData || {};
-      
+
       // Check for equipment history (permanent record)
-      const equipmentHistory = warehouseCustomData.equipmentHistory || 
-                              warehouseData?.equipmentHistory || 
-                              [];
-      
+      const equipmentHistory = asArray(
+        warehouseCustomData.equipmentHistory ?? warehouseData?.equipmentHistory
+      );
+
       if (equipmentHistory.length > 0) {
         return true;
       }
-      
+
       // Also check current assigned items
-      const assignedItems = warehouseCustomData.assignedItems || 
-                           warehouseData?.assignedItems || 
-                           [];
-      
+      const assignedItems = asArray(
+        warehouseCustomData.assignedItems ?? warehouseData?.assignedItems
+      );
+
       if (assignedItems.length > 0) {
         return true;
       }
-      
+
       // Check external broadcasts equipment list
       const externalBroadcastsData = event.metadata?.departments?.externalBroadcasts;
       const externalCustomData = externalBroadcastsData?.customData || {};
-      const equipmentList = externalCustomData.equipmentList || 
-                           externalBroadcastsData?.equipmentList || 
-                           [];
-      
+      const equipmentList = asArray(
+        externalCustomData.equipmentList ?? externalBroadcastsData?.equipmentList
+      );
+
       if (equipmentList.length > 0) {
         return true;
       }
-      
+
       // Check legacy equipment_list field
-      if (event.equipment_list && event.equipment_list.length > 0) {
+      if (legacyEquipmentStrings(event.equipment_list).length > 0) {
         return true;
       }
-      
+
       // Check if metadata has warehouseData at root level (backward compatibility)
       const rootWarehouseData = event.metadata?.warehouseData;
       if (rootWarehouseData) {
-        const rootHistory = rootWarehouseData.equipmentHistory || [];
-        const rootAssigned = rootWarehouseData.assignedItems || [];
+        const rootHistory = asArray(rootWarehouseData.equipmentHistory);
+        const rootAssigned = asArray(rootWarehouseData.assignedItems);
         if (rootHistory.length > 0 || rootAssigned.length > 0) {
           return true;
         }
       }
-      
+
       return false;
     });
 
@@ -608,11 +634,13 @@ const WarehousePage: React.FC = () => {
             </Col>
             <Col span={12} className="text-left">
               <Space>
-                <Tag color="blue">{eventsWithEquipment.length} אירועים עם ציוד</Tag>
+                <Tag color="blue">
+                  {dateRangeValid ? `${eventsWithEquipment.length} אירועים עם ציוד` : 'בחר טווח תאריכים'}
+                </Tag>
                 <Button 
                   icon={<FileExcelOutlined />}
                   onClick={() => exportToExcel(eventsWithEquipment)}
-                  disabled={eventsWithEquipment.length === 0}
+                  disabled={!dateRangeValid || eventsWithEquipment.length === 0}
                 >
                   חלץ לאקסל
                 </Button>
@@ -630,7 +658,9 @@ const WarehousePage: React.FC = () => {
             </span>
           }
         >
-          {eventsLoading ? (
+          {!dateRangeValid ? (
+            <Empty description="בחר תאריך התחלה ותאריך סיום כדי לטעון את רשימת האירועים" />
+          ) : eventsLoading ? (
             <div className="text-center py-8">טוען נתוני אירועים...</div>
           ) : eventsError ? (
             <Alert message="שגיאה בטעינת נתוני אירועים" type="error" showIcon />
@@ -641,22 +671,21 @@ const WarehousePage: React.FC = () => {
               dataSource={eventsWithEquipment}
               renderItem={(event: any) => {
                 // Extract equipment data from various sources
-                let equipmentItems: any[] = [];
-                
+                const equipmentItems: any[] = [];
+
                 // From warehouse metadata (permanent history)
                 const warehouseData = event.metadata?.departments?.warehouse;
                 const warehouseCustomData = warehouseData?.customData || {};
-                
+
                 // First check equipmentHistory (permanent record)
-                const equipmentHistory = warehouseCustomData.equipmentHistory || 
-                                       warehouseData?.equipmentHistory || 
-                                       [];
-                
+                const equipmentHistory = asArray(
+                  warehouseCustomData.equipmentHistory ?? warehouseData?.equipmentHistory
+                );
+
                 // If no history, fall back to current assignedItems
-                const assignedItems = equipmentHistory.length > 0 ? equipmentHistory :
-                                     (warehouseCustomData.assignedItems || 
-                                      warehouseData?.assignedItems || 
-                                      []);
+                const assignedItems = equipmentHistory.length > 0
+                  ? equipmentHistory
+                  : asArray(warehouseCustomData.assignedItems ?? warehouseData?.assignedItems);
                 
                 // Add items from history or current assignments
                 assignedItems.forEach((item: any) => {
@@ -676,9 +705,9 @@ const WarehousePage: React.FC = () => {
                 // From external broadcasts (requested equipment)
                 const externalBroadcastsData = event.metadata?.departments?.externalBroadcasts;
                 const externalCustomData = externalBroadcastsData?.customData || {};
-                const requestedEquipment = externalCustomData.equipmentList || 
-                                         externalBroadcastsData?.equipmentList || 
-                                         [];
+                const requestedEquipment = asArray(
+                  externalCustomData.equipmentList ?? externalBroadcastsData?.equipmentList
+                );
                 
                 // Add requested equipment
                 requestedEquipment.forEach((item: any) => {
@@ -691,20 +720,18 @@ const WarehousePage: React.FC = () => {
                 });
                 
                 // From legacy equipment_list field
-                if (event.equipment_list && event.equipment_list.length > 0) {
-                  event.equipment_list.forEach((item: string) => {
-                    equipmentItems.push({
-                      name: item,
-                      type: 'legacy'
-                    });
+                legacyEquipmentStrings(event.equipment_list).forEach((item: string) => {
+                  equipmentItems.push({
+                    name: item,
+                    type: 'legacy'
                   });
-                }
+                });
                 
                 // Check backward compatibility location
                 const rootWarehouseData = event.metadata?.warehouseData;
                 if (rootWarehouseData) {
                   // Check history first
-                  const rootHistory = rootWarehouseData.equipmentHistory || [];
+                  const rootHistory = asArray(rootWarehouseData.equipmentHistory);
                   if (rootHistory.length > 0) {
                     rootHistory.forEach((item: any) => {
                       equipmentItems.push({
@@ -720,7 +747,7 @@ const WarehousePage: React.FC = () => {
                     });
                   } else if (rootWarehouseData.assignedItems) {
                     // Fall back to assigned items if no history
-                    rootWarehouseData.assignedItems.forEach((item: any) => {
+                    asArray(rootWarehouseData.assignedItems).forEach((item: any) => {
                       equipmentItems.push({
                         name: item.name || 'ציוד',
                         type: 'scanned',
@@ -731,6 +758,9 @@ const WarehousePage: React.FC = () => {
                   }
                 }
                 
+                const startD = event.startTime ? dayjs(event.startTime) : null;
+                const isUpcoming = startD?.isValid() ? startD.isAfter(dayjs()) : false;
+
                 return (
                   <List.Item>
                     <div className="w-full">
@@ -742,8 +772,8 @@ const WarehousePage: React.FC = () => {
                           )}
                         </div>
                         <Space>
-                          <Tag color={new Date(event.startTime) > new Date() ? 'blue' : 'default'}>
-                            {new Date(event.startTime) > new Date() ? 'עתידי' : 'עבר'}
+                          <Tag color={isUpcoming ? 'blue' : 'default'}>
+                            {isUpcoming ? 'עתידי' : 'עבר'}
                           </Tag>
                           <Tag>{event.channel}</Tag>
                         </Space>
@@ -751,8 +781,11 @@ const WarehousePage: React.FC = () => {
                       <div className="text-sm text-gray-600 mb-2">
                         <Space>
                           <CalendarOutlined />
-                          {dayjs(event.startTime).format('DD/MM/YYYY HH:mm')}
-                          {event.endTime && ` - ${dayjs(event.endTime).format('HH:mm')}`}
+                          {startD?.isValid()
+                            ? startD.format('DD/MM/YYYY HH:mm')
+                            : '—'}
+                          {event.endTime && dayjs(event.endTime).isValid() &&
+                            ` - ${dayjs(event.endTime).format('HH:mm')}`}
                           {event.location && <span>| {event.location}</span>}
                         </Space>
                       </div>
@@ -842,7 +875,7 @@ const WarehousePage: React.FC = () => {
                   onClick={() => setIsReturnModalVisible(true)}
                   style={{ marginLeft: 8 }}
                 >
-                  זכה ציוד
+                  החזרת ציוד
                 </Button>
               </Space>
             )}

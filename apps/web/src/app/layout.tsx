@@ -9,10 +9,19 @@ import ChatWrapper from '@/components/ChatWrapper'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Lancelot - Broadcast Planning System',
-  description: 'Broadcast planning and scheduling system',
+  title: 'Lancelot - Broadcast Operations Platform',
+  description: 'Enterprise broadcast operations ERP - planning, MCR, shifts, equipment, and more',
   icons: {
     icon: '/lancelot-small-logo.png',
+    apple: '/lancelot-small-logo.png',
+  },
+  manifest: '/manifest.json',
+  themeColor: '#3B82F6',
+  viewport: 'width=device-width, initial-scale=1, maximum-scale=1',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'Lancelot',
   },
 }
 

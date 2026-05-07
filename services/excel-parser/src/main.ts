@@ -15,7 +15,11 @@ const upload = multer({
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:3000'],
+  origin: [
+    'http://localhost:3000',
+    'https://www.lanceloterp.io',
+    'https://lanceloterp.io',
+  ],
   credentials: true,
 }));
 app.use(express.json());

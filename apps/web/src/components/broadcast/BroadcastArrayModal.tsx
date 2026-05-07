@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Modal, Form, Input, Select, Row, Col, Button, Space, Divider, Alert, Spin, App } from 'antd';
 import { useMutation, useQuery } from '@apollo/client';
 import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA } from '../../graphql/mutations';
@@ -71,72 +71,89 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
     skip: !visible
   });
 
-  // Create department code to ID mapping
-  const getDepartmentIdByCode = (code: string): string | null => {
-    if (!departmentsData?.departments) return null;
-    const department = departmentsData.departments.find((dept: any) => dept.code === code);
-    return department?.id || null;
-  };
+  /**
+   * IMPORTANT: `users(filter: { departmentId })` expects a department "code" (string),
+   * not a Mongo ObjectId. Our `departments` resolver exposes `Department.id` as the code
+   * for compatibility, but we also keep fallback matching to support mixed environments.
+   */
+  const getDepartmentIdByCodes = useMemo(() => {
+    return (codes: string[]): string | null => {
+      const list = departmentsData?.departments || [];
+      for (const code of codes) {
+        const department = list.find((dept: any) => dept?.code === code);
+        if (department?.id) return String(department.id);
+      }
+      return null;
+    };
+  }, [departmentsData]);
+
+  // Try multiple known codes across environments (prod vs seeded dev DB)
+  const editorsDeptId = getDepartmentIdByCodes(['CONTENT_EDIT', 'Visuals-VideoEditors', 'NewMedia-Editors', 'News-Editors']);
+  const producersDeptId = getDepartmentIdByCodes(['PROD', 'NewMedia-Producers', 'News-Producers']);
+  const vtrDeptId = getDepartmentIdByCodes(['VTR', 'Production-VTR']);
+  const directorsDeptId = getDepartmentIdByCodes(['DIR', 'Production-Directors']);
+  const commentatorsDeptId = getDepartmentIdByCodes(['COMMENT', 'Production-Commentators']);
+  const soundmenDeptId = getDepartmentIdByCodes(['SOUND', 'Production-Soundmen']);
 
   // Queries for different department employees
   const { data: editorsData, loading: editorsLoading } = useQuery(GET_EMPLOYEES_BY_DEPARTMENT, {
     variables: { 
       filter: {
-        departmentId: getDepartmentIdByCode('CONTENT_EDIT'),
+        departmentId: editorsDeptId,
         isActive: true
       }
     },
-    skip: !visible || !departmentsData
+    skip: !visible || !editorsDeptId
   });
 
   const { data: producersData, loading: producersLoading } = useQuery(GET_EMPLOYEES_BY_DEPARTMENT, {
     variables: { 
       filter: {
-        departmentId: getDepartmentIdByCode('PROD'),
+        departmentId: producersDeptId,
         isActive: true
       }
     },
-    skip: !visible || !departmentsData
+    skip: !visible || !producersDeptId
   });
 
   const { data: vtrData, loading: vtrLoading } = useQuery(GET_EMPLOYEES_BY_DEPARTMENT, {
     variables: { 
       filter: {
-        departmentId: getDepartmentIdByCode('VTR'),
+        departmentId: vtrDeptId,
         isActive: true
       }
     },
-    skip: !visible || !departmentsData
+    skip: !visible || !vtrDeptId
   });
 
   const { data: directorsData, loading: directorsLoading } = useQuery(GET_EMPLOYEES_BY_DEPARTMENT, {
     variables: { 
       filter: {
-        departmentId: getDepartmentIdByCode('DIR'),
+        departmentId: directorsDeptId,
         isActive: true
       }
     },
-    skip: !visible || !departmentsData
+    skip: !visible || !directorsDeptId
   });
 
   const { data: commentatorsData, loading: commentatorsLoading } = useQuery(GET_EMPLOYEES_BY_DEPARTMENT, {
     variables: { 
       filter: {
-        departmentId: getDepartmentIdByCode('COMMENT'),
+        departmentId: commentatorsDeptId,
         isActive: true
       }
     },
-    skip: !visible || !departmentsData
+    skip: !visible || !commentatorsDeptId
   });
 
   const { data: soundmenData, loading: soundmenLoading } = useQuery(GET_EMPLOYEES_BY_DEPARTMENT, {
     variables: { 
       filter: {
-        departmentId: getDepartmentIdByCode('SOUND'),
+        departmentId: soundmenDeptId,
         isActive: true
       }
     },
-    skip: !visible || !departmentsData
+    skip: !visible || !soundmenDeptId
   });
 
   const isLoadingEmployees = editorsLoading || producersLoading || vtrLoading || 
@@ -154,8 +171,10 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
       console.log('🔍 BroadcastArrayModal - Event data:', eventData);
       console.log('🔍 BroadcastArrayModal - Metadata:', eventData.metadata);
       
-      // Get existing broadcast array data from metadata
-      const broadcastArrayData = eventData.metadata?.departments?.broadcastArray;
+      // Get existing broadcast array data from metadata (support legacy key)
+      const broadcastArrayData =
+        eventData.metadata?.departments?.broadcastArray ||
+        eventData.metadata?.departments?.['broadcast-array'];
       
       console.log('🔍 BroadcastArrayModal - Broadcast array data:', broadcastArrayData);
       console.log('🔍 BroadcastArrayModal - Hebrew fields:', {

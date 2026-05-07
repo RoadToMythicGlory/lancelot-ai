@@ -2,6 +2,7 @@ import { AuthenticationError, UserInputError } from 'apollo-server-express';
 import MCREvent, { IMCREvent } from '../models/mcrEvent';
 import BulletinPost, { IBulletinPost } from '../models/bulletinPost';
 import ActivityRow, { IActivityRow } from '../models/activityRow';
+import { BroadcastEvent } from '../models/broadcast.models';
 import { pubsub } from '../utils/pubsub';
 import { withAuth } from '../utils/auth';
 
@@ -76,20 +77,77 @@ const resolvers = {
       return await BulletinPost.findById(args.id);
     }),
 
-    // Activity Rows
-    activityRows: withAuth(async (_: any, args: any) => {
+    // Activity Rows — auto-syncs broadcast events into empty activity rows
+    activityRows: withAuth(async (_: any, args: any, context: any) => {
       const startOfDay = new Date(args.date);
       startOfDay.setHours(0, 0, 0, 0);
       
       const endOfDay = new Date(args.date);
       endOfDay.setHours(23, 59, 59, 999);
-      
+
+      // 1. Find broadcast events that fall on this day
+      try {
+        const broadcastEvents = await BroadcastEvent.find({
+          $or: [
+            { startTime: { $gte: startOfDay, $lte: endOfDay } },
+            { endTime: { $gte: startOfDay, $lte: endOfDay } },
+            { startTime: { $lte: startOfDay }, endTime: { $gte: endOfDay } }
+          ]
+        });
+
+        if (broadcastEvents.length > 0) {
+          // 2. Check which broadcast events already have an activity row
+          const broadcastIds = broadcastEvents.map(e => e._id);
+          const existingRows = await ActivityRow.find({
+            broadcastEventId: { $in: broadcastIds }
+          });
+          const existingBroadcastIds = new Set(
+            existingRows.map(r => r.broadcastEventId?.toString())
+          );
+
+          // 3. Create empty activity rows for new broadcast events
+          const newRows = broadcastEvents
+            .filter(event => !existingBroadcastIds.has(event._id.toString()))
+            .map(event => {
+              const startTime = new Date(event.startTime);
+              const endTime = new Date(event.endTime);
+              const timeStr = startTime.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', hour12: false });
+              const endTimeStr = endTime.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+              return {
+                date: startOfDay,
+                activityName: (event as any).hebrewTitle || event.title || 'אירוע שידור',
+                time: timeStr,
+                endTime: endTimeStr,
+                channel: (event as any).channel || '',
+                equipment: '',
+                backup: '',
+                routing: '',
+                notes: '',
+                status: 'UNKNOWN',
+                isHidden: false,
+                isManual: false,
+                broadcastEventId: event._id,
+                createdBy: context.user.userId,
+              };
+            });
+
+          if (newRows.length > 0) {
+            await ActivityRow.insertMany(newRows);
+          }
+        }
+      } catch (err) {
+        // Log but don't fail — the board should still show existing rows
+        console.error('Error syncing broadcast events to activity rows:', err);
+      }
+
+      // 4. Return all activity rows for the day
       const query: any = {
         date: { $gte: startOfDay, $lte: endOfDay }
       };
       
       if (!args.includeHidden) {
-        query.isHidden = false;
+        query.isHidden = { $ne: true };
       }
       
       return await ActivityRow.find(query)

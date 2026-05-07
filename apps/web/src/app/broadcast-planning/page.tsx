@@ -459,11 +459,23 @@ const BroadcastPlanningPage: React.FC = () => {
 
   // Get department status color
   const getDepartmentStatus = (event: BroadcastEvent, department: string): 'success' | 'warning' | 'error' => {
-    if (!event.metadata?.departments?.[department]) {
+    if (!event.metadata?.departments) {
+      return 'error'; // Red - no data
+    }
+
+    // Frontend uses kebab-case, backend stores camelCase keys
+    const departmentKeyMap: Record<string, string> = {
+      'broadcast-array': 'broadcastArray',
+      'external-broadcasts': 'externalBroadcasts',
+      'closed-captions': 'closedCaptions',
+    };
+    const departmentKey = departmentKeyMap[department] || department;
+
+    if (!event.metadata.departments?.[departmentKey]) {
       return 'error'; // Red - no data
     }
     
-    const deptData = event.metadata.departments[department];
+    const deptData = event.metadata.departments[departmentKey];
     
     // Check if department has filled required fields
     if (deptData.customData || deptData.data) {
@@ -2011,7 +2023,8 @@ const BroadcastPlanningPage: React.FC = () => {
                   const formData = new FormData();
                   formData.append('file', file);
 
-                  const response = await fetch('https://api.lanceloterp.io/parse-broadcast-schedule', {
+                  const excelParserUrl = process.env.NEXT_PUBLIC_EXCEL_PARSER_URL || 'http://localhost:4002';
+                  const response = await fetch(`${excelParserUrl}/parse-broadcast-schedule`, {
                     method: 'POST',
                     body: formData
                   });
@@ -2054,7 +2067,7 @@ const BroadcastPlanningPage: React.FC = () => {
                       const koHHmm = normalizeHHmm(String(cd.koTime || raw['KO / TO'] || event.koTime || '').trim());
 
                       // Build absolute times in Asia/Jerusalem, then to ISO
-                      let startDateTime = baseDate.isValid() && startHHmm
+                      const startDateTime = baseDate.isValid() && startHHmm
                         ? dayjs.tz(`${baseDate.format('DD/MM/YYYY')} ${startHHmm}`, 'DD/MM/YYYY HH:mm', 'Asia/Jerusalem', true)
                         : baseDate.startOf('day');
                       let endDateTime = baseDate.isValid() && endHHmm

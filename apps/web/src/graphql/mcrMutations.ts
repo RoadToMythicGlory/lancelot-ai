@@ -64,3 +64,64 @@ export const DELETE_MCR_EVENT = gql`
   }
 `;
 
+// Activity Row Mutations
+export const CREATE_ACTIVITY_ROW = gql`
+  mutation CreateActivityRow($input: CreateActivityRowInput!) {
+    createActivityRow(input: $input) {
+      id
+      date
+      activityName
+      time
+      endTime
+      equipment
+      backup
+      routing
+      channel
+      broadcastType
+      notes
+      status
+      isHidden
+      isManual
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const UPDATE_ACTIVITY_ROW = gql`
+  mutation UpdateActivityRow($id: ID!, $input: UpdateActivityRowInput!) {
+    updateActivityRow(id: $id, input: $input) {
+      id
+      date
+      activityName
+      time
+      endTime
+      equipment
+      backup
+      routing
+      channel
+      broadcastType
+      notes
+      status
+      isHidden
+      isManual
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const DELETE_ACTIVITY_ROW = gql`
+  mutation DeleteActivityRow($id: ID!) {
+    deleteActivityRow(id: $id)
+  }
+`;
+
+export const HIDE_ACTIVITY_ROW = gql`
+  mutation HideActivityRow($id: ID!) {
+    hideActivityRow(id: $id) {
+      id
+      isHidden
+    }
+  }
+`;

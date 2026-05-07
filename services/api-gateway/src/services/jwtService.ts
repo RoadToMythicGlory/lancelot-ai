@@ -7,6 +7,7 @@ export interface JWTPayload {
   email: string;
   role: string;
   systemRole?: string;
+  accountType?: string; // 'streamer' for B2C users, undefined for ERP users
   departmentId?: string;
   departments?: any[];
   firstName?: string;

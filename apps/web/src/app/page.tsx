@@ -110,11 +110,37 @@ const GET_WEEKLY_SHIFTS = gql`
   }
 `;
 
+// For "my broadcast assignments" — fetch events for the next 7 days, filter by crewAssignments
+const GET_BROADCAST_EVENTS_FOR_ASSIGNMENTS = gql`
+  query GetBroadcastEventsForMyAssignments($startDate: DateTime, $endDate: DateTime) {
+    broadcastEvents(startDate: $startDate, endDate: $endDate) {
+      id
+      title
+      hebrewTitle
+      channel
+      startTime
+      endTime
+      live
+      metadata
+    }
+  }
+`;
+
 export default function Home() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [broadcastsModalVisible, setBroadcastsModalVisible] = useState(false);
+
+  // Stable date range for the next 7 days (for broadcast assignments)
+  const assignmentsDateRange = useMemo(() => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 7);
+    end.setHours(23, 59, 59, 999);
+    return { startDate: start.toISOString(), endDate: end.toISOString() };
+  }, []);
 
   // Update current time every minute
   useEffect(() => {
@@ -155,6 +181,14 @@ export default function Home() {
     pollInterval: 300000 // Refresh every 5 minutes
   });
 
+  // Query for broadcast events (next 7 days) to extract "my broadcast array assignments"
+  const { data: assignmentsSourceData, loading: assignmentsLoading } = useQuery(GET_BROADCAST_EVENTS_FOR_ASSIGNMENTS, {
+    variables: assignmentsDateRange,
+    skip: !user,
+    errorPolicy: 'all',
+    pollInterval: 300000
+  });
+
   // Extract data with defaults (before any conditional returns)
   const stats = statsData?.dashboardStats || {
     totalUsers: 0,
@@ -170,6 +204,78 @@ export default function Home() {
   const bulletinPosts = bulletinData?.bulletinPosts || [];
   const todaysBroadcasts = broadcastsData?.todaysBroadcasts || [];
   const weeklyShifts = shiftsData?.weeklyShifts || [];
+  const broadcastEventsForAssignments = assignmentsSourceData?.broadcastEvents || [];
+
+  // Helper: ensure metadata is an object (GraphQL JSON scalar may return a string)
+  const ensureObject = (val: any): any => {
+    if (!val) return null;
+    if (typeof val === 'string') {
+      try { return JSON.parse(val); } catch { return null; }
+    }
+    return val;
+  };
+
+  // Merge shifts + broadcast-array assignments into one sorted list
+  const upcomingWorkItems = useMemo(() => {
+    const now = new Date();
+    const userId = user?.id;
+    if (!userId) return [];
+
+    // --- Shift items ---
+    const shiftItems = (weeklyShifts || []).map((shift: any) => {
+      const base = new Date(shift.date);
+      const parseTime = (t: string | undefined) => {
+        if (!t) return new Date(base);
+        const [h, m] = t.split(':').map((n: string) => parseInt(n, 10));
+        const d = new Date(base);
+        if (!Number.isNaN(h) && !Number.isNaN(m)) d.setHours(h, m, 0, 0);
+        return d;
+      };
+      const start = parseTime(shift.startTime);
+      let end = parseTime(shift.endTime);
+      if (end <= start) end = new Date(end.getTime() + 24 * 60 * 60 * 1000);
+
+      return { kind: 'shift' as const, id: String(shift.id), start, end, shift };
+    });
+
+    // --- Broadcast-array assignment items ---
+    const broadcastItems = (broadcastEventsForAssignments || []).flatMap((event: any) => {
+      const meta = ensureObject(event?.metadata);
+      if (!meta?.departments) return [];
+
+      const dept = meta.departments.broadcastArray
+        || meta.departments['broadcast-array']
+        || null;
+      if (!dept) return [];
+
+      const crewAssignments: any[] =
+        (Array.isArray(dept.crewAssignments) ? dept.crewAssignments : null)
+        || (Array.isArray(dept.broadcastArray?.crewAssignments) ? dept.broadcastArray.crewAssignments : null)
+        || [];
+      if (crewAssignments.length === 0) return [];
+
+      const matched = crewAssignments.filter((a: any) => a?.userId === userId);
+      if (matched.length === 0) return [];
+
+      const start = new Date(event.startTime);
+      const end = new Date(event.endTime);
+      const place = dept.מקוםשידור || dept.customData?.מקוםשידור || '';
+
+      return matched.map((a: any, idx: number) => ({
+        kind: 'broadcast' as const,
+        id: `ba-${event.id}-${a.role || 'r'}-${idx}`,
+        start,
+        end,
+        event,
+        role: a.role || a.userName || 'תפקיד',
+        place,
+      }));
+    });
+
+    return [...shiftItems, ...broadcastItems]
+      .filter((item) => item.end > now)
+      .sort((a, b) => a.start.getTime() - b.start.getTime());
+  }, [weeklyShifts, broadcastEventsForAssignments, user?.id]);
 
   // Sort broadcasts by relevance (on-air first, then coming soon, then by start time)
   const sortedBroadcasts = useMemo(() => {
@@ -339,50 +445,51 @@ export default function Home() {
     <Content className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="p-6 max-w-7xl mx-auto">
         {/* Header Section */}
-        <Card className="mb-6 bg-gradient-to-r from-blue-600 to-purple-600 border-0">
-          <Row align="middle" justify="space-between">
-            <Col>
-              <Space direction="vertical" size="small">
-                <Title level={2} className="text-white mb-0">
-                  ברוך הבא למערכת לנסלוט! 🚀
-                </Title>
-                <Space>
-                  <Avatar icon={<UserOutlined />} className="bg-white text-blue-600" />
-                  <Text className="text-white text-lg">
-                    {user.displayName || user.email}
-                  </Text>
-                  <Divider type="vertical" className="bg-white opacity-50" />
-                  <Text className="text-blue-100">
-                    {getDepartmentName(user.department)} • {getRoleName(user.systemRole)}
-                  </Text>
-                </Space>
-                <Text className="text-blue-100">
-                  <ClockCircleOutlined className="mr-2" />
-                  {currentTime.toLocaleDateString('he-IL', { 
-                    weekday: 'long', 
-                    year: 'numeric', 
-                    month: 'long', 
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })}
-                </Text>
-              </Space>
-            </Col>
-            <Col>
-              <Button
-                icon={<SyncOutlined />} 
-                onClick={handleRefresh}
-                loading={statsLoading}
-                size="large"
-                type="primary"
-                ghost
-              >
-                רענן נתונים
-              </Button>
-            </Col>
-          </Row>
-          </Card>
+        <div className="mb-6">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-white text-lg font-bold shadow-lg shadow-blue-500/20">
+                {(user.displayName || user.email || '?')[0].toUpperCase()}
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900 leading-tight">
+                  {(() => {
+                    const hour = currentTime.getHours();
+                    if (hour < 6) return 'לילה טוב';
+                    if (hour < 12) return 'בוקר טוב';
+                    if (hour < 17) return 'צהריים טובים';
+                    if (hour < 21) return 'ערב טוב';
+                    return 'לילה טוב';
+                  })()}, {user.displayName?.split(' ')[0] || user.email}
+                </h1>
+                <div className="flex items-center gap-2 mt-0.5 text-sm text-gray-500">
+                  <span>{getDepartmentName(user.department)}</span>
+                  <span className="w-1 h-1 rounded-full bg-gray-300" />
+                  <span>{getRoleName(user.systemRole)}</span>
+                  <span className="w-1 h-1 rounded-full bg-gray-300" />
+                  <span>
+                    {currentTime.toLocaleDateString('he-IL', { 
+                      weekday: 'long', 
+                      day: 'numeric',
+                      month: 'long',
+                    })}
+                  </span>
+                  <span className="font-medium text-gray-700">
+                    {currentTime.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={handleRefresh}
+              disabled={statsLoading}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm disabled:opacity-50"
+            >
+              <SyncOutlined spin={statsLoading} />
+              רענן
+            </button>
+          </div>
+        </div>
 
         {/* Stats Grid */}
         <Row gutter={[16, 16]} className="mb-6">
@@ -558,17 +665,20 @@ export default function Home() {
           </Col>
         </Row>
 
-        {/* Weekly Shifts and Bulletin Board */}
+        {/* Weekly Shifts + Broadcast Assignments and Bulletin Board */}
         <Row gutter={[16, 16]}>
           <Col xs={24} lg={12}>
             <Card 
               title={
                 <Space>
                   <CalendarOutlined />
-                  <span>המשמרות שלי השבוע</span>
+                  <span>המשמרות והשיבוצים שלי</span>
+                  {upcomingWorkItems.length > 0 && (
+                    <Badge count={upcomingWorkItems.length} style={{ backgroundColor: '#722ed1' }} />
+                  )}
                 </Space>
               }
-              loading={shiftsLoading}
+              loading={shiftsLoading || assignmentsLoading}
               extra={
                 <Button type="link" onClick={() => router.push('/shifts')}>
                   הצג הכל
@@ -576,40 +686,90 @@ export default function Home() {
               }
               className="h-full"
             >
-              {weeklyShifts.length > 0 ? (
+              {upcomingWorkItems.length > 0 ? (
                 <Space direction="vertical" className="w-full">
-                  {weeklyShifts.map((shift: any) => (
-                    <div key={shift.id} className="border-b pb-3 last:border-b-0">
-                      <Row>
-                        <Col span={12}>
-                          <Text strong>{shift.shiftType}</Text>
-                          <br />
-                          <Text type="secondary" className="text-sm">
-                            {shift.department}
-                          </Text>
-                        </Col>
-                        <Col span={12} className="text-left">
-                          <Text>
-                            {new Date(shift.date).toLocaleDateString('he-IL', { 
-                              weekday: 'short',
-                              day: 'numeric',
-                              month: 'numeric'
-                            })}
-                          </Text>
-                          <br />
-                          <Text type="secondary" className="text-sm">
-                            {shift.startTime} - {shift.endTime}
-                          </Text>
-                        </Col>
-                      </Row>
-                    </div>
-                  ))}
+                  {upcomingWorkItems.slice(0, 6).map((item) => {
+                    const isToday = item.start.toDateString() === new Date().toDateString();
+
+                    if (item.kind === 'shift') {
+                      const shift = item.shift;
+                      return (
+                        <div key={item.id} className={`border-b pb-3 last:border-b-0 ${isToday ? 'bg-blue-50 rounded p-2' : ''}`}>
+                          <Row align="middle">
+                            <Col span={12}>
+                              <Space size="small">
+                                <CalendarOutlined />
+                                <Text strong>{shift.shiftType || 'משמרת'}</Text>
+                              </Space>
+                              <br />
+                              <Text type="secondary" className="text-sm">
+                                {shift.department}
+                              </Text>
+                            </Col>
+                            <Col span={12} className="text-left">
+                              <Text>
+                                {item.start.toLocaleDateString('he-IL', { 
+                                  weekday: 'short',
+                                  day: 'numeric',
+                                  month: 'numeric'
+                                })}
+                                {isToday && <Badge status="processing" className="mr-2" />}
+                              </Text>
+                              <br />
+                              <Text type="secondary" className="text-sm">
+                                {shift.startTime && shift.endTime
+                                  ? `${shift.startTime} - ${shift.endTime}`
+                                  : shift.shiftType || 'משמרת'}
+                              </Text>
+                            </Col>
+                          </Row>
+                        </div>
+                      );
+                    }
+
+                    // Broadcast array assignment
+                    const ev = item.event;
+                    return (
+                      <div key={item.id} className={`border-b pb-3 last:border-b-0 ${isToday ? 'bg-purple-50 rounded p-2' : ''}`}>
+                        <Row align="middle">
+                          <Col span={14}>
+                            <Space size="small">
+                              <VideoCameraOutlined style={{ color: '#722ed1' }} />
+                              <Text strong>{ev.title || ev.hebrewTitle}</Text>
+                            </Space>
+                            <br />
+                            <Space size="small" className="mt-1">
+                              <Text type="secondary" className="text-sm">תפקיד:</Text>
+                              <Text className="text-sm" style={{ color: '#722ed1', fontWeight: 500 }}>{item.role}</Text>
+                              {ev.channel && <Text type="secondary" className="text-sm">• {ev.channel}</Text>}
+                              {item.place && <Text type="secondary" className="text-sm">• {item.place}</Text>}
+                            </Space>
+                          </Col>
+                          <Col span={10} className="text-left">
+                            <Text>
+                              {item.start.toLocaleDateString('he-IL', { 
+                                weekday: 'short',
+                                day: 'numeric',
+                                month: 'numeric'
+                              })}
+                              {isToday && <Badge status="processing" className="mr-2" />}
+                            </Text>
+                            <br />
+                            <Text type="secondary" className="text-sm">
+                              {item.start.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })} -{' '}
+                              {item.end.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}
+                            </Text>
+                          </Col>
+                        </Row>
+                      </div>
+                    );
+                  })}
                 </Space>
               ) : (
                 <div className="text-center py-8">
                   <CalendarOutlined className="text-4xl text-gray-400 mb-2" />
                   <br />
-                  <Text type="secondary">אין משמרות מתוכננות השבוע</Text>
+                  <Text type="secondary">אין משמרות או שיבוצים קרובים</Text>
                 </div>
               )}
             </Card>

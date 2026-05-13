@@ -127,6 +127,9 @@ Passwords/
 PASSWORDS
 **/PASSWORDS
 
+# Local-only scrapers / importers (contain third-party credentials)
+scripts/shidureyhuts-scraper/
+
 # App temp dirs
 temp/
 

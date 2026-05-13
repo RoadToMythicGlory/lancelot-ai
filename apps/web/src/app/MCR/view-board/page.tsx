@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useQuery } from '@apollo/client';
-import { ActivityRow, ActivityStatus, BroadcastType, WarehouseEquipmentAssignment } from '../types';
+import { ActivityRow, ActivityStatus, BroadcastType } from '../types';
 import { GET_ACTIVITY_ROWS } from '@/graphql/mcrQueries';
 import { Button, DatePicker } from 'antd';
 import { LeftOutlined, RightOutlined, LoadingOutlined } from '@ant-design/icons';
@@ -97,7 +97,7 @@ export default function ViewBoardPage() {
     <div className="min-h-screen bg-black text-white p-4" dir="rtl">
       <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold">לוח פעילויות צפייה</h1>
+          <h1 className="text-2xl font-bold text-white">לוח פעילויות צפייה</h1>
           <div className="text-lg text-blue-300 mt-1 flex items-center gap-2">
             <span>{dateLabel}</span>
             {loading && (
@@ -151,16 +151,15 @@ export default function ViewBoardPage() {
       <div className="overflow-x-auto">
         <table className="w-full border-collapse">
           <thead>
-            <tr className="border-b border-gray-600">
+            <tr className="border-b border-neutral-400">
               <th className="text-right p-2">מקור</th>
               <th className="text-right p-2">פעילות</th>
               <th className="text-right p-2">שעה</th>
               <th className="text-right p-2">שעת סיום</th>
-              <th className="text-right p-2">מקור שידור</th>
+              <th className="text-right p-2 bg-neutral-700">מקור שידור</th>
               <th className="text-right p-2">מכשירים</th>
-              <th className="text-right p-2">ציוד מהמחסן</th>
-              <th className="text-right p-2">גיבוי</th>
-              <th className="text-right p-2">ניתובים</th>
+              <th className="text-right p-2 bg-neutral-700">גיבוי</th>
+              <th className="text-right p-2 bg-neutral-700">ניתובים</th>
               <th className="text-right p-2">ערוץ</th>
               <th className="text-right p-2">סוג שידור</th>
               <th className="text-right p-2">הערות</th>
@@ -171,7 +170,7 @@ export default function ViewBoardPage() {
             {activities.map((activity) => (
               <tr
                 key={activity.id}
-                className={`border-b border-gray-700 ${activity.broadcastEventId ? 'bg-blue-900/20' : ''}`}
+                className={`border-b border-neutral-500 ${activity.broadcastEventId ? 'bg-blue-900/20' : ''}`}
               >
                 <td className="p-2">
                   {activity.broadcastEventId ? (
@@ -187,23 +186,10 @@ export default function ViewBoardPage() {
                 <td className="p-2 font-medium">{activity.activityName}</td>
                 <td className="p-2">{activity.time}</td>
                 <td className="p-2">{activity.endTime}</td>
-                <td className="p-2 text-white [&_p]:text-inherit" dangerouslySetInnerHTML={{ __html: activity.source || '' }} />
+                <td className="p-2 text-white bg-neutral-700 [&_p]:text-inherit" dangerouslySetInnerHTML={{ __html: activity.source || '' }} />
                 <td className="p-2 text-white [&_p]:text-inherit" dangerouslySetInnerHTML={{ __html: activity.equipment || '' }} />
-                <td className="p-2">
-                  {(activity.warehouseEquipment || []).length > 0 ? (
-                    <div className="space-y-1">
-                      {(activity.warehouseEquipment || []).map((item: WarehouseEquipmentAssignment) => (
-                        <div key={item.id} className="text-xs bg-blue-900/40 text-blue-200 px-1.5 py-0.5 rounded">
-                          {item.eventName} (×{item.quantityAssigned})
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-gray-600">-</span>
-                  )}
-                </td>
-                <td className="p-2 text-white [&_p]:text-inherit" dangerouslySetInnerHTML={{ __html: activity.backup || '' }} />
-                <td className="p-2 text-white [&_p]:text-inherit" dangerouslySetInnerHTML={{ __html: activity.routing || '' }} />
+                <td className="p-2 text-white bg-neutral-700 [&_p]:text-inherit" dangerouslySetInnerHTML={{ __html: activity.backup || '' }} />
+                <td className="p-2 text-white bg-neutral-700 [&_p]:text-inherit" dangerouslySetInnerHTML={{ __html: activity.routing || '' }} />
                 <td className="p-2">{activity.channel || '-'}</td>
                 <td className="p-2">
                   {activity.broadcastType && (
@@ -224,7 +210,7 @@ export default function ViewBoardPage() {
             ))}
             {!loading && activities.length === 0 && (
               <tr>
-                <td colSpan={13} className="text-center py-8 text-gray-500">
+                <td colSpan={12} className="text-center py-8 text-gray-500">
                   {isToday
                     ? 'אין פעילויות להיום.'
                     : `אין פעילויות לתאריך ${selectedDate.format('DD/MM/YYYY')}.`}

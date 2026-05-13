@@ -2,12 +2,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@apollo/client';
-import { ActivityRow, ActivityStatus, BroadcastType, WarehouseEquipmentAssignment } from '../types';
+import { ActivityRow, ActivityStatus, BroadcastType } from '../types';
 import { GET_ACTIVITY_ROWS } from '@/graphql/mcrQueries';
-import { CREATE_ACTIVITY_ROW, UPDATE_ACTIVITY_ROW, HIDE_ACTIVITY_ROW } from '@/graphql/mcrMutations';
+import { CREATE_ACTIVITY_ROW, UPDATE_ACTIVITY_ROW } from '@/graphql/mcrMutations';
 import RichTextEditor from '../components/RichTextEditor';
-import { Table, DatePicker, Button, Select, Tag, Popconfirm, App, Empty, Skeleton, Space, Tooltip } from 'antd';
-import { PlusOutlined, ReloadOutlined, EyeInvisibleOutlined } from '@ant-design/icons';
+import { Table, DatePicker, Button, Select, Tag, Popconfirm, App, Empty, Skeleton, Space } from 'antd';
+import { PlusOutlined, ReloadOutlined, EyeInvisibleOutlined, EyeOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 
@@ -35,9 +35,25 @@ const statusLabels: Record<ActivityStatus, string> = {
   'NOT_READY': 'לא מוכן לשידור', 'ERROR': 'תקלה',
 };
 
-const statusColors: Record<ActivityStatus, string> = {
-  'READY': 'green', 'NOT_READY': 'orange', 'ERROR': 'red', 'UNKNOWN': 'default',
+const statusDotColors: Record<ActivityStatus, string> = {
+  'READY': '#52c41a', 'NOT_READY': '#fa8c16', 'ERROR': '#ff4d4f', 'UNKNOWN': '#bfbfbf',
 };
+
+const StatusLabel: React.FC<{ status: ActivityStatus }> = ({ status }) => (
+  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+    <span
+      style={{
+        width: 8,
+        height: 8,
+        borderRadius: '50%',
+        backgroundColor: statusDotColors[status],
+        display: 'inline-block',
+        flexShrink: 0,
+      }}
+    />
+    <span>{statusLabels[status]}</span>
+  </span>
+);
 
 export default function EditBoardPage() {
   const [selectedDate, setSelectedDate] = useState<dayjs.Dayjs>(dayjs());
@@ -57,7 +73,6 @@ export default function EditBoardPage() {
   });
 
   const activities: ActivityRow[] = data?.activityRows ?? [];
-  const visibleActivities = activities.filter(a => !a.isHidden);
 
   useEffect(() => {
     if (error) {
@@ -75,10 +90,9 @@ export default function EditBoardPage() {
     onError: (err) => message.error('שגיאה בעדכון: ' + err.message),
   });
 
-  const [hideActivityRow] = useMutation(HIDE_ACTIVITY_ROW, {
-    refetchQueries: ['GetActivityRows'],
-    onError: (err) => message.error('שגיאה בהסתרת שורה: ' + err.message),
-  });
+  const toggleHideActivityRow = (row: ActivityRow) => {
+    updateActivityRow({ variables: { id: row.id, input: { isHidden: !row.isHidden } } });
+  };
 
   const handleAddRow = () => {
     if (!dateValid) return;
@@ -166,97 +180,72 @@ export default function EditBoardPage() {
       title: 'מקור',
       dataIndex: 'broadcastEventId',
       key: 'origin',
-      width: 90,
+      width: 70,
       render: (_: any, record: ActivityRow) => record.broadcastEventId
-        ? <Tag color="blue">תכנון שידור</Tag>
-        : <Tag>ידני</Tag>,
+        ? <Tag color="blue" style={{ margin: 0, fontSize: 11 }}>תכנון</Tag>
+        : <Tag style={{ margin: 0, fontSize: 11 }}>ידני</Tag>,
     },
     {
       title: 'פעילות',
       dataIndex: 'activityName',
       key: 'activityName',
-      width: 160,
+      width: 120,
       render: (_: any, record: ActivityRow) => renderEditableCell(record, 'activityName'),
     },
     {
       title: 'שעה',
       dataIndex: 'time',
       key: 'time',
-      width: 70,
+      width: 80,
       render: (_: any, record: ActivityRow) => renderEditableCell(record, 'time'),
     },
     {
-      title: 'שעת סיום',
+      title: 'סיום',
       dataIndex: 'endTime',
       key: 'endTime',
-      width: 70,
+      width: 80,
       render: (_: any, record: ActivityRow) => renderEditableCell(record, 'endTime'),
     },
     {
       title: 'מקור שידור',
       dataIndex: 'source',
       key: 'source',
-      width: 140,
       render: (_: any, record: ActivityRow) => renderEditableCell(record, 'source', true),
     },
     {
       title: 'מכשירים',
       dataIndex: 'equipment',
       key: 'equipment',
-      width: 150,
       render: (_: any, record: ActivityRow) => renderEditableCell(record, 'equipment', true),
-    },
-    {
-      title: 'ציוד מהמחסן',
-      dataIndex: 'warehouseEquipment',
-      key: 'warehouseEquipment',
-      width: 140,
-      render: (_: any, record: ActivityRow) => {
-        const items = record.warehouseEquipment || [];
-        if (items.length === 0) return <span className="text-gray-300">-</span>;
-        return (
-          <div className="space-y-1">
-            {items.map((item: WarehouseEquipmentAssignment) => (
-              <Tooltip key={item.id} title={item.assignmentNotes || ''}>
-                <Tag color="blue" className="text-xs">
-                  {item.eventName} (×{item.quantityAssigned})
-                </Tag>
-              </Tooltip>
-            ))}
-          </div>
-        );
-      },
     },
     {
       title: 'גיבוי',
       dataIndex: 'backup',
       key: 'backup',
-      width: 140,
       render: (_: any, record: ActivityRow) => renderEditableCell(record, 'backup', true),
     },
     {
       title: 'ניתובים',
       dataIndex: 'routing',
       key: 'routing',
-      width: 140,
       render: (_: any, record: ActivityRow) => renderEditableCell(record, 'routing', true),
     },
     {
       title: 'ערוץ',
       dataIndex: 'channel',
       key: 'channel',
-      width: 80,
+      width: 60,
       render: (_: any, record: ActivityRow) => renderEditableCell(record, 'channel'),
     },
     {
       title: 'סוג שידור',
       dataIndex: 'broadcastType',
       key: 'broadcastType',
-      width: 120,
+      width: 100,
       render: (_: any, record: ActivityRow) => {
         if (record.broadcastType) {
           return (
-            <Tag style={{ backgroundColor: broadcastTypeColors[record.broadcastType] || '#666', color: 'white', border: 'none' }}>
+            <Tag style={{ backgroundColor: broadcastTypeColors[record.broadcastType] || '#666', color: 'white', border: 'none', margin: 0, fontSize: 11 }}>
               {broadcastTypeLabels[record.broadcastType] || record.broadcastType}
             </Tag>
           );
@@ -264,7 +253,7 @@ export default function EditBoardPage() {
         return (
           <Select
             size="small"
-            placeholder="בחר סוג"
+            placeholder="בחר"
             style={{ width: '100%' }}
             onChange={(val) => handleCellEdit(record.id, 'broadcastType', val)}
             options={broadcastTypes.map(t => ({ value: t, label: broadcastTypeLabels[t] }))}
@@ -277,50 +266,96 @@ export default function EditBoardPage() {
       title: 'הערות',
       dataIndex: 'notes',
       key: 'notes',
-      width: 150,
       render: (_: any, record: ActivityRow) => renderEditableCell(record, 'notes', true),
     },
     {
       title: 'סטטוס',
       dataIndex: 'status',
       key: 'status',
-      width: 130,
+      width: 110,
       render: (_: any, record: ActivityRow) => (
         <Select
           size="small"
           value={record.status}
           style={{ width: '100%' }}
           onChange={(val) => handleCellEdit(record.id, 'status', val)}
-          options={Object.entries(statusLabels).map(([key, label]) => ({
+          options={(Object.keys(statusLabels) as ActivityStatus[]).map((key) => ({
             value: key,
-            label: <Tag color={statusColors[key as ActivityStatus]}>{label}</Tag>,
+            label: <StatusLabel status={key} />,
           }))}
         />
       ),
     },
     {
-      title: 'פעולות',
+      title: '',
       key: 'actions',
-      width: 90,
+      width: 50,
       align: 'center' as const,
-      render: (_: any, record: ActivityRow) => (
-        <Popconfirm
-          title="הסתרת שורה"
-          description="האם אתה בטוח שברצונך להסתיר שורה זו?"
-          onConfirm={() => hideActivityRow({ variables: { id: record.id } })}
-          okText="כן"
-          cancelText="לא"
-        >
-          <Button size="small" danger icon={<EyeInvisibleOutlined />}>
-            הסתר
-          </Button>
-        </Popconfirm>
-      ),
+      render: (_: any, record: ActivityRow) => {
+        if (record.isHidden) {
+          return (
+            <Button
+              size="small"
+              type="text"
+              icon={<EyeOutlined />}
+              title="ביטול הסתרה"
+              onClick={() => toggleHideActivityRow(record)}
+            />
+          );
+        }
+        return (
+          <Popconfirm
+            title="הסתרת שורה"
+            description="השורה תוסתר מלוח הצפייה אך תישאר זמינה לעריכה. להמשיך?"
+            onConfirm={() => toggleHideActivityRow(record)}
+            okText="כן"
+            cancelText="לא"
+          >
+            <Button size="small" danger type="text" icon={<EyeInvisibleOutlined />} title="הסתר שורה" />
+          </Popconfirm>
+        );
+      },
     },
   ];
 
   return (
     <div className="min-h-screen bg-gray-50 p-4" dir="rtl">
+      <style jsx global>{`
+        .mcr-edit-board-table-wrapper .ant-table {
+          font-size: 12px;
+        }
+        .mcr-edit-board-table-wrapper .ant-table-thead > tr > th {
+          white-space: nowrap;
+          padding: 6px 8px !important;
+          font-size: 12px;
+          font-weight: 600;
+        }
+        .mcr-edit-board-table-wrapper .ant-table-tbody > tr > td {
+          padding: 6px 8px !important;
+          vertical-align: top;
+          word-break: normal;
+          overflow-wrap: break-word;
+          white-space: normal;
+        }
+        .mcr-edit-board-table-wrapper .ant-table-cell .ant-tag {
+          white-space: nowrap;
+        }
+        .mcr-edit-board-table-wrapper .ant-table-cell p {
+          margin: 0;
+        }
+        .mcr-edit-board-table-wrapper .ant-table-tbody > tr.mcr-edit-board-row-hidden > td {
+          opacity: 0.45;
+        }
+        .mcr-edit-board-table-wrapper .ant-table-tbody > tr.mcr-edit-board-row-hidden > td:last-child {
+          opacity: 1;
+        }
+        .mcr-edit-board-table-wrapper .ant-table-tbody > tr.mcr-edit-board-row-hidden:hover > td {
+          opacity: 0.85;
+        }
+        .mcr-edit-board-table-wrapper .ant-table-tbody > tr.mcr-edit-board-row-hidden:hover > td:last-child {
+          opacity: 1;
+        }
+      `}</style>
       <div className="w-full max-w-full" style={{ minWidth: 0 }}>
         <h1 className="text-2xl font-bold mb-4">לוח פעילויות עריכה</h1>
 
@@ -342,20 +377,24 @@ export default function EditBoardPage() {
           </Button>
         </Space>
 
-        {loading && visibleActivities.length === 0 ? (
+        {loading && activities.length === 0 ? (
           <Skeleton active paragraph={{ rows: 6 }} />
         ) : (
-          <div className="w-full" style={{ minWidth: 0 }}>
+          <div className="mcr-edit-board-table-wrapper" style={{ width: '100%', minWidth: 0 }}>
             <Table
               columns={columns}
-              dataSource={visibleActivities}
+              dataSource={activities}
               rowKey="id"
               pagination={false}
               size="small"
-              scroll={{ x: 'max-content' }}
               bordered
-              sticky
-              rowClassName={(record) => record.broadcastEventId ? 'bg-blue-50/50' : ''}
+              tableLayout="fixed"
+              rowClassName={(record) => {
+                const classes: string[] = [];
+                if (record.broadcastEventId) classes.push('bg-blue-50/50');
+                if (record.isHidden) classes.push('mcr-edit-board-row-hidden');
+                return classes.join(' ');
+              }}
               locale={{
                 emptyText: (
                   <Empty

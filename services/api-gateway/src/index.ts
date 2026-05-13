@@ -34,6 +34,7 @@ import { pubsub } from './utils/pubsub';
 import { startScheduler, stopScheduler } from './services/jobScheduler';
 import { metrics } from './services/metrics';
 import { oauthRouter } from './services/oauthService';
+import { warehouseRoutes } from './routes/warehouseRoutes';
 
 // Load GraphQL schema
 const typeDefs = readFileSync(join(__dirname, 'schema/schema.graphql'), 'utf8');
@@ -260,6 +261,9 @@ async function startServer() {
 
     // Apply security middleware
     app.use(securityMiddleware());
+
+    // Warehouse PDF import routes (must be after CORS middleware)
+    app.use('/api/warehouse', warehouseRoutes);
   
     // Create HTTP server
     const httpServer = createServer(app);

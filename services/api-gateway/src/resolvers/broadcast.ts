@@ -382,9 +382,43 @@ export const broadcastResolvers = {
 
     // Equipment Assignment Queries
     equipmentAssignmentsByEvent: async (_: any, { broadcastEventId }: { broadcastEventId: string }) => {
-      // For now, return empty array to avoid null errors
-      // TODO: Implement actual database query
-      return [];
+      try {
+        await ensureMongoConnection();
+        const assignments = await EquipmentAssignment.find({
+          eventId: new mongoose.Types.ObjectId(broadcastEventId),
+          status: 'active'
+        }).sort({ assignedAt: -1 }).exec();
+        
+        return assignments.map(a => ({
+          id: a._id.toString(),
+          equipmentId: a.equipmentId.toString(),
+          eventName: a.eventName,
+          eventId: a.eventId.toString(),
+          startDate: a.startDate.toISOString(),
+          endDate: a.endDate.toISOString(),
+          location: a.location || null,
+          status: a.status,
+          quantityAssigned: a.quantityAssigned,
+          assignmentStatus: a.status,
+          assignedAt: a.assignedAt?.toISOString() || null,
+          scheduledPickupAt: null,
+          scheduledReturnAt: null,
+          actualPickupAt: null,
+          actualReturnAt: a.returnedAt?.toISOString() || null,
+          assignmentNotes: a.notes || null,
+          returnNotes: null,
+          assignedToName: a.assignedByName || null,
+          assignedBy: a.assignedBy || null,
+          assignedByUser: null,
+          collectedByUser: null,
+          returnedByUser: null,
+          createdAt: a.createdAt.toISOString(),
+          updatedAt: a.updatedAt.toISOString()
+        }));
+      } catch (error) {
+        console.error('Error fetching equipment assignments by event:', error);
+        return [];
+      }
     },
 
     // Equipment Assignments by Equipment ID (for equipment details modal)
@@ -412,17 +446,31 @@ export const broadcastResolvers = {
         console.log(`📊 Found ${assignments.length} active assignments`);
         
         // Map to GraphQL format
-        return assignments.map(assignment => ({
-          id: assignment._id.toString(),
-          eventName: assignment.eventName,
-          eventId: assignment.eventId.toString(),
-          startDate: assignment.startDate.toISOString(),
-          endDate: assignment.endDate.toISOString(),
-          location: assignment.location || null,
-          status: assignment.status,
-          quantityAssigned: assignment.quantityAssigned,
-          assignedBy: assignment.assignedByName || assignment.assignedBy || null,
-          createdAt: assignment.createdAt.toISOString()
+        return assignments.map(a => ({
+          id: a._id.toString(),
+          equipmentId: a.equipmentId.toString(),
+          eventName: a.eventName,
+          eventId: a.eventId.toString(),
+          startDate: a.startDate.toISOString(),
+          endDate: a.endDate.toISOString(),
+          location: a.location || null,
+          status: a.status,
+          quantityAssigned: a.quantityAssigned,
+          assignmentStatus: a.status,
+          assignedAt: a.assignedAt?.toISOString() || null,
+          scheduledPickupAt: null,
+          scheduledReturnAt: null,
+          actualPickupAt: null,
+          actualReturnAt: a.returnedAt?.toISOString() || null,
+          assignmentNotes: a.notes || null,
+          returnNotes: null,
+          assignedToName: a.assignedByName || null,
+          assignedBy: a.assignedBy || null,
+          assignedByUser: null,
+          collectedByUser: null,
+          returnedByUser: null,
+          createdAt: a.createdAt.toISOString(),
+          updatedAt: a.updatedAt.toISOString()
         }));
       } catch (error) {
         console.error('Error fetching equipment assignments:', error);
@@ -456,13 +504,25 @@ export const broadcastResolvers = {
         // Map to GraphQL format
         return history.map(record => ({
           id: record._id.toString(),
-          eventName: record.eventName || null,
-          eventId: record.eventId?.toString() || null,
-          date: record.date.toISOString(),
+          equipmentId: record.equipmentId.toString(),
+          eventId: record.eventId?.toString() || '',
+          eventName: record.eventName || '',
           action: record.action,
           quantity: record.quantity || 1,
+          date: record.date.toISOString(),
           performedBy: record.performedByName || record.performedBy || null,
-          notes: record.notes || null
+          performedByUser: null,
+          notes: record.notes || null,
+          previousValue: record.previousValue || null,
+          newValue: record.newValue || null,
+          transferDetails: record.transferDetails ? {
+            sourceEventId: record.transferDetails.sourceEventId?.toString() || '',
+            sourceEventName: record.transferDetails.sourceEventName || '',
+            targetEventId: record.transferDetails.targetEventId?.toString() || '',
+            targetEventName: record.transferDetails.targetEventName || '',
+            transferredQuantity: record.transferDetails.transferredQuantity || 0,
+            canUndo: false
+          } : null
         }));
       } catch (error) {
         console.error('Error fetching equipment history:', error);
@@ -898,6 +958,8 @@ export const broadcastResolvers = {
             updateData.currentLocation = `Row ${input.storage.row}, Shelf ${input.storage.shelf}, Cell ${input.storage.cell}`;
           }
         }
+        if (input.isDisabled !== undefined) updateData.isDisabled = input.isDisabled;
+        if (input.disabledReason !== undefined) updateData.disabledReason = input.disabledReason;
         
         // Update equipment
         const updatedEquipment = await Equipment.findByIdAndUpdate(
@@ -1500,39 +1562,121 @@ export const broadcastResolvers = {
 
     // Equipment Assignment Mutations
     createEquipmentAssignment: async (_: any, { input }: { input: any }) => {
-      // For now, return dummy data to avoid null errors
-      // TODO: Implement actual database logic
-      return {
-        id: 'temp-' + Date.now(),
-        equipmentId: input.equipmentId,
-        quantityAssigned: input.quantityAssigned,
-        assignmentStatus: input.assignmentStatus,
-        assignedAt: new Date().toISOString(),
-        scheduledPickupAt: input.scheduledPickupAt,
-        scheduledReturnAt: input.scheduledReturnAt,
-        assignmentNotes: input.assignmentNotes,
-        assignedToName: input.assignedToName,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
+      try {
+        await ensureMongoConnection();
+        
+        const event = await BroadcastEvent.findById(input.broadcastEventId).exec();
+        if (!event) {
+          throw new Error('Broadcast event not found');
+        }
+        
+        const assignment = new EquipmentAssignment({
+          equipmentId: new mongoose.Types.ObjectId(input.equipmentId),
+          eventId: new mongoose.Types.ObjectId(input.broadcastEventId),
+          eventName: event.title || '',
+          startDate: event.startTime || new Date(),
+          endDate: event.endTime || new Date(),
+          location: event.location || event.venue || null,
+          status: 'active',
+          quantityAssigned: input.quantityAssigned || 1,
+          assignedBy: input.assignedToName || 'system',
+          assignedByName: input.assignedToName || 'System',
+          assignedAt: input.assignedAt ? new Date(input.assignedAt) : new Date(),
+          notes: input.assignmentNotes || null
+        });
+        
+        const saved = await assignment.save();
+        
+        return {
+          id: saved._id.toString(),
+          equipmentId: saved.equipmentId.toString(),
+          eventName: saved.eventName,
+          eventId: saved.eventId.toString(),
+          startDate: saved.startDate.toISOString(),
+          endDate: saved.endDate.toISOString(),
+          location: saved.location || null,
+          status: saved.status,
+          quantityAssigned: saved.quantityAssigned,
+          assignmentStatus: input.assignmentStatus || saved.status,
+          assignedAt: saved.assignedAt?.toISOString() || null,
+          scheduledPickupAt: input.scheduledPickupAt || null,
+          scheduledReturnAt: input.scheduledReturnAt || null,
+          actualPickupAt: null,
+          actualReturnAt: null,
+          assignmentNotes: saved.notes || null,
+          returnNotes: null,
+          assignedToName: saved.assignedByName || null,
+          assignedBy: saved.assignedBy || null,
+          assignedByUser: null,
+          collectedByUser: null,
+          returnedByUser: null,
+          createdAt: saved.createdAt.toISOString(),
+          updatedAt: saved.updatedAt.toISOString()
+        };
+      } catch (error) {
+        console.error('Error creating equipment assignment:', error);
+        throw new Error('Failed to create equipment assignment');
+      }
     },
 
     updateEquipmentAssignment: async (_: any, { id, input }: { id: string, input: any }) => {
-      // For now, return dummy data to avoid null errors
-      // TODO: Implement actual database logic
-      return {
-        id,
-        equipmentId: 'dummy-equipment-id',
-        quantityAssigned: input.quantityAssigned || 1,
-        assignmentStatus: input.assignmentStatus || 'updated',
-        updatedAt: new Date().toISOString()
-      };
+      try {
+        await ensureMongoConnection();
+        
+        const assignment = await EquipmentAssignment.findById(id).exec();
+        if (!assignment) {
+          throw new Error('Equipment assignment not found');
+        }
+        
+        if (input.quantityAssigned !== undefined) assignment.quantityAssigned = input.quantityAssigned;
+        if (input.assignmentStatus !== undefined) assignment.status = input.assignmentStatus === 'completed' ? 'completed' : input.assignmentStatus === 'cancelled' ? 'cancelled' : 'active';
+        if (input.actualReturnAt !== undefined) { assignment.returnedAt = new Date(input.actualReturnAt); }
+        if (input.returnNotes !== undefined) assignment.notes = input.returnNotes;
+        if (input.assignedToName !== undefined) assignment.assignedByName = input.assignedToName;
+        
+        const saved = await assignment.save();
+        
+        return {
+          id: saved._id.toString(),
+          equipmentId: saved.equipmentId.toString(),
+          eventName: saved.eventName,
+          eventId: saved.eventId.toString(),
+          startDate: saved.startDate.toISOString(),
+          endDate: saved.endDate.toISOString(),
+          location: saved.location || null,
+          status: saved.status,
+          quantityAssigned: saved.quantityAssigned,
+          assignmentStatus: saved.status,
+          assignedAt: saved.assignedAt?.toISOString() || null,
+          scheduledPickupAt: null,
+          scheduledReturnAt: null,
+          actualPickupAt: null,
+          actualReturnAt: saved.returnedAt?.toISOString() || null,
+          assignmentNotes: saved.notes || null,
+          returnNotes: null,
+          assignedToName: saved.assignedByName || null,
+          assignedBy: saved.assignedBy || null,
+          assignedByUser: null,
+          collectedByUser: null,
+          returnedByUser: null,
+          createdAt: saved.createdAt.toISOString(),
+          updatedAt: saved.updatedAt.toISOString()
+        };
+      } catch (error) {
+        console.error('Error updating equipment assignment:', error);
+        throw new Error('Failed to update equipment assignment');
+      }
     },
 
     deleteEquipmentAssignment: async (_: any, { id }: { id: string }) => {
-      // For now, just return true
-      // TODO: Implement actual database logic
-      return true;
+      try {
+        await ensureMongoConnection();
+        const result = await EquipmentAssignment.findByIdAndDelete(id).exec();
+        return result !== null;
+      } catch (error) {
+        console.error('Error deleting equipment assignment:', error);
+        throw new Error('Failed to delete equipment assignment');
+      }
     },
 
     updateWarehouseEquipmentQuantity: async (_: any, { id, quantityChange }: { id: string, quantityChange: number }) => {

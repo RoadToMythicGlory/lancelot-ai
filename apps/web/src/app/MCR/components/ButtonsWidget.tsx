@@ -1,8 +1,12 @@
 'use client';
 
 import React from 'react';
+import { Button, App, Space } from 'antd';
+import { EyeOutlined, EditOutlined, EnvironmentOutlined } from '@ant-design/icons';
 
 export default function ButtonsWidget() {
+  const { message } = App.useApp();
+
   const handleOpenViewBoard = () => {
     window.open('/MCR/view-board', '_blank');
   };
@@ -12,36 +16,38 @@ export default function ButtonsWidget() {
   };
 
   const handleOpenMCRMap = () => {
-    // MCR MAP - Will be implemented later as specified
-    alert('MCR MAP - יבוצע בהמשך');
+    message.info('MCR MAP - יבוצע בהמשך');
   };
 
   return (
-    <div className="h-full bg-white rounded-lg shadow-lg p-4 flex items-center justify-center gap-4">
-      <button
-        onClick={handleOpenViewBoard}
-        className="px-6 py-3 bg-blue-500 text-white font-medium rounded-lg hover:bg-blue-600 transition-colors"
-      >
-        לוח פעילויות צפייה
-      </button>
-      <button
-        onClick={handleOpenEditBoard}
-        className="px-6 py-3 bg-green-500 text-white font-medium rounded-lg hover:bg-green-600 transition-colors"
-      >
-        לוח פעילויות עריכה
-      </button>
-      <button
-        onClick={handleOpenMCRMap}
-        className="px-6 py-3 bg-purple-500 text-white font-medium rounded-lg hover:bg-purple-600 transition-colors"
-      >
-        MCR MAP
-      </button>
+    <div className="h-full bg-white rounded-lg shadow-lg p-4 flex items-center justify-center">
+      <Space size="middle">
+        <Button
+          type="primary"
+          size="large"
+          icon={<EyeOutlined />}
+          onClick={handleOpenViewBoard}
+        >
+          לוח פעילויות צפייה
+        </Button>
+        <Button
+          type="primary"
+          size="large"
+          icon={<EditOutlined />}
+          onClick={handleOpenEditBoard}
+          style={{ backgroundColor: '#22c55e', borderColor: '#22c55e' }}
+        >
+          לוח פעילויות עריכה
+        </Button>
+        <Button
+          size="large"
+          icon={<EnvironmentOutlined />}
+          onClick={handleOpenMCRMap}
+          style={{ backgroundColor: '#8b5cf6', borderColor: '#8b5cf6', color: 'white' }}
+        >
+          MCR MAP
+        </Button>
+      </Space>
     </div>
   );
 }
-
-
-
-
-
-

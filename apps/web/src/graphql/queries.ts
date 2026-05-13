@@ -564,10 +564,16 @@ export const GET_EXTERNAL_BROADCAST_PRESETS = gql`
         isCustom
       }
       equipment {
-        equipmentId
-        name
         category
+        categoryLabel
         count
+        unitSettings {
+          unitIndex
+          purpose
+          audioConfig
+          assignedEquipmentId
+          assignedEquipmentName
+        }
       }
       createdBy
       createdAt
@@ -590,10 +596,16 @@ export const GET_EXTERNAL_BROADCAST_PRESET = gql`
         isCustom
       }
       equipment {
-        equipmentId
-        name
         category
+        categoryLabel
         count
+        unitSettings {
+          unitIndex
+          purpose
+          audioConfig
+          assignedEquipmentId
+          assignedEquipmentName
+        }
       }
       createdBy
       createdAt

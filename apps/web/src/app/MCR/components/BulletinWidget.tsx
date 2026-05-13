@@ -1,16 +1,21 @@
 'use client';
 
 import React, { useState } from 'react';
+import { Button, Card, Radio, DatePicker, Space, Empty, Popconfirm, Typography } from 'antd';
+import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { MCRBulletinPost } from '../types';
 import RichTextEditor from './RichTextEditor';
+import dayjs from 'dayjs';
+
+const { Text } = Typography;
 
 export default function BulletinWidget() {
   const [posts, setPosts] = useState<MCRBulletinPost[]>([]);
   const [showNewPost, setShowNewPost] = useState(false);
   const [newPostContent, setNewPostContent] = useState('');
   const [expiryType, setExpiryType] = useState<'date' | 'untilNew'>('date');
-  const [expiryDate, setExpiryDate] = useState('');
-  
+  const [expiryDate, setExpiryDate] = useState<dayjs.Dayjs | null>(null);
+
   // TODO: Get current user from auth context
   const currentUser = { id: '1', name: 'User', isAdmin: false };
 
@@ -22,24 +27,18 @@ export default function BulletinWidget() {
       content: newPostContent,
       createdBy: currentUser.name,
       createdAt: new Date(),
-      expiryDate: expiryType === 'date' && expiryDate ? new Date(expiryDate) : undefined,
+      expiryDate: expiryType === 'date' && expiryDate ? expiryDate.toDate() : undefined,
       untilNewPost: expiryType === 'untilNew',
     };
 
     setPosts([newPost, ...posts]);
     setNewPostContent('');
     setShowNewPost(false);
-    setExpiryDate('');
+    setExpiryDate(null);
   };
 
   const handleDeletePost = (postId: string) => {
-    const post = posts.find(p => p.id === postId);
-    if (!post) return;
-
-    // Check if user can delete (admin can delete all, users can delete their own)
-    if (currentUser.isAdmin || post.createdBy === currentUser.name) {
-      setPosts(posts.filter(p => p.id !== postId));
-    }
+    setPosts(posts.filter(p => p.id !== postId));
   };
 
   const getActivePost = () => {
@@ -51,121 +50,113 @@ export default function BulletinWidget() {
     });
   };
 
+  const activePosts = getActivePost();
+
   return (
-    <div className="h-full bg-white rounded-lg shadow-lg p-4 flex flex-col">
+    <div className="h-full bg-white rounded-lg shadow-lg p-4 flex flex-col" dir="rtl">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-semibold">הודעות חשובות</h2>
-        <button
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
           onClick={() => setShowNewPost(!showNewPost)}
-          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
         >
-          הודעה חדשה +
-        </button>
+          הודעה חדשה
+        </Button>
       </div>
 
       {showNewPost && (
-        <div className="mb-4 p-4 border rounded-lg bg-gray-50">
+        <Card size="small" className="mb-4 bg-gray-50">
           <RichTextEditor
             value={newPostContent}
             onChange={setNewPostContent}
             placeholder="הזן תוכן הודעה..."
           />
-          
-          <div className="mt-4 flex items-center gap-4">
-            <label className="flex items-center">
-              <input
-                type="radio"
-                value="date"
-                checked={expiryType === 'date'}
-                onChange={(e) => setExpiryType(e.target.value as 'date' | 'untilNew')}
-                className="mr-2"
-              />
-              הגבל תאריך
-            </label>
+
+          <div className="mt-3">
+            <Radio.Group
+              value={expiryType}
+              onChange={(e) => setExpiryType(e.target.value)}
+            >
+              <Space>
+                <Radio value="date">הגבל תאריך</Radio>
+                <Radio value="untilNew">עד הודעה חדשה</Radio>
+              </Space>
+            </Radio.Group>
             {expiryType === 'date' && (
-              <input
-                type="datetime-local"
+              <DatePicker
+                showTime
+                format="DD/MM/YYYY HH:mm"
                 value={expiryDate}
-                onChange={(e) => setExpiryDate(e.target.value)}
-                className="p-1 border rounded"
+                onChange={setExpiryDate}
+                className="mt-2"
+                placeholder="בחר תאריך תפוגה"
               />
             )}
-            <label className="flex items-center">
-              <input
-                type="radio"
-                value="untilNew"
-                checked={expiryType === 'untilNew'}
-                onChange={(e) => setExpiryType(e.target.value as 'date' | 'untilNew')}
-                className="mr-2"
-              />
-              עד הודעה חדשה
-            </label>
           </div>
 
-          <div className="mt-4 flex gap-2">
-            <button
-              onClick={handleCreatePost}
-              className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
-            >
+          <Space className="mt-3">
+            <Button type="primary" onClick={handleCreatePost}>
               פרסם
-            </button>
-            <button
-              onClick={() => {
-                setShowNewPost(false);
-                setNewPostContent('');
-              }}
-              className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
-            >
+            </Button>
+            <Button onClick={() => { setShowNewPost(false); setNewPostContent(''); }}>
               ביטול
-            </button>
-          </div>
-        </div>
+            </Button>
+          </Space>
+        </Card>
       )}
 
       <div className="flex-1 overflow-y-auto space-y-3">
-        {getActivePost().length === 0 ? (
-          <p className="text-gray-500 text-center py-8">אין הודעות פעילות</p>
+        {activePosts.length === 0 ? (
+          <Empty description="אין הודעות פעילות" />
         ) : (
-          getActivePost().map((post) => (
-            <div key={post.id} className="p-3 border rounded-lg bg-yellow-50 relative">
-              <div className="pr-8">
-                <div 
-                  className="prose max-w-none"
+          activePosts.map((post) => (
+            <Card key={post.id} size="small" className="bg-yellow-50 relative">
+              <div className="pr-6">
+                <div
+                  className="prose max-w-none prose-strong:text-inherit"
                   dangerouslySetInnerHTML={{ __html: post.content }}
                 />
                 <div className="mt-2 text-xs text-gray-500">
-                  <span>נוצר על ידי: {post.createdBy}</span>
+                  <Text type="secondary">נוצר על ידי: {post.createdBy}</Text>
                   <span className="mx-2">|</span>
-                  <span>{new Date(post.createdAt).toLocaleString('he-IL')}</span>
+                  <Text type="secondary">{new Date(post.createdAt).toLocaleString('he-IL')}</Text>
                   {post.expiryDate && (
                     <>
                       <span className="mx-2">|</span>
-                      <span>תפוגה: {new Date(post.expiryDate).toLocaleString('he-IL')}</span>
+                      <Text type="secondary">תפוגה: {new Date(post.expiryDate).toLocaleString('he-IL')}</Text>
                     </>
                   )}
                   {post.untilNewPost && (
                     <>
                       <span className="mx-2">|</span>
-                      <span>עד הודעה חדשה</span>
+                      <Text type="secondary">עד הודעה חדשה</Text>
                     </>
                   )}
                 </div>
               </div>
-              
+
               {(currentUser.isAdmin || post.createdBy === currentUser.name) && (
-                <button
-                  onClick={() => handleDeletePost(post.id)}
-                  className="absolute top-2 right-2 text-red-500 hover:text-red-700"
-                  title="מחק הודעה"
+                <Popconfirm
+                  title="מחיקת הודעה"
+                  description="האם אתה בטוח?"
+                  onConfirm={() => handleDeletePost(post.id)}
+                  okText="כן"
+                  cancelText="לא"
                 >
-                  ✕
-                </button>
+                  <Button
+                    type="text"
+                    danger
+                    size="small"
+                    icon={<DeleteOutlined />}
+                    className="absolute top-2 left-2"
+                  />
+                </Popconfirm>
               )}
-            </div>
+            </Card>
           ))
         )}
       </div>
     </div>
   );
 }
-

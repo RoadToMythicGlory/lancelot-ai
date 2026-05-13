@@ -36,7 +36,10 @@ export default function RootLayout({
         <ClientProviders>
           <div className="flex h-screen">
             <Sidebar />
-            <main className="flex-1 overflow-y-auto bg-gray-50">
+            {/* min-w-0 lets the flex item shrink below its content's intrinsic
+                width, so wide tables (antd `scroll.x`) scroll inside their
+                own component instead of pushing the whole page horizontally. */}
+            <main className="flex-1 min-w-0 overflow-y-auto bg-gray-50">
               <div className="p-4 lg:p-8">
                 {children}
               </div>

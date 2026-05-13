@@ -25,3 +25,4 @@ export * from './rights.models';
 export * from './help.models';
 export * from './apiKey.models';
 export * from './externalBroadcastPreset.models';
+export * from './warehousePdfImport.models';

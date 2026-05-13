@@ -14,9 +14,10 @@ import {
   ToolOutlined,
   HistoryOutlined,
   CalendarOutlined,
-  FileExcelOutlined,
+  DownloadOutlined,
   ExclamationCircleOutlined,
-  PhoneOutlined
+  PhoneOutlined,
+  FilePdfOutlined
 } from '@ant-design/icons';
 import { useQuery } from '@apollo/client';
 import { GET_WAREHOUSE_EQUIPMENT, GET_BROADCAST_EVENTS } from '../../graphql/queries';
@@ -28,6 +29,8 @@ import EquipmentQuantityAdjustment from '../../components/warehouse/EquipmentQua
 import EquipmentDisableModal from '../../components/warehouse/EquipmentDisableModal';
 import VendorManagement from '../../components/warehouse/VendorManagement';
 import UpcomingEvents from '../../components/warehouse/UpcomingEvents';
+import ExternalBroadcastRequests from '../../components/warehouse/ExternalBroadcastRequests';
+import WarehousePdfImportModal from '../../components/warehouse/WarehousePdfImportModal';
 import dayjs from 'dayjs';
 
 const { RangePicker } = DatePicker;
@@ -89,6 +92,7 @@ const WarehousePage: React.FC = () => {
   const [isQuantityAdjustmentVisible, setIsQuantityAdjustmentVisible] = useState(false);
   const [isDisableModalVisible, setIsDisableModalVisible] = useState(false);
   const [activeTab, setActiveTab] = useState('equipment');
+  const [isPdfImportVisible, setIsPdfImportVisible] = useState(false);
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([
     dayjs().subtract(30, 'days'),
     dayjs().add(30, 'days')
@@ -638,11 +642,11 @@ const WarehousePage: React.FC = () => {
                   {dateRangeValid ? `${eventsWithEquipment.length} אירועים עם ציוד` : 'בחר טווח תאריכים'}
                 </Tag>
                 <Button 
-                  icon={<FileExcelOutlined />}
+                  icon={<DownloadOutlined />}
                   onClick={() => exportToExcel(eventsWithEquipment)}
                   disabled={!dateRangeValid || eventsWithEquipment.length === 0}
                 >
-                  חלץ לאקסל
+                  ייצוא CSV
                 </Button>
               </Space>
             </Col>
@@ -877,6 +881,14 @@ const WarehousePage: React.FC = () => {
                 >
                   החזרת ציוד
                 </Button>
+                <Button
+                  icon={<FilePdfOutlined />}
+                  size="large"
+                  onClick={() => setIsPdfImportVisible(true)}
+                  style={{ marginLeft: 8 }}
+                >
+                  ייבוא PDF ציוד
+                </Button>
               </Space>
             )}
           </div>
@@ -927,6 +939,16 @@ const WarehousePage: React.FC = () => {
               ),
               children: <UpcomingEvents />,
             },
+            {
+              key: 'external-requests',
+              label: (
+                <span>
+                  <ToolOutlined />
+                  בקשות שידורי חוץ
+                </span>
+              ),
+              children: <ExternalBroadcastRequests message={message} />,
+            },
           ]}
         />
 
@@ -936,7 +958,6 @@ const WarehousePage: React.FC = () => {
           onClose={() => setIsRegistrationModalVisible(false)}
           onSuccess={() => {
             refetch();
-            message.success('הציוד נוסף בהצלחה');
           }}
         />
 
@@ -970,7 +991,6 @@ const WarehousePage: React.FC = () => {
           }}
           onSuccess={() => {
             refetch();
-            message.success('כמות הציוד עודכנה בהצלחה');
           }}
         />
 
@@ -984,6 +1004,15 @@ const WarehousePage: React.FC = () => {
           }}
           onSuccess={() => {
             refetch();
+          }}
+        />
+
+        {/* PDF Equipment Import Modal */}
+        <WarehousePdfImportModal
+          visible={isPdfImportVisible}
+          onClose={() => setIsPdfImportVisible(false)}
+          onSuccess={() => {
+            message.success('רשימת הציוד לאירוע נשמרה בהצלחה');
           }}
         />
       </div>

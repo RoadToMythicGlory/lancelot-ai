@@ -323,6 +323,65 @@ input EquipmentReplacementInput {
   replacementEquipmentId: ID!
 }
 
+# Internal Equipment Assignment — equipment dispatched to a worker
+# (either an internal Lancelot user or a custom external name) rather
+# than to a broadcast event.
+type InternalEquipmentAssignment {
+  id: ID!
+  equipmentId: ID!
+  equipment: WarehouseEquipment
+
+  assignedToType: String!          # 'internal' | 'external'
+  assignedToUserId: ID
+  assignedToUser: User
+  assignedToName: String!
+  assignedToPhone: String
+
+  quantityAssigned: Int!
+
+  status: String!                  # 'active' | 'returned' | 'transferred' | 'cancelled'
+
+  assignedAt: DateTime!
+  assignedBy: String
+  assignedByName: String
+  notes: String
+
+  returnedAt: DateTime
+  returnedByName: String
+  returnNotes: String
+
+  transferredAt: DateTime
+  transferredByName: String
+  transferredToAssignmentId: ID
+  transferredFromAssignmentId: ID
+  transferNotes: String
+
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+input AssignEquipmentToWorkerInput {
+  # One of `equipmentId` or `barcode` must be provided
+  equipmentId: ID
+  barcode: String
+  quantityAssigned: Int
+
+  # One of `assignedToUserId` (internal user) or `assignedToExternalName`
+  # (custom external worker) must be provided.
+  assignedToUserId: ID
+  assignedToExternalName: String
+  assignedToPhone: String
+  notes: String
+}
+
+input TransferInternalAssignmentInput {
+  assignmentId: ID!
+  assignedToUserId: ID
+  assignedToExternalName: String
+  assignedToPhone: String
+  notes: String
+}
+
 type EquipmentSetReturnResponse {
   success: Boolean!
   message: String!
@@ -877,6 +936,11 @@ type Query {
 
   # Stale equipment (unused for N days)
   staleEquipment(daysUnused: Int = 14): [WarehouseEquipment!]!
+
+  # Internal equipment assignments (worker-based dispatch).
+  # status filter: 'active' | 'returned' | 'transferred' | 'cancelled' | 'all'.
+  # Defaults to 'active' to keep the warehouse tab focused on what's "out".
+  internalEquipmentAssignments(status: String = "active"): [InternalEquipmentAssignment!]!
   
   # Vendors
   vendors(filter: VendorFilter): [Vendor!]!
@@ -990,10 +1054,17 @@ type Mutation {
 
   # Equipment state management
   disableEquipment(id: ID!, reason: String!, suspensionStatus: String): WarehouseEquipment!
-  enableEquipment(id: ID!): WarehouseEquipment!
+  # `notes` is recorded in EquipmentHistory and surfaced in the disable/enable
+  # log shown when re-enabling equipment.
+  enableEquipment(id: ID!, notes: String): WarehouseEquipment!
   
   # Undo equipment transfer
   undoEquipmentTransfer(transferId: ID!): TransferEquipmentResponse!
+
+  # Internal Equipment Assignment mutations (worker-based dispatch)
+  assignEquipmentToWorker(input: AssignEquipmentToWorkerInput!): InternalEquipmentAssignment!
+  returnInternalEquipmentAssignment(assignmentId: ID!, notes: String): InternalEquipmentAssignment!
+  transferInternalEquipmentAssignment(input: TransferInternalAssignmentInput!): InternalEquipmentAssignment!
 
   # Equipment Set mutations
   createEquipmentSet(input: CreateEquipmentSetInput!): EquipmentSet!

@@ -2062,7 +2062,7 @@ export const broadcastResolvers = {
       }
     },
 
-    enableEquipment: async (_: any, { id }: { id: string }, context: any) => {
+    enableEquipment: async (_: any, { id, notes }: { id: string; notes?: string }, context: any) => {
       try {
         await ensureMongoConnection();
         const user = authenticateUser(context);
@@ -2086,13 +2086,17 @@ export const broadcastResolvers = {
         
         await equipment.save();
 
-        // Create history entry
+        // Create history entry — the optional `notes` is the warehouse-user
+        // explanation for why the equipment is back in service (e.g. "תוקן",
+        // "החזרה מספק", "טעות בהשבתה"). Surfaced in EquipmentDisableModal's
+        // log view the next time the equipment is disabled.
+        const enableNote = (notes && notes.trim()) || 'Equipment re-enabled';
         const history = new EquipmentHistory({
           equipmentId: equipment._id,
           action: 'enabled',
           performedBy: user.id,
           performedByName: `${user.firstName} ${user.lastName}`,
-          notes: 'Equipment re-enabled',
+          notes: enableNote,
           date: new Date()
         });
         

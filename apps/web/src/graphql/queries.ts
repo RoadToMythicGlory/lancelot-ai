@@ -862,3 +862,52 @@ export const TRACKER_POSITION_UPDATED = gql`
     }
   }
 `;
+
+// Internal Equipment Assignments (worker-based dispatch from warehouse)
+export const GET_INTERNAL_EQUIPMENT_ASSIGNMENTS = gql`
+  query GetInternalEquipmentAssignments($status: String) {
+    internalEquipmentAssignments(status: $status) {
+      id
+      equipmentId
+      equipment {
+        id
+        name
+        category
+        brand
+        barcode
+        quantityTotal
+        quantityAvailable
+        quantityAssigned
+        isQuantityBased
+        isDisabled
+      }
+      assignedToType
+      assignedToUserId
+      assignedToUser {
+        id
+        firstName
+        lastName
+        displayName
+        email
+      }
+      assignedToName
+      assignedToPhone
+      quantityAssigned
+      status
+      assignedAt
+      assignedBy
+      assignedByName
+      notes
+      returnedAt
+      returnedByName
+      returnNotes
+      transferredAt
+      transferredByName
+      transferredToAssignmentId
+      transferredFromAssignmentId
+      transferNotes
+      createdAt
+      updatedAt
+    }
+  }
+`;

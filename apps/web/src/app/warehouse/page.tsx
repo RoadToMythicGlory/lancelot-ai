@@ -19,6 +19,7 @@ import {
   PhoneOutlined,
   FilePdfOutlined,
   EnvironmentOutlined,
+  UserSwitchOutlined,
 } from '@ant-design/icons';
 import { useQuery } from '@apollo/client';
 import { GET_WAREHOUSE_EQUIPMENT, GET_BROADCAST_EVENTS, GET_STALE_EQUIPMENT } from '../../graphql/queries';
@@ -34,6 +35,7 @@ import ExternalBroadcastRequests from '../../components/warehouse/ExternalBroadc
 import WarehousePdfImportModal from '../../components/warehouse/WarehousePdfImportModal';
 import EquipmentSetsManager from '../../components/warehouse/EquipmentSetsManager';
 import EquipmentLiveTracking from '../../components/warehouse/tracking/EquipmentLiveTracking';
+import InternalAssignmentsTab from '../../components/warehouse/internalAssignments/InternalAssignmentsTab';
 import dayjs from 'dayjs';
 
 const { RangePicker } = DatePicker;
@@ -975,6 +977,16 @@ const WarehousePage: React.FC = () => {
                 </span>
               ),
               children: renderHistoryTab(),
+            },
+            {
+              key: 'internal-assignments',
+              label: (
+                <span>
+                  <UserSwitchOutlined />
+                  הקצאות פנימיות
+                </span>
+              ),
+              children: <InternalAssignmentsTab />,
             },
             {
               key: 'vendors',

@@ -37,6 +37,7 @@ import { oauthRouter } from './services/oauthService';
 import { warehouseRoutes } from './routes/warehouseRoutes';
 import { trackingRoutes } from './routes/trackingRoutes';
 import { equipmentSetsResolvers } from './resolvers/equipmentSets';
+import { internalAssignmentsResolvers } from './resolvers/internalAssignments';
 import { trackingResolvers } from './resolvers/tracking';
 import { startTrackerIngest, stopTrackerIngest } from './services/trackerIngestService';
 
@@ -62,6 +63,8 @@ const resolvers = {
     equipmentSet: equipmentSetsResolvers.Query.equipmentSet,
     equipmentSetByBarcode: equipmentSetsResolvers.Query.equipmentSetByBarcode,
     staleEquipment: equipmentSetsResolvers.Query.staleEquipment,
+    // Internal worker-based equipment assignments
+    internalEquipmentAssignments: internalAssignmentsResolvers.Query.internalEquipmentAssignments,
     // Add shifts queries
     ...shiftsResolvers.Query,
     // Add user queries (overriding users from shifts)
@@ -117,6 +120,10 @@ const resolvers = {
     deleteEquipmentSet: equipmentSetsResolvers.Mutation.deleteEquipmentSet,
     assignEquipmentSetToEvent: equipmentSetsResolvers.Mutation.assignEquipmentSetToEvent,
     returnEquipmentSet: equipmentSetsResolvers.Mutation.returnEquipmentSet,
+    // Internal worker-based equipment assignments
+    assignEquipmentToWorker: internalAssignmentsResolvers.Mutation.assignEquipmentToWorker,
+    returnInternalEquipmentAssignment: internalAssignmentsResolvers.Mutation.returnInternalEquipmentAssignment,
+    transferInternalEquipmentAssignment: internalAssignmentsResolvers.Mutation.transferInternalEquipmentAssignment,
     // Add shifts mutations
     ...shiftsResolvers.Mutation,
     // Add user mutations
@@ -176,6 +183,8 @@ const resolvers = {
   User: userResolvers.User,
   // Equipment set field resolver
   EquipmentSetItem: equipmentSetsResolvers.EquipmentSetItem,
+  // Internal equipment assignment field resolvers (lazy `equipment` and `assignedToUser`)
+  InternalEquipmentAssignment: internalAssignmentsResolvers.InternalEquipmentAssignment,
   // Add MCR field resolvers
   MCREvent: mcrResolvers.MCREvent,
   MCRBulletinPost: mcrResolvers.MCRBulletinPost,

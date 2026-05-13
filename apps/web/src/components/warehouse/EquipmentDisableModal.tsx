@@ -1,8 +1,10 @@
 import React from 'react';
-import { Modal, Form, Input, Select, Space, Button, Alert, App } from 'antd';
-import { ExclamationCircleOutlined } from '@ant-design/icons';
-import { useMutation } from '@apollo/client';
+import { Modal, Form, Input, Select, Space, Button, Alert, App, Timeline, Tag, Empty, Spin, Divider } from 'antd';
+import { ExclamationCircleOutlined, HistoryOutlined } from '@ant-design/icons';
+import { useMutation, useQuery } from '@apollo/client';
 import { DISABLE_EQUIPMENT, ENABLE_EQUIPMENT } from '../../graphql/mutations';
+import { GET_EQUIPMENT_HISTORY } from '../../graphql/queries';
+import dayjs from 'dayjs';
 
 const SUSPENSION_STATUS_OPTIONS = [
   { value: 'under_maintenance', label: 'בתחזוקה' },
@@ -31,13 +33,34 @@ const EquipmentDisableModal: React.FC<EquipmentDisableModalProps> = ({
   onClose,
   onSuccess
 }) => {
-  const [form] = Form.useForm();
+  const [disableForm] = Form.useForm();
+  const [enableForm] = Form.useForm();
   const { message } = App.useApp();
 
-  const [disableEquipment] = useMutation(DISABLE_EQUIPMENT, {
+  // Pull the full history for this equipment so we can render a log of past
+  // disable/enable actions next to the re-enable confirmation. Skipped when
+  // the modal is closed or no equipment is selected.
+  const { data: historyData, loading: historyLoading, refetch: refetchHistory } = useQuery(
+    GET_EQUIPMENT_HISTORY,
+    {
+      variables: { equipmentId: equipment?.id },
+      skip: !visible || !equipment?.id,
+      fetchPolicy: 'cache-and-network',
+    },
+  );
+
+  const disableEnableLog = React.useMemo(() => {
+    const all = historyData?.equipmentHistory || [];
+    return all
+      .filter((h: any) => h.action === 'disabled' || h.action === 'enabled')
+      .slice(0, 20); // newest first (the query already sorts desc by date)
+  }, [historyData]);
+
+  const [disableEquipment, { loading: disableLoading }] = useMutation(DISABLE_EQUIPMENT, {
+    refetchQueries: ['GetWarehouseEquipment', 'GetEquipmentHistory'],
     onCompleted: () => {
       message.success('הציוד הושבת בהצלחה');
-      form.resetFields();
+      disableForm.resetFields();
       onSuccess();
       onClose();
     },
@@ -46,9 +69,12 @@ const EquipmentDisableModal: React.FC<EquipmentDisableModalProps> = ({
     }
   });
 
-  const [enableEquipment] = useMutation(ENABLE_EQUIPMENT, {
+  const [enableEquipment, { loading: enableLoading }] = useMutation(ENABLE_EQUIPMENT, {
+    refetchQueries: ['GetWarehouseEquipment', 'GetEquipmentHistory'],
     onCompleted: () => {
       message.success('הציוד הופעל מחדש בהצלחה');
+      enableForm.resetFields();
+      refetchHistory().catch(() => undefined);
       onSuccess();
       onClose();
     },
@@ -67,20 +93,79 @@ const EquipmentDisableModal: React.FC<EquipmentDisableModalProps> = ({
     });
   };
 
-  const handleEnable = async () => {
+  const handleEnable = async (values: any) => {
+    const notes = (values?.notes || '').trim();
+    if (!notes) {
+      // Re-enable requires a note describing what changed (fix, calibration,
+      // returned from vendor, …) so the audit trail explains *why* the gear
+      // is back in service — not just *who* re-enabled it.
+      message.error('יש להזין הערה לפני הפעלת הציוד מחדש');
+      return;
+    }
     await enableEquipment({
       variables: {
-        id: equipment?.id
+        id: equipment?.id,
+        notes,
       }
     });
   };
 
   const handleCancel = () => {
-    form.resetFields();
+    disableForm.resetFields();
+    enableForm.resetFields();
     onClose();
   };
 
   if (!equipment) return null;
+
+  const renderLog = () => {
+    if (historyLoading) {
+      return (
+        <div className="text-center py-4">
+          <Spin size="small" />
+        </div>
+      );
+    }
+    if (disableEnableLog.length === 0) {
+      return (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description="אין יומן השבתה/הפעלה לציוד זה"
+          style={{ margin: '8px 0' }}
+        />
+      );
+    }
+    return (
+      <Timeline
+        mode="left"
+        items={disableEnableLog.map((entry: any) => ({
+          color: entry.action === 'disabled' ? 'red' : 'green',
+          children: (
+            <div>
+              <div>
+                <Tag color={entry.action === 'disabled' ? 'red' : 'green'}>
+                  {entry.action === 'disabled' ? 'הושבת' : 'הופעל'}
+                </Tag>
+                <span className="text-xs text-gray-500 ml-2">
+                  {dayjs(entry.date).format('DD/MM/YYYY HH:mm')}
+                </span>
+              </div>
+              {entry.performedBy && (
+                <div className="text-xs text-gray-700 mt-1">
+                  ע״י: {entry.performedBy}
+                </div>
+              )}
+              {entry.notes && (
+                <div className="text-xs text-gray-600 mt-1" style={{ whiteSpace: 'pre-wrap' }}>
+                  {entry.notes}
+                </div>
+              )}
+            </div>
+          ),
+        }))}
+      />
+    );
+  };
 
   return (
     <Modal
@@ -88,7 +173,8 @@ const EquipmentDisableModal: React.FC<EquipmentDisableModalProps> = ({
       open={visible}
       onCancel={handleCancel}
       footer={null}
-      width={500}
+      width={560}
+      destroyOnHidden
     >
       <div className="mb-4">
         <Alert
@@ -119,17 +205,30 @@ const EquipmentDisableModal: React.FC<EquipmentDisableModalProps> = ({
       )}
 
       {equipment.isDisabled ? (
-        <div className="text-center py-4">
-          <p className="mb-4">האם ברצונך להפעיל מחדש את הציוד?</p>
-          <Space>
-            <Button type="primary" onClick={handleEnable}>
-              הפעל ציוד
-            </Button>
-            <Button onClick={handleCancel}>ביטול</Button>
-          </Space>
-        </div>
+        <Form form={enableForm} layout="vertical" onFinish={handleEnable}>
+          <Form.Item
+            name="notes"
+            label="הערה להפעלה מחדש"
+            rules={[{ required: true, message: 'נא להזין הערה (לדוגמה: תוקן, נבדק, החזרה מספק)' }]}
+            extra="ההערה תישמר ביומן ההשבתה/הפעלה של הציוד."
+          >
+            <Input.TextArea
+              rows={3}
+              placeholder="לדוגמה: תוקן ע״י טכנאי | נבדק במחסן | החזרה מהמעבדה"
+            />
+          </Form.Item>
+
+          <Form.Item>
+            <Space>
+              <Button type="primary" htmlType="submit" loading={enableLoading}>
+                הפעל ציוד
+              </Button>
+              <Button onClick={handleCancel}>ביטול</Button>
+            </Space>
+          </Form.Item>
+        </Form>
       ) : (
-        <Form form={form} layout="vertical" onFinish={handleDisable} initialValues={{ suspensionStatus: 'under_maintenance' }}>
+        <Form form={disableForm} layout="vertical" onFinish={handleDisable} initialValues={{ suspensionStatus: 'under_maintenance' }}>
           <Form.Item
             name="suspensionStatus"
             label="סטטוס השעיה"
@@ -151,7 +250,7 @@ const EquipmentDisableModal: React.FC<EquipmentDisableModalProps> = ({
 
           <Form.Item>
             <Space>
-              <Button type="primary" danger htmlType="submit">
+              <Button type="primary" danger htmlType="submit" loading={disableLoading}>
                 השבת ציוד
               </Button>
               <Button onClick={handleCancel}>ביטול</Button>
@@ -159,6 +258,14 @@ const EquipmentDisableModal: React.FC<EquipmentDisableModalProps> = ({
           </Form.Item>
         </Form>
       )}
+
+      <Divider orientation="left">
+        <Space>
+          <HistoryOutlined />
+          יומן השבתות והפעלות
+        </Space>
+      </Divider>
+      {renderLog()}
     </Modal>
   );
 };

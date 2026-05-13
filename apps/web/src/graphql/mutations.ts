@@ -323,12 +323,76 @@ export const DISABLE_EQUIPMENT = gql`
 `;
 
 export const ENABLE_EQUIPMENT = gql`
-  mutation EnableEquipment($id: ID!) {
-    enableEquipment(id: $id) {
+  mutation EnableEquipment($id: ID!, $notes: String) {
+    enableEquipment(id: $id, notes: $notes) {
       id
       name
       status
       isDisabled
+    }
+  }
+`;
+
+// Internal Equipment Assignment (worker-based dispatch from warehouse)
+const INTERNAL_ASSIGNMENT_FIELDS = `
+  id
+  equipmentId
+  equipment {
+    id
+    name
+    category
+    barcode
+    quantityAvailable
+    quantityAssigned
+  }
+  assignedToType
+  assignedToUserId
+  assignedToUser {
+    id
+    firstName
+    lastName
+    displayName
+    email
+  }
+  assignedToName
+  assignedToPhone
+  quantityAssigned
+  status
+  assignedAt
+  assignedByName
+  notes
+  returnedAt
+  returnedByName
+  returnNotes
+  transferredAt
+  transferredByName
+  transferredToAssignmentId
+  transferredFromAssignmentId
+  transferNotes
+  createdAt
+  updatedAt
+`;
+
+export const ASSIGN_EQUIPMENT_TO_WORKER = gql`
+  mutation AssignEquipmentToWorker($input: AssignEquipmentToWorkerInput!) {
+    assignEquipmentToWorker(input: $input) {
+      ${INTERNAL_ASSIGNMENT_FIELDS}
+    }
+  }
+`;
+
+export const RETURN_INTERNAL_EQUIPMENT_ASSIGNMENT = gql`
+  mutation ReturnInternalEquipmentAssignment($assignmentId: ID!, $notes: String) {
+    returnInternalEquipmentAssignment(assignmentId: $assignmentId, notes: $notes) {
+      ${INTERNAL_ASSIGNMENT_FIELDS}
+    }
+  }
+`;
+
+export const TRANSFER_INTERNAL_EQUIPMENT_ASSIGNMENT = gql`
+  mutation TransferInternalEquipmentAssignment($input: TransferInternalAssignmentInput!) {
+    transferInternalEquipmentAssignment(input: $input) {
+      ${INTERNAL_ASSIGNMENT_FIELDS}
     }
   }
 `;

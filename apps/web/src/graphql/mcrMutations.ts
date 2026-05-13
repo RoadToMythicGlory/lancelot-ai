@@ -71,6 +71,7 @@ export const CREATE_ACTIVITY_ROW = gql`
       id
       date
       activityName
+      source
       time
       endTime
       equipment
@@ -94,6 +95,7 @@ export const UPDATE_ACTIVITY_ROW = gql`
       id
       date
       activityName
+      source
       time
       endTime
       equipment

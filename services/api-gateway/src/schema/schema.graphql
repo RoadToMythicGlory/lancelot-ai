@@ -581,10 +581,18 @@ type PresetRole {
 }
 
 type PresetEquipment {
-  equipmentId: String
-  name: String!
-  category: String
+  category: String!
+  categoryLabel: String!
   count: Int!
+  unitSettings: [UnitSetting!]
+}
+
+type UnitSetting {
+  unitIndex: Int!
+  purpose: String
+  audioConfig: String
+  assignedEquipmentId: String
+  assignedEquipmentName: String
 }
 
 input CreateExternalBroadcastPresetInput {
@@ -611,10 +619,18 @@ input PresetRoleInput {
 }
 
 input PresetEquipmentInput {
-  equipmentId: String
-  name: String!
-  category: String
+  category: String!
+  categoryLabel: String!
   count: Int!
+  unitSettings: [UnitSettingInput!]
+}
+
+input UnitSettingInput {
+  unitIndex: Int!
+  purpose: String
+  audioConfig: String
+  assignedEquipmentId: String
+  assignedEquipmentName: String
 }
 
 # Overlap Types
@@ -1845,6 +1861,7 @@ type ActivityRow {
   id: ID!
   date: DateTime!
   activityName: String!
+  source: String
   time: String!
   endTime: String!
   equipment: String
@@ -1859,6 +1876,7 @@ type ActivityRow {
   broadcastEventId: ID
   createdBy: User
   updatedBy: User
+  warehouseEquipment: [EquipmentAssignment!]!
   createdAt: DateTime!
   updatedAt: DateTime!
 }
@@ -1911,6 +1929,7 @@ input UpdateBulletinPostInput {
 input CreateActivityRowInput {
   date: DateTime!
   activityName: String!
+  source: String
   time: String!
   endTime: String!
   equipment: String
@@ -1925,6 +1944,7 @@ input CreateActivityRowInput {
 
 input UpdateActivityRowInput {
   activityName: String
+  source: String
   time: String
   endTime: String
   equipment: String
@@ -1963,6 +1983,7 @@ extend type Query {
   ): [ActivityRow!]!
   
   activityRow(id: ID!): ActivityRow
+  activityRowByBroadcastEvent(broadcastEventId: ID!, date: DateTime!): ActivityRow
 }
 
 # MCR Mutations

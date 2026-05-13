@@ -1,8 +1,9 @@
-/* Minimal fixes for overlapping events - preserve RBC's positioning */
+/* Side-by-side layout for concurrent events */
 
-/* Just add visual separation between events */
+/* Give events a small gap so they don't touch */
 .mcr-calendar .rbc-event {
   margin: 0 1px !important;
+  border-right: 2px solid rgba(255,255,255,0.4) !important;
 }
 
 /* Fix event content overflow */
@@ -14,11 +15,18 @@
   direction: rtl !important;
 }
 
-/* Proper z-index layering */
-.mcr-calendar .rbc-event {
-  z-index: 2 !important;
+/* Let react-big-calendar manage z-index naturally — don't force a flat layer */
+.mcr-calendar .rbc-event.rbc-selected {
+  z-index: 10 !important;
+  box-shadow: 0 0 0 2px rgba(0,0,0,0.3) !important;
 }
 
-.mcr-calendar .rbc-event.rbc-selected {
-  z-index: 3 !important;
+/* Ensure the events container allows side-by-side layout */
+.mcr-calendar .rbc-events-container {
+  margin-right: 0 !important;
+}
+
+/* When events are placed side-by-side, give them readable min-width */
+.mcr-calendar .rbc-event {
+  min-width: 20px !important;
 }

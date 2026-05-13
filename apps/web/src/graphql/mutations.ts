@@ -618,10 +618,16 @@ export const CREATE_EXTERNAL_BROADCAST_PRESET = gql`
         isCustom
       }
       equipment {
-        equipmentId
-        name
         category
+        categoryLabel
         count
+        unitSettings {
+          unitIndex
+          purpose
+          audioConfig
+          assignedEquipmentId
+          assignedEquipmentName
+        }
       }
       createdAt
     }
@@ -642,10 +648,16 @@ export const UPDATE_EXTERNAL_BROADCAST_PRESET = gql`
         isCustom
       }
       equipment {
-        equipmentId
-        name
         category
+        categoryLabel
         count
+        unitSettings {
+          unitIndex
+          purpose
+          audioConfig
+          assignedEquipmentId
+          assignedEquipmentName
+        }
       }
       updatedAt
     }

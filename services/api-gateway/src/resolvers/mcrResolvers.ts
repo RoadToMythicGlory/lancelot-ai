@@ -3,6 +3,7 @@ import MCREvent, { IMCREvent } from '../models/mcrEvent';
 import BulletinPost, { IBulletinPost } from '../models/bulletinPost';
 import ActivityRow, { IActivityRow } from '../models/activityRow';
 import { BroadcastEvent } from '../models/broadcast.models';
+import { EquipmentAssignment } from '../models/equipment.models';
 import { pubsub } from '../utils/pubsub';
 import { withAuth } from '../utils/auth';
 
@@ -157,6 +158,56 @@ const resolvers = {
     activityRow: withAuth(async (_: any, args: any) => {
       return await ActivityRow.findById(args.id);
     }),
+
+    activityRowByBroadcastEvent: withAuth(async (_: any, args: any, context: any) => {
+      const { broadcastEventId, date } = args;
+      
+      const startOfDay = new Date(date);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(date);
+      endOfDay.setHours(23, 59, 59, 999);
+      
+      // Try to find existing row
+      let row = await ActivityRow.findOne({
+        broadcastEventId: new (require('mongoose').Types.ObjectId)(broadcastEventId),
+        date: { $gte: startOfDay, $lte: endOfDay }
+      });
+      
+      if (!row) {
+        // Auto-create from broadcast event
+        const event = await BroadcastEvent.findById(broadcastEventId);
+        if (!event) {
+          throw new UserInputError('Broadcast event not found');
+        }
+        
+        const startTime = new Date(event.startTime);
+        const endTime = new Date(event.endTime);
+        const timeStr = startTime.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', hour12: false });
+        const endTimeStr = endTime.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', hour12: false });
+        
+        row = new ActivityRow({
+          date: startOfDay,
+          activityName: (event as any).hebrewTitle || event.title || 'אירוע שידור',
+          time: timeStr,
+          endTime: endTimeStr,
+          channel: (event as any).channel || '',
+          source: '',
+          equipment: '',
+          backup: '',
+          routing: '',
+          notes: '',
+          status: 'UNKNOWN',
+          isHidden: false,
+          isManual: false,
+          broadcastEventId: event._id,
+          createdBy: context.user.userId,
+        });
+        
+        await row.save();
+      }
+      
+      return row;
+    }),
   },
 
   Mutation: {
@@ -182,7 +233,7 @@ const resolvers = {
       }
       
       // Check permissions - only creator or admin can update
-      if (mcrEvent.createdBy.toString() !== context.user.userId && context.user.systemRole !== 'ADMIN') {
+      if (mcrEvent.createdBy.toString() !== context.user.userId && context.user.systemRole !== 'SYSTEM_ADMIN') {
         throw new AuthenticationError('Not authorized to update this event');
       }
       
@@ -202,7 +253,7 @@ const resolvers = {
       }
       
       // Check permissions - only creator or admin can delete
-      if (mcrEvent.createdBy.toString() !== context.user.userId && context.user.systemRole !== 'ADMIN') {
+      if (mcrEvent.createdBy.toString() !== context.user.userId && context.user.systemRole !== 'SYSTEM_ADMIN') {
         throw new AuthenticationError('Not authorized to delete this event');
       }
       
@@ -249,7 +300,7 @@ const resolvers = {
       }
       
       // Check permissions - only creator or admin can update
-      if (bulletinPost.createdBy.toString() !== context.user.userId && context.user.systemRole !== 'ADMIN') {
+      if (bulletinPost.createdBy.toString() !== context.user.userId && context.user.systemRole !== 'SYSTEM_ADMIN') {
         throw new AuthenticationError('Not authorized to update this post');
       }
       
@@ -271,7 +322,7 @@ const resolvers = {
       // Check permissions - only creator or MCR admin can delete
       const isMCRAdmin = context.user.departments?.some((dept: any) => 
         dept.name === 'MCR' && dept.role === 'admin'
-      ) || context.user.systemRole === 'ADMIN';
+      ) || context.user.systemRole === 'SYSTEM_ADMIN';
       
       if (bulletinPost.createdBy.toString() !== context.user.userId && !isMCRAdmin) {
         throw new AuthenticationError('Not authorized to delete this post');
@@ -422,6 +473,45 @@ const resolvers = {
       const db = await context.mongoDb;
       const usersCollection = db.collection('users');
       return await usersCollection.findOne({ _id: parent.updatedBy });
+    },
+    warehouseEquipment: async (parent: IActivityRow) => {
+      if (!parent.broadcastEventId) return [];
+      try {
+        const assignments = await EquipmentAssignment.find({
+          eventId: parent.broadcastEventId,
+          status: 'active'
+        }).exec();
+        
+        return assignments.map(a => ({
+          id: a._id.toString(),
+          equipmentId: a.equipmentId.toString(),
+          eventName: a.eventName,
+          eventId: a.eventId.toString(),
+          startDate: a.startDate.toISOString(),
+          endDate: a.endDate.toISOString(),
+          location: a.location || null,
+          status: a.status,
+          quantityAssigned: a.quantityAssigned,
+          assignmentStatus: a.status,
+          assignedAt: a.assignedAt?.toISOString() || null,
+          scheduledPickupAt: null,
+          scheduledReturnAt: null,
+          actualPickupAt: null,
+          actualReturnAt: a.returnedAt?.toISOString() || null,
+          assignmentNotes: a.notes || null,
+          returnNotes: null,
+          assignedToName: a.assignedByName || null,
+          assignedBy: a.assignedBy || null,
+          assignedByUser: null,
+          collectedByUser: null,
+          returnedByUser: null,
+          createdAt: a.createdAt.toISOString(),
+          updatedAt: a.updatedAt.toISOString()
+        }));
+      } catch (error) {
+        console.error('Error fetching warehouse equipment for activity row:', error);
+        return [];
+      }
     }
   }
 };

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useQuery } from '@apollo/client';
 import { Modal, Button, Space } from 'antd';
 import {
   VideoCameraOutlined,
@@ -21,6 +22,7 @@ import ClosedCaptionsModal from './ClosedCaptionsModal';
 import WarehouseModal from './WarehouseModal';
 import PlayoutDepartmentModal from './PlayoutDepartmentModal';
 import RundownModal from './RundownModal';
+import { GET_ACTIVITY_ROW_BY_BROADCAST_EVENT } from '@/graphql/mcrQueries';
 
 interface BroadcastEventModalProps {
   visible: boolean;
@@ -50,27 +52,28 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
   const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Debug: Log event structure when modal opens
-  React.useEffect(() => {
-    if (visible && event) {
-      console.log('🔵 BroadcastEventModal opened with event:', {
-        eventId: event.id,
-        title: event.title,
-        metadata: event.metadata,
-        departments: event.metadata?.departments,
-        departmentKeys: event.metadata?.departments ? Object.keys(event.metadata.departments) : [],
-        fullEvent: event
-      });
-    }
-  }, [visible, event]);
+  // Fetch the real ActivityRow from the DB for this broadcast event so MCR
+  // status reflects actual saved data, not stale metadata.
+  const eventDate = event?.startTime
+    ? new Date(event.startTime).toISOString()
+    : new Date().toISOString();
 
-  // Function to check data completion status for each department
+  const { data: activityRowData } = useQuery(GET_ACTIVITY_ROW_BY_BROADCAST_EVENT, {
+    variables: {
+      broadcastEventId: event?.id,
+      date: eventDate,
+    },
+    skip: !visible || !event?.id,
+    fetchPolicy: 'cache-and-network',
+  });
+
+  const activityRow = activityRowData?.activityRowByBroadcastEvent;
+
   const getDataStatus = (dept: Department): DataStatus => {
     if (!event) return 'empty';
 
     const metadata = event.metadata || {};
     
-    // Map frontend department names to backend department names
     const deptNameMap: Record<Department, string> = {
       'broadcast-array': 'broadcastArray',
       'mcr': 'mcr',
@@ -83,116 +86,51 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
     const backendDeptName = deptNameMap[dept];
     const departmentData = metadata.departments?.[backendDeptName] || {};
     
-    // Check for "not applicable" flag first
     if (departmentData.customData?.notApplicable || departmentData.notApplicable) {
-      return 'complete'; // Show as complete if marked as not applicable
+      return 'complete';
     }
 
-    // Debug logging
-    console.log(`🔍 Checking status for ${dept} (${backendDeptName}):`, {
-      eventId: event.id,
-      eventTitle: event.title,
-      hasMetadata: !!metadata,
-      hasDepartments: !!metadata.departments,
-      availableDepartments: metadata.departments ? Object.keys(metadata.departments) : [],
-      departmentData,
-      allDepartmentData: metadata.departments,
-      // Also check root level fields
-      rootFields: {
-        routing_preset: event.routingPreset,
-        production_crew: event.production_crew,
-        equipment_list: event.equipment_list,
-        subtitles: event.subtitles,
-        reception_start_time: event.reception_start_time
-      }
-    });
-
     switch (dept) {
-      case 'broadcast-array':
-        // Check all possible data locations
+      case 'broadcast-array': {
         const broadcastArrayData = departmentData;
         const crewAssignments = broadcastArrayData.crewAssignments || broadcastArrayData.broadcastArray?.crewAssignments || [];
         const customData = broadcastArrayData.customData || broadcastArrayData.broadcastArray?.customData || {};
         
-        // Also check root level fields
         const hasRootData = broadcastArrayData.שידור || broadcastArrayData.מקוםשידור ||
                            broadcastArrayData.עורך || broadcastArrayData.מפיק || 
                            broadcastArrayData.אישVTR || broadcastArrayData.טכנאישידור;
         
-        // Count filled crew positions (6 possible roles)
         const filledCrewPositions = crewAssignments.length;
         const hasCustomData = customData.שידור || customData.מקוםשידור;
         
-        // Complete: All 6 crew positions + custom data
         if (filledCrewPositions >= 6 && (hasCustomData || hasRootData)) return 'complete';
-        // Partial: Some crew positions OR some custom data OR root data
         if (filledCrewPositions > 0 || hasCustomData || hasRootData) return 'partial';
         return 'empty';
+      }
 
-      case 'mcr':
-        // Check all possible data locations for MCR
-        const mcrData = departmentData;
-        const mcrCustomData = mcrData.customData || {};
-        
-        // Enhanced debug logging for MCR
-        console.log(`🔍 MCR Debug for event ${event.id}:`, {
-          mcrData,
-          mcrCustomData,
-          allKeys: Object.keys(mcrData),
-          customDataKeys: Object.keys(mcrCustomData),
-          hasRoutingPreset: mcrData.routingPreset || mcrData.routing_preset,
-          hasDevices: mcrData.devices || mcrData.מכשירים
-        });
-        
-        // Check Hebrew fields in customData
-        const mcrFields = [
-          mcrCustomData.מקור,
-          mcrCustomData.גיבוי,
-          mcrCustomData.מכשירים,
-          mcrCustomData.ניתובים
-        ].filter(field => field && field.trim() !== '');
-        
-        // Also check root level fields
-        const rootMcrFields = [
-          mcrData.מקור,
-          mcrData.גיבוי,
-          mcrData.מכשירים,
-          mcrData.ניתובים
-        ].filter(field => field && field.trim() !== '');
-        
-        // Check for other MCR data (including at event root)
-        const hasRoutingData = mcrData.routingPreset || mcrData.routing_preset || 
-                              mcrData.routingData?.selectedPreset || event.routingPreset;
-        const hasDevicesData = mcrData.devices || mcrData.devicesData?.primaryDevices?.length > 0 ||
-                              metadata.mcrDevices?.length > 0;
-        const hasCameramanData = mcrCustomData.cameramanData?.length > 0 || mcrData.cameramanData?.length > 0;
-        
-        const totalFields = Math.max(mcrFields.length, rootMcrFields.length);
-        
-        console.log(`🔍 MCR Status calculation:`, {
-          mcrFieldsCount: mcrFields.length,
-          rootMcrFieldsCount: rootMcrFields.length,
-          hasRoutingData,
-          hasDevicesData,
-          hasCameramanData
-        });
-        
-        // Complete: Multiple fields filled
-        if (totalFields >= 4 || (totalFields >= 2 && (hasRoutingData || hasDevicesData))) return 'complete';
-        // Partial: Any field filled
-        if (totalFields > 0 || hasRoutingData || hasDevicesData || hasCameramanData) return 'partial';
-        
-        // Check if notApplicable is true
-        if (mcrCustomData.notApplicable || mcrData.notApplicable) return 'complete';
-        
+      case 'mcr': {
+        // MCR data lives in ActivityRow — read directly from the DB query above.
+        if (!activityRow) return 'empty';
+
+        const filledFields = [
+          activityRow.source,
+          activityRow.backup,
+          activityRow.equipment,
+          activityRow.routing,
+          activityRow.notes,
+        ].filter((f: string | null | undefined) => f && String(f).trim() !== '');
+
+        const hasWarehouseEquipment = (activityRow.warehouseEquipment || []).length > 0;
+
+        if (filledFields.length >= 4 || (filledFields.length >= 2 && hasWarehouseEquipment)) return 'complete';
+        if (filledFields.length > 0 || hasWarehouseEquipment) return 'partial';
         return 'empty';
+      }
 
-      case 'external-broadcasts':
-        // Check all possible data locations
+      case 'external-broadcasts': {
         const externalData = departmentData;
         const externalCustomData = externalData.customData || {};
         
-        // Check multiple data locations (including event root)
         const productionCrew = externalCustomData.productionCrew || 
                               externalData.productionCrew || 
                               externalData.production_crew || 
@@ -201,82 +139,50 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
                              externalData.equipmentList || 
                              externalData.equipment_list || 
                              event.equipment_list || [];
+        const equipmentRequests = externalCustomData.equipmentRequests || 
+                                 externalData.equipmentRequests || [];
+        const hasEquipment = equipmentList.length > 0 || equipmentRequests.length > 0;
         
-        console.log(`🔍 External Broadcasts Debug:`, {
-          externalData,
-          externalCustomData,
-          productionCrewLength: productionCrew.length,
-          equipmentListLength: equipmentList.length,
-          customDataKeys: Object.keys(externalCustomData)
-        });
-        
-        // Check if notApplicable
         if (externalCustomData.notApplicable || externalData.notApplicable) return 'complete';
         
-        // Complete: Both crew and equipment with reasonable amounts
-        if (productionCrew.length >= 2 && equipmentList.length >= 1) return 'complete';
-        // Partial: Either crew or equipment
-        if (productionCrew.length > 0 || equipmentList.length > 0) return 'partial';
+        if (productionCrew.length >= 2 && hasEquipment) return 'complete';
+        if (productionCrew.length > 0 || hasEquipment) return 'partial';
         
         return 'empty';
+      }
 
-      case 'closed-captions':
-        // Check all possible data locations
+      case 'closed-captions': {
         const captionsData = departmentData;
         const captionsCustomData = captionsData.customData || {};
         
-        // Check multiple locations for caption type
         const captionType = captionsCustomData.captionType || 
                            captionsData.captionType || 
                            captionsData.subtitles ||
                            event.subtitles;
         
-        console.log(`🔍 Closed Captions Debug:`, {
-          captionsData,
-          captionType
-        });
-        
-        // Check if notApplicable
         if (captionsCustomData.notApplicable || captionsData.notApplicable) return 'complete';
-        
-        // If there's a caption type that's not None, show as complete
         if (captionType && captionType !== 'None' && captionType !== '') return 'complete';
-        
         return 'empty';
+      }
 
-      case 'warehouse':
-        // Check all possible data locations
+      case 'warehouse': {
         const warehouseData = departmentData;
         const warehouseCustomData = warehouseData.customData || {};
-        
-        // Also check metadata.warehouseData location (for backward compatibility)
         const warehouseDataFromMetadata = metadata.warehouseData || {};
         const warehouseDataFromMetadataCustom = warehouseDataFromMetadata.customData || {};
         
-        // Check multiple locations for SCANNED items (not requested items!)
         const assignedItems = warehouseCustomData.assignedItems || 
                              warehouseData.assignedItems || 
                              warehouseDataFromMetadataCustom.assignedItems ||
                              warehouseDataFromMetadata.assignedItems ||
                              [];
         
-        // Get the actual count of scanned items
         const totalScanned = warehouseCustomData.totalAssigned || 
                             warehouseData.totalAssigned || 
                             warehouseDataFromMetadataCustom.totalAssigned ||
                             warehouseDataFromMetadata.totalAssigned ||
                             assignedItems.length;
         
-        console.log(`🔍 Warehouse Debug:`, {
-          warehouseData,
-          warehouseCustomData,
-          assignedItems,
-          assignedItemsLength: assignedItems.length,
-          totalScanned,
-          totalRequested: warehouseCustomData.totalRequested || warehouseData.totalRequested
-        });
-        
-        // Check if notApplicable
         if (warehouseCustomData.notApplicable || 
             warehouseData.notApplicable || 
             warehouseDataFromMetadataCustom.notApplicable || 
@@ -284,20 +190,16 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
           return 'complete';
         }
         
-        // Complete: 3+ items scanned, Partial: 1-2 items
         if (totalScanned >= 3 || assignedItems.length >= 3) return 'complete';
         if (totalScanned > 0 || assignedItems.length > 0) return 'partial';
-        
         return 'empty';
-
-
+      }
 
       default:
         return 'empty';
     }
   };
 
-  // Function to get color and icon based on status
   const getStatusStyle = (status: DataStatus) => {
     switch (status) {
       case 'complete':
@@ -358,7 +260,6 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
       title: 'Rundown',
       icon: <BarsOutlined className="text-3xl" />,
     },
-    // Removed playout - it's now a bulk action in the main page
   ];
 
   const handleDepartmentClick = (dept: Department) => {
@@ -367,7 +268,6 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
 
   const handleDepartmentModalClose = () => {
     setSelectedDepartment(null);
-    // Refresh parent data when modal closes
     if (onDataSaved) {
       onDataSaved();
     }
@@ -381,18 +281,11 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
 
     setSaving(true);
     try {
-      const departmentData = {
-        department: selectedDepartment,
-        ...data,
-      };
-
-      // Map department-specific data to database fields
       const updateData: any = {};
 
       switch (selectedDepartment) {
         case 'broadcast-array':
-          // Save all broadcast array fields
-          const broadcastArrayData = {
+          const broadcastArraySaveData = {
             שידור: data.שידור,
             מקוםשידור: data.מקוםשידור,
             עורך: data.עורך,
@@ -406,7 +299,7 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
             ...event.metadata,
             departments: {
               ...event.metadata?.departments,
-              'broadcastArray': broadcastArrayData
+              'broadcastArray': broadcastArraySaveData
             }
           };
           break;
@@ -465,9 +358,6 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
           {departments.map((dept) => {
             const status = getDataStatus(dept.key);
             const statusStyle = getStatusStyle(status);
-            
-            // Debug logging
-            console.log(`Department: ${dept.key}, Status: ${status}, Style:`, statusStyle);
             
             return (
               <button
@@ -548,7 +438,6 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
         </div>
       </Modal>
 
-      {/* Department-specific modals */}
       {selectedDepartment === 'broadcast-array' && (
         <BroadcastArrayModal
           visible={true}
@@ -606,4 +495,4 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
   );
 };
 
-export default BroadcastEventModal; 
+export default BroadcastEventModal;

@@ -6,6 +6,7 @@ export const GET_ACTIVITY_ROWS = gql`
       id
       date
       activityName
+      source
       time
       endTime
       equipment
@@ -18,6 +19,18 @@ export const GET_ACTIVITY_ROWS = gql`
       isHidden
       isManual
       broadcastEventId
+      warehouseEquipment {
+        id
+        equipmentId
+        eventName
+        eventId
+        status
+        quantityAssigned
+        assignmentStatus
+        assignedToName
+        assignedBy
+        assignmentNotes
+      }
       createdBy {
         id
         displayName
@@ -25,6 +38,43 @@ export const GET_ACTIVITY_ROWS = gql`
       updatedBy {
         id
         displayName
+      }
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const GET_ACTIVITY_ROW_BY_BROADCAST_EVENT = gql`
+  query GetActivityRowByBroadcastEvent($broadcastEventId: ID!, $date: DateTime!) {
+    activityRowByBroadcastEvent(broadcastEventId: $broadcastEventId, date: $date) {
+      id
+      date
+      activityName
+      source
+      time
+      endTime
+      equipment
+      backup
+      routing
+      channel
+      broadcastType
+      notes
+      status
+      isHidden
+      isManual
+      broadcastEventId
+      warehouseEquipment {
+        id
+        equipmentId
+        eventName
+        eventId
+        status
+        quantityAssigned
+        assignmentStatus
+        assignedToName
+        assignedBy
+        assignmentNotes
       }
       createdAt
       updatedAt

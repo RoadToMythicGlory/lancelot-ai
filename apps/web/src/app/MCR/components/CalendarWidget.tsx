@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Calendar, momentLocalizer, View, Event } from 'react-big-calendar';
 import moment from 'moment';
 import { useQuery, useMutation, gql } from '@apollo/client';
+import { App } from 'antd';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import '../styles/calendar.css';
 import '../styles/calendar-override.css';
@@ -66,29 +67,24 @@ const broadcastTypeColors: Record<BroadcastType, string> = {
 };
 
 export default function CalendarWidget() {
-  const [view, setView] = useState('week');
+  const [view, setView] = useState<string>('week');
   const [selectedEvent, setSelectedEvent] = useState<MCREvent | null>(null);
   const [showEventForm, setShowEventForm] = useState(false);
   const [events, setEvents] = useState<MCREvent[]>([]);
   const [date, setDate] = useState(new Date());
   const [, forceUpdate] = useState({});
-  
-  // Force week view on mount
+  const { message } = App.useApp();
+
   useEffect(() => {
     setView('week');
   }, []);
 
-  // Update calendar every minute to move the current time indicator
   useEffect(() => {
     const timer = setInterval(() => {
       forceUpdate({});
-    }, 60000); // Update every minute
-
+    }, 60000);
     return () => clearInterval(timer);
   }, []);
-  
-  // Debug log
-  console.log('🔴 Current view:', view);
 
   // Calculate date range for queries
   const getDateRange = () => {
@@ -141,17 +137,7 @@ export default function CalendarWidget() {
   const [createMCREvent] = useMutation(CREATE_MCR_EVENT);
   const [updateMCREvent] = useMutation(UPDATE_MCR_EVENT);
 
-  // Combine and format events
   useEffect(() => {
-    console.log('🎯 MCR Calendar - Combining events');
-    console.log('MCR Loading:', mcrLoading, 'Broadcast Loading:', broadcastLoading);
-    console.log('MCR Data:', mcrData);
-    console.log('Broadcast Data:', broadcastData);
-    console.log('MCR Events:', mcrData?.mcrEvents?.length || 0);
-    console.log('Broadcast Events:', broadcastData?.broadcastEvents?.length || 0);
-    console.log('🎯 Current calendar date:', date);
-    console.log('🎯 Current calendar view:', view);
-    
     const combinedEvents: MCREvent[] = [];
     
     // Add MCR events (but not those linked to broadcasts - they'll be handled below)
@@ -170,9 +156,6 @@ export default function CalendarWidget() {
     
     // Add broadcast events
     if (broadcastData?.broadcastEvents) {
-      console.log('🎯 Processing broadcast events, count:', broadcastData.broadcastEvents.length);
-      console.log('🎯 First few broadcast events:', broadcastData.broadcastEvents.slice(0, 3));
-      
       broadcastData.broadcastEvents.forEach((broadcast: any, index: number) => {
         const startDate = new Date(broadcast.startTime);
         const endDate = new Date(broadcast.endTime);
@@ -209,12 +192,6 @@ export default function CalendarWidget() {
           },
         };
         
-        if (index < 5) {
-          console.log(`🎯 Event ${index}: "${eventToAdd.title}"`);
-          console.log(`   Start: ${startDate.toISOString()} (${startDate.toLocaleString('he-IL')})`);
-          console.log(`   End: ${endDate.toISOString()} (${endDate.toLocaleString('he-IL')})`);
-        }
-        
         combinedEvents.push(eventToAdd);
         }
       });
@@ -235,12 +212,10 @@ export default function CalendarWidget() {
           _holidayInfo: holiday,
         } as any);
       });
-    } catch (error) {
-      console.error('Error fetching Jewish holidays:', error);
+    } catch {
+      // Holiday fetch failed silently — non-critical
     }
     
-    console.log('🎯 Combined events total:', combinedEvents.length);
-    console.log('🎯 Sample of final events:', combinedEvents.slice(0, 3));
     setEvents(combinedEvents);
   }, [mcrData, broadcastData, mcrLoading, broadcastLoading, date, view]);
 
@@ -269,8 +244,8 @@ export default function CalendarWidget() {
 
   const handleCreateEvent = (slotInfo: any) => {
     const newEvent: MCREvent = {
-      id: '',  // Empty string for new events
-      title: 'New Event',
+      id: '',
+      title: 'אירוע חדש',
       start: slotInfo.start,
       end: slotInfo.end,
       broadcastType: undefined,
@@ -411,10 +386,7 @@ export default function CalendarWidget() {
               {viewOptions.map((option) => (
                 <button
                   key={option.value}
-                  onClick={() => {
-                    console.log('🔴 Setting view to:', option.value);
-                    setView(option.value);
-                  }}
+                  onClick={() => setView(option.value)}
                   className={`px-4 py-2 rounded-lg font-medium transition-all ${
                     view === option.value
                       ? 'bg-white text-blue-600 shadow-lg transform scale-105'
@@ -473,10 +445,7 @@ export default function CalendarWidget() {
           defaultView='week'
           view={view === 'agenda' ? 'week' : view}
           views={['month', 'week', 'day']}
-          onView={(newView) => {
-            console.log('🔴 Calendar trying to set view to:', newView);
-            setView(newView);
-          }}
+          onView={(newView) => setView(newView)}
           date={date}
           onNavigate={setDate}
           onSelectEvent={handleSelectEvent}
@@ -485,7 +454,7 @@ export default function CalendarWidget() {
           eventPropGetter={eventStyleGetter}
           style={{ height: 'calc(100% - 20px)' }}
           scrollToTime={new Date(1970, 1, 1, 8)}
-          dayLayoutAlgorithm='overlap'
+          dayLayoutAlgorithm='no-overlap'
           showCurrentTime={true}
           messages={{
             today: 'היום',
@@ -521,21 +490,12 @@ export default function CalendarWidget() {
           }}
           onSave={async (updatedEvent) => {
             try {
-              // Check if user is authenticated
               const token = localStorage.getItem('auth-token');
               if (!token) {
-                console.error('❌ No authentication token found');
-                alert('יש להתחבר למערכת כדי לשמור אירועים');
+                message.error('יש להתחבר למערכת כדי לשמור אירועים');
                 window.location.href = '/login';
                 return;
               }
-
-              console.log('📝 Saving MCR event:', {
-                id: updatedEvent.id,
-                title: updatedEvent.title,
-                broadcastType: updatedEvent.broadcastType,
-                hasToken: !!token,
-              });
 
               // Clean the details object to remove __typename and filter out undefined values
               const cleanDetails = updatedEvent.details ? 
@@ -554,18 +514,14 @@ export default function CalendarWidget() {
               const isBroadcastEvent = updatedEvent.id && updatedEvent.id.startsWith('broadcast-');
               
               if (isBroadcastEvent) {
-                // For broadcast events, check if there's already an MCR event
                 const broadcastId = updatedEvent.id.replace('broadcast-', '');
                 const existingMCREvent = mcrData?.mcrEvents?.find((mcrEvent: any) => 
                   mcrEvent.broadcastEventId === broadcastId
                 );
                 
-                // Check if we have the MCR event ID stored in the event object
                 const mcrEventId = (updatedEvent as any)._mcrEventId || existingMCREvent?.id;
                 
                 if (mcrEventId) {
-                  // Update existing MCR event
-                  console.log('📝 Updating existing MCR event for broadcast...');
                   const { data } = await updateMCREvent({
                     variables: {
                       id: mcrEventId,
@@ -583,11 +539,7 @@ export default function CalendarWidget() {
                   if (!data || !data.updateMCREvent) {
                     throw new Error('Update mutation returned no data');
                   }
-                  
-                  console.log('✅ MCR Event updated for broadcast:', data.updateMCREvent);
                 } else {
-                  // Create new MCR event linked to broadcast
-                  console.log('📝 Creating MCR event for broadcast event...');
                   const { data } = await createMCREvent({
                     variables: {
                       input: {
@@ -605,12 +557,8 @@ export default function CalendarWidget() {
                   if (!data || !data.createMCREvent) {
                     throw new Error('Create mutation returned no data');
                   }
-                  
-                  console.log('✅ MCR Event created for broadcast:', data.createMCREvent);
                 }
               } else if (updatedEvent.id && events.find(e => e.id === updatedEvent.id)) {
-                // Update existing event
-                console.log('📝 Updating existing event...');
                 const { data } = await updateMCREvent({
                   variables: {
                     id: updatedEvent.id,
@@ -628,11 +576,7 @@ export default function CalendarWidget() {
                 if (!data || !data.updateMCREvent) {
                   throw new Error('Update mutation returned no data');
                 }
-                
-                console.log('✅ MCR Event updated:', data.updateMCREvent);
             } else {
-                // Create new event
-                console.log('📝 Creating new event...');
                 const { data } = await createMCREvent({
                   variables: {
                     input: {
@@ -649,33 +593,24 @@ export default function CalendarWidget() {
                 if (!data || !data.createMCREvent) {
                   throw new Error('Create mutation returned no data');
                 }
-                
-                console.log('✅ MCR Event created:', data.createMCREvent);
               }
-              
-              // Refetch events to update the calendar
+
               await refetchMCR();
             setShowEventForm(false);
             setSelectedEvent(null);
             } catch (error: any) {
-              console.error('❌ Error saving MCR event:', error);
-              
-              // Check for specific error types
-              if (error.graphQLErrors && error.graphQLErrors.length > 0) {
+              if (error.graphQLErrors?.length > 0) {
                 const graphQLError = error.graphQLErrors[0];
-                console.error('GraphQL Error details:', graphQLError);
-                
                 if (graphQLError.message.includes('createdBy')) {
-                  alert('שגיאת אימות: אנא התחבר מחדש למערכת');
+                  message.error('שגיאת אימות: אנא התחבר מחדש למערכת');
                   window.location.href = '/login';
                 } else {
-                  alert(`שגיאה: ${graphQLError.message}`);
+                  message.error('שגיאה: ' + graphQLError.message);
                 }
               } else if (error.networkError) {
-                console.error('Network Error:', error.networkError);
-                alert('שגיאת רשת. אנא בדוק את החיבור שלך.');
+                message.error('שגיאת רשת. אנא בדוק את החיבור שלך.');
               } else {
-                alert('שגיאה בשמירת האירוע. אנא נסה שנית.');
+                message.error('שגיאה בשמירת האירוע. אנא נסה שנית.');
               }
             }
           }}

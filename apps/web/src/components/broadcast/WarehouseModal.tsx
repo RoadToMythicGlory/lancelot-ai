@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import dayjs from 'dayjs';
 import { Modal, Alert, List, Card, Input, Button, Space, Tag, Row, Col, Badge, Empty, App } from 'antd';
 import { 
   BarcodeOutlined, 
@@ -6,8 +7,10 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   ScanOutlined,
-  SwapRightOutlined
+  SwapRightOutlined,
+  FilePdfOutlined
 } from '@ant-design/icons';
+import WarehousePdfImportModal from '../warehouse/WarehousePdfImportModal';
 import { useQuery, useMutation } from '@apollo/client';
 import { GET_WAREHOUSE_EQUIPMENT, GET_BROADCAST_EVENT, GET_EQUIPMENT_ASSIGNMENTS_BY_EVENT } from '../../graphql/queries';
 import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA, CREATE_EQUIPMENT_ASSIGNMENT, UPDATE_EQUIPMENT_ASSIGNMENT, UPDATE_WAREHOUSE_EQUIPMENT_QUANTITY } from '../../graphql/mutations';
@@ -58,13 +61,13 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
   const [requestedItems, setRequestedItems] = useState<RequestedEquipment[]>([]);
   const [assignedItems, setAssignedItems] = useState<ScannedItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [isPdfImportVisible, setIsPdfImportVisible] = useState(false);
 
   // GraphQL mutation for updating department data
   const [updateDepartmentData] = useMutation(UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA, {
     refetchQueries: ['GetBroadcastEvents', 'GetBroadcastEvent'],
     awaitRefetchQueries: true,
     onCompleted: () => {
-      // console.log('✅ Warehouse data saved successfully');
       if (onDataSaved) {
         onDataSaved();
       }
@@ -108,14 +111,8 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
   });
 
   // Query for warehouse equipment
-  const { data: equipmentData, loading: equipmentLoading, error: equipmentError } = useQuery(GET_WAREHOUSE_EQUIPMENT);
+  const { data: equipmentData, loading: equipmentLoading, error: equipmentError } = useQuery(GET_WAREHOUSE_EQUIPMENT, { skip: !visible });
   const equipment: Equipment[] = equipmentData?.warehouseEquipment || [];
-  
-  // console.log('🔧 Warehouse equipment data:', equipment);
-  // console.log('🔍 Equipment count:', equipment.length);
-  // console.log('📊 Equipment barcodes:', equipment.map(e => e.barcode));
-  // console.log('⏳ Equipment loading:', equipmentLoading);
-  // console.log('❌ Equipment error:', equipmentError);
 
   // Query for broadcast event details
   const { data: eventData } = useQuery(GET_BROADCAST_EVENT, {
@@ -126,29 +123,30 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
   // Extract requested equipment from External Broadcasts department data
   useEffect(() => {
     if (visible && eventData?.broadcastEvent) {
-      // Always use fresh data from the query when available
       const metadata = eventData.broadcastEvent.metadata || {};
       
-      // Check both in customData and directly in department data for external broadcasts
       const externalBroadcastsDept = metadata.departments?.externalBroadcasts || {};
-      const equipmentList = externalBroadcastsDept.customData?.equipmentList || 
-                           externalBroadcastsDept.equipmentList || [];
+      const cd = externalBroadcastsDept.customData || {};
+
+      // Support both old format (equipmentList) and new format (equipmentRequests)
+      const equipmentList: RequestedEquipment[] = cd.equipmentList || externalBroadcastsDept.equipmentList || [];
+      const equipmentRequests: any[] = cd.equipmentRequests || externalBroadcastsDept.equipmentRequests || [];
+
+      let finalRequested = equipmentList;
+      if (finalRequested.length === 0 && equipmentRequests.length > 0) {
+        finalRequested = equipmentRequests.map((req: any) => ({
+          equipmentId: req.equipmentId || req.id || '',
+          quantity: req.count || 0,
+          name: req.categoryLabel || req.category || '',
+          category: req.category || '',
+        }));
+      }
       
-      // Get existing warehouse data - check both customData and direct fields
       const warehouseDept = metadata.departments?.warehouse || {};
       const existingAssigned = warehouseDept.customData?.assignedItems || 
                               warehouseDept.assignedItems || [];
       
-      console.log('📦 Loading equipment data:', {
-        eventId: eventData.broadcastEvent.id,
-        hasMetadata: !!metadata,
-        departments: Object.keys(metadata.departments || {}),
-        warehouseDept,
-        existingAssignedCount: existingAssigned.length,
-        existingAssigned
-      });
-      
-      setRequestedItems(equipmentList);
+      setRequestedItems(finalRequested);
       setAssignedItems(existingAssigned);
     }
   }, [eventData, visible]);
@@ -172,42 +170,12 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
       return;
     }
 
-    // console.log('🔍 Scanning barcode:', trimmedBarcode);
-    // console.log('📦 Available equipment:', equipment.length);
-    // console.log('🔍 Looking for barcode:', `"${trimmedBarcode}"`);
-    // console.log('📊 First 5 equipment items:', equipment.slice(0, 5).map(e => ({
-    //   id: e.id,
-    //   barcode: e.barcode,
-    //   name: e.name
-    // })));
-    
     // Find equipment by barcode (case-insensitive)
     const scannedEquipment = equipment.find(e => 
       e.barcode.toLowerCase() === trimmedBarcode.toLowerCase()
     );
     
-    // console.log('✅ Found equipment:', scannedEquipment);
-    
     if (!scannedEquipment) {
-      // Show similar barcodes for debugging
-      const similarBarcodes = equipment
-        .filter(e => e.barcode.toLowerCase().includes(trimmedBarcode.toLowerCase()))
-        .slice(0, 5);
-      
-      // console.log('❌ Barcode not found. Similar barcodes:', similarBarcodes.map(e => ({
-      //   barcode: e.barcode,
-      //   name: e.name
-      // })));
-      
-      // Also check if the barcode exists but with different case
-      const caseInsensitiveMatch = equipment.find(e => 
-        e.barcode.toLowerCase() === trimmedBarcode.toLowerCase()
-      );
-      
-      if (caseInsensitiveMatch) {
-        // console.log('🔍 Found case-insensitive match:', caseInsensitiveMatch);
-      }
-      
       message.error(`ברקוד "${trimmedBarcode}" לא נמצא במערכת`);
       
       // Show helpful message with available barcodes
@@ -219,16 +187,8 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
       return;
     }
 
-    // Check if this equipment was requested
+    // Check if this equipment was requested (allow scanning any equipment)
     const requestedItem = requestedItems.find(item => item.equipmentId === scannedEquipment.id);
-    
-    if (!requestedItem) {
-      // For now, allow scanning any equipment even if not requested
-      // console.log('⚠️ Equipment not in requested list, but allowing scan');
-      
-      // Don't add to requested items - just continue with scanning
-      // Continue with scanning
-    }
 
     // Check quantity limit - count how many times this equipment has been scanned
     const alreadyScannedCount = assignedItems.filter(item => item.equipmentId === scannedEquipment.id).length;
@@ -273,7 +233,12 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
       
       // Merge with existing history (avoid duplicates)
       const existingBarcodes = new Set(existingHistory.map((h: any) => h.barcode));
-      const uniqueNewEntries = newHistoryEntries.filter(entry => !existingBarcodes.has(entry.barcode));
+      const seenInBatch = new Set<string>();
+      const uniqueNewEntries = newHistoryEntries.filter(entry => {
+        if (existingBarcodes.has(entry.barcode) || seenInBatch.has(entry.barcode)) return false;
+        seenInBatch.add(entry.barcode);
+        return true;
+      });
       const completeHistory = [...existingHistory, ...uniqueNewEntries];
       
       // Prepare the data for saving
@@ -287,8 +252,6 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
           notApplicable: false
         }
       };
-
-      // console.log('📤 Warehouse - Saving data:', departmentData);
 
       // Save to MongoDB
       await updateDepartmentData({
@@ -319,20 +282,16 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
       }, {} as Record<string, ScannedItem[]>);
 
       // Create or update assignment for each equipment type
+      let failureCount = 0;
       for (const [equipmentId, items] of Object.entries(equipmentGroups)) {
-        const equipment = items[0]; // Get equipment info from first item
-        
-        // Check if assignment already exists
         const existingAssignment = existingAssignments.find(
           (assignment: any) => assignment.equipmentId === equipmentId
         );
         
         try {
           if (existingAssignment) {
-            // Calculate quantity difference
             const quantityDifference = items.length - existingAssignment.quantityAssigned;
             
-            // Update existing assignment
             await updateEquipmentAssignment({
               variables: {
                 id: existingAssignment.id,
@@ -345,7 +304,6 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
               }
             });
             
-            // Update equipment quantity if there's a difference
             if (quantityDifference !== 0) {
               await updateEquipmentQuantity({
                 variables: {
@@ -355,7 +313,6 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
               });
             }
           } else {
-            // Create new assignment
             await createEquipmentAssignment({
               variables: {
                 input: {
@@ -371,7 +328,6 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
               }
             });
             
-            // Update equipment quantity (decrease available)
             await updateEquipmentQuantity({
               variables: {
                 id: equipmentId,
@@ -380,12 +336,16 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
             });
           }
         } catch (error) {
-          console.error(`Error assigning equipment ${equipment.name}:`, error);
-          // Continue with other assignments even if one fails
+          console.error(`Error assigning equipment:`, error);
+          failureCount++;
         }
       }
       
-      message.success('הנתונים נשמרו בהצלחה');
+      if (failureCount > 0) {
+        message.warning(`הנתונים נשמרו, אך ${failureCount} שיוכי ציוד נכשלו`);
+      } else {
+        message.success('הנתונים נשמרו בהצלחה');
+      }
       onClose();
     } catch (error) {
       console.error('Error saving warehouse data:', error);
@@ -477,7 +437,7 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
               <strong>אירוע:</strong> {event.title}
             </Col>
             <Col span={12}>
-              <strong>זמן:</strong> {event.תאריך} | {event.שעה}
+              <strong>זמן:</strong> {event.startTime ? dayjs(event.startTime).format('DD/MM/YYYY HH:mm') : '-'}
             </Col>
           </Row>
         </Card>
@@ -490,6 +450,15 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
         showIcon
         className="mb-4"
       />
+
+      <div className="mb-4 text-center">
+        <Button
+          icon={<FilePdfOutlined />}
+          onClick={() => setIsPdfImportVisible(true)}
+        >
+          ייבוא ציוד מ-PDF
+        </Button>
+      </div>
 
       {/* Barcode Scanner Input */}
       <div className="mb-6 text-center">
@@ -526,57 +495,6 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
               </Button>
             </Space.Compact>
             
-            {/* Example barcodes for testing */}
-            {equipment.length > 0 && (
-              <div className="mt-4 text-sm text-gray-500">
-                <div>דוגמאות ברקודים לבדיקה:</div>
-                <div className="mt-1">
-                  {equipment.slice(0, 5).map((eq, idx) => (
-                    <Tag 
-                      key={idx} 
-                      className="cursor-pointer mt-1"
-                      onClick={() => setScannedBarcode(eq.barcode)}
-                    >
-                      {eq.barcode} - {eq.name}
-                    </Tag>
-                  ))}
-                </div>
-                
-                {/* Quick test section */}
-                <div className="mt-4 p-3 bg-gray-100 rounded">
-                  <div className="font-semibold mb-2">בדיקה מהירה:</div>
-                  <Space wrap>
-                    <Button 
-                      size="small" 
-                      onClick={() => {
-                        setScannedBarcode('CAM-000001');
-                        setTimeout(handleBarcodeScan, 100);
-                      }}
-                    >
-                      סרוק CAM-000001
-                    </Button>
-                    <Button 
-                      size="small" 
-                      onClick={() => {
-                        setScannedBarcode('AUD-000426');
-                        setTimeout(handleBarcodeScan, 100);
-                      }}
-                    >
-                      סרוק AUD-000426
-                    </Button>
-                    <Button 
-                      size="small" 
-                      onClick={() => {
-                        setScannedBarcode('INVALID-123');
-                        setTimeout(handleBarcodeScan, 100);
-                      }}
-                    >
-                      סרוק ברקוד לא קיים
-                    </Button>
-                  </Space>
-                </div>
-              </div>
-            )}
           </>
         )}
       </div>
@@ -696,6 +614,17 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
           </Col>
         </Row>
       </Card>
+
+      {/* PDF Import Modal */}
+      <WarehousePdfImportModal
+        visible={isPdfImportVisible}
+        onClose={() => setIsPdfImportVisible(false)}
+        eventId={event.id}
+        eventTitle={event.title}
+        onSuccess={() => {
+          if (onDataSaved) onDataSaved();
+        }}
+      />
     </Modal>
   );
 };

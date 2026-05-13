@@ -1,24 +1,24 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Table, Card, Button, Space, Modal, Tag, Row, Col, Typography, Spin, Alert,
-  Input, DatePicker, Select, Form, Divider, InputNumber, App, Badge, Tabs, List,
-  Popconfirm, Empty, Tooltip
+  Input, Select, Form, Divider, InputNumber, App, Badge, Tabs, List,
+  Popconfirm, Empty, Tooltip, Collapse
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, GlobalOutlined, SearchOutlined,
   LeftOutlined, RightOutlined, ReloadOutlined, ToolOutlined, TeamOutlined,
   VideoCameraOutlined, AudioOutlined, UserOutlined, SaveOutlined,
   CheckCircleOutlined, ExclamationCircleOutlined, CloseCircleOutlined,
-  AppstoreOutlined, CopyOutlined
+  AppstoreOutlined, CopyOutlined, SettingOutlined, MinusCircleOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import isoWeek from 'dayjs/plugin/isoWeek';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { useQuery, useMutation } from '@apollo/client';
-import { GET_BROADCAST_EVENTS, GET_WAREHOUSE_EQUIPMENT, GET_EMPLOYEES_BY_DEPARTMENT, GET_DEPARTMENTS, GET_EXTERNAL_BROADCAST_PRESETS } from '@/graphql/queries';
+import { GET_BROADCAST_EVENTS, GET_EMPLOYEES_BY_DEPARTMENT, GET_DEPARTMENTS, GET_EXTERNAL_BROADCAST_PRESETS } from '@/graphql/queries';
 import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA, CREATE_EXTERNAL_BROADCAST_PRESET, UPDATE_EXTERNAL_BROADCAST_PRESET, DELETE_EXTERNAL_BROADCAST_PRESET } from '@/graphql/mutations';
 
 dayjs.extend(isoWeek);
@@ -28,7 +28,29 @@ dayjs.tz.setDefault('Asia/Jerusalem');
 
 const { Title, Text } = Typography;
 const { Option } = Select;
-const { TabPane } = Tabs;
+
+// ─── Constants ────────────────────────────────────────────
+
+const EQUIPMENT_CATEGORIES: Record<string, string> = {
+  cameras: 'מצלמות',
+  batteries: 'סוללות',
+  liveu_kits: 'ערכות LIVEU',
+  unity_kits: 'ערכות UNITY',
+  monitors: 'מוניטורים',
+  headphones: 'אוזניות',
+  stabilizers: 'מייצבים',
+  cards: 'כרטיסים',
+  adapters: 'מתאמים',
+  matrix_components: 'רכיבי מטריצה',
+  other: 'אחר',
+};
+
+const FIXED_ROLES: Array<{ key: string; label: string; icon: React.ReactNode; deptCode: string }> = [
+  { key: 'cameraman', label: 'צלם', icon: <VideoCameraOutlined />, deptCode: 'CAM' },
+  { key: 'soundman', label: 'סאונדמן', icon: <AudioOutlined />, deptCode: 'SOUND' },
+  { key: 'producer', label: 'מפיק', icon: <UserOutlined />, deptCode: 'PROD' },
+  { key: 'director', label: 'במאי', icon: <UserOutlined />, deptCode: 'DIR' },
+];
 
 // ─── Interfaces ───────────────────────────────────────────
 
@@ -49,14 +71,6 @@ interface BroadcastEvent {
   [key: string]: any;
 }
 
-interface Equipment {
-  id: string;
-  name: string;
-  category: string;
-  brand: string;
-  quantityAvailable: number;
-}
-
 interface Employee {
   id: string;
   firstName: string;
@@ -67,6 +81,30 @@ interface Employee {
   departments?: Array<{ departmentId: string; departmentName: string; roles: string[] }>;
 }
 
+interface CrewAssignment {
+  roleKey: string;
+  roleLabel: string;
+  userId: string;
+  name: string;
+  phone?: string;
+  isCustom: boolean;
+}
+
+interface UnitSetting {
+  unitIndex: number;
+  purpose: string;
+  audioConfig?: string;
+  assignedEquipmentId?: string;
+  assignedEquipmentName?: string;
+}
+
+interface EquipmentRequest {
+  category: string;
+  categoryLabel: string;
+  count: number;
+  unitSettings: UnitSetting[];
+}
+
 interface PresetRole {
   roleKey: string;
   roleLabel: string;
@@ -75,10 +113,10 @@ interface PresetRole {
 }
 
 interface PresetEquipment {
-  equipmentId?: string;
-  name: string;
-  category?: string;
+  category: string;
+  categoryLabel: string;
   count: number;
+  unitSettings?: UnitSetting[];
 }
 
 interface Preset {
@@ -100,10 +138,12 @@ function getExternalBroadcastStatus(event: BroadcastEvent): DataStatus {
   const deptData = event.metadata?.departments?.externalBroadcasts || {};
   const customData = deptData.customData || {};
   if (customData.notApplicable || deptData.notApplicable) return 'complete';
-  const crew = customData.productionCrew || deptData.productionCrew || [];
-  const equip = customData.equipmentList || deptData.equipmentList || [];
-  if (crew.length >= 2 && equip.length >= 1) return 'complete';
-  if (crew.length > 0 || equip.length > 0) return 'partial';
+  const crew: any[] = customData.productionCrew || deptData.productionCrew || [];
+  const equipReqs: any[] = customData.equipmentRequests || deptData.equipmentRequests || [];
+  const equipList: any[] = customData.equipmentList || deptData.equipmentList || [];
+  const hasEquip = equipReqs.length > 0 || equipList.length > 0;
+  if (crew.length >= 2 && hasEquip) return 'complete';
+  if (crew.length > 0 || hasEquip) return 'partial';
   return 'empty';
 }
 
@@ -119,30 +159,31 @@ const statusLabels: Record<DataStatus, string> = {
   empty: 'ריק',
 };
 
-// Fixed production roles matching the existing modal
-const FIXED_ROLES: Array<{ key: string; label: string; icon: React.ReactNode; deptCode: string }> = [
-  { key: 'cameraman', label: 'צלם', icon: <VideoCameraOutlined />, deptCode: 'CAM' },
-  { key: 'soundman', label: 'סאונדמן', icon: <AudioOutlined />, deptCode: 'SOUND' },
-  { key: 'producer', label: 'מפיק', icon: <UserOutlined />, deptCode: 'PROD' },
-  { key: 'director', label: 'במאי', icon: <UserOutlined />, deptCode: 'DIR' },
-];
-
 // ─── Main Component ───────────────────────────────────────
 
 const ExternalBroadcastsPage: React.FC = () => {
-  const { message: messageApi, modal } = App.useApp();
+  const { message: messageApi } = App.useApp();
 
-  // Navigation state
+  // Navigation
   const [currentDate, setCurrentDate] = useState(dayjs());
   const [searchText, setSearchText] = useState('');
 
-  // Selection state
+  // Selection
   const [selectedEvent, setSelectedEvent] = useState<BroadcastEvent | null>(null);
 
-  // Assignment form
-  const [form] = Form.useForm();
-  const [selectedEquipment, setSelectedEquipment] = useState<Array<{ id: string; quantity: number }>>([]);
-  const [customRoles, setCustomRoles] = useState<Array<{ key: string; label: string; assignedIds: string[] }>>([]);
+  // Crew assignments (dynamic)
+  const [crewAssignments, setCrewAssignments] = useState<CrewAssignment[]>([]);
+  const [addCrewModalOpen, setAddCrewModalOpen] = useState(false);
+  const [newCrewRole, setNewCrewRole] = useState<string>('');
+  const [newCrewCustomLabel, setNewCrewCustomLabel] = useState('');
+  const [newCrewUserId, setNewCrewUserId] = useState<string>('');
+  const [newCrewCount, setNewCrewCount] = useState<number>(1);
+
+  // Equipment requests (category-based)
+  const [equipmentRequests, setEquipmentRequests] = useState<EquipmentRequest[]>([]);
+  const [newEquipCategory, setNewEquipCategory] = useState<string>('');
+
+  // Saving
   const [saving, setSaving] = useState(false);
 
   // Preset management
@@ -150,10 +191,7 @@ const ExternalBroadcastsPage: React.FC = () => {
   const [editingPreset, setEditingPreset] = useState<Preset | null>(null);
   const [presetForm] = Form.useForm();
 
-  // Custom role addition
-  const [newRoleName, setNewRoleName] = useState('');
-
-  // Department IDs for fetching employees
+  // Department IDs
   const [departmentIds, setDepartmentIds] = useState<Record<string, string>>({});
 
   // ─── Date range ─────────────────────────────────────────
@@ -171,9 +209,6 @@ const ExternalBroadcastsPage: React.FC = () => {
     pollInterval: 10000,
   });
 
-  const { data: equipmentData } = useQuery(GET_WAREHOUSE_EQUIPMENT);
-  const equipment: Equipment[] = equipmentData?.warehouseEquipment || [];
-
   const { data: departmentsData } = useQuery(GET_DEPARTMENTS);
 
   const { data: presetsData, refetch: refetchPresets } = useQuery(GET_EXTERNAL_BROADCAST_PRESETS, {
@@ -181,7 +216,6 @@ const ExternalBroadcastsPage: React.FC = () => {
   });
   const presets: Preset[] = presetsData?.externalBroadcastPresets || [];
 
-  // Department IDs mapping
   useEffect(() => {
     if (departmentsData?.departments) {
       const map: Record<string, string> = {};
@@ -190,7 +224,7 @@ const ExternalBroadcastsPage: React.FC = () => {
     }
   }, [departmentsData]);
 
-  // Employee queries per role
+  // Employee queries per role department
   const { data: cameramenData } = useQuery(GET_EMPLOYEES_BY_DEPARTMENT, {
     variables: { filter: { departmentId: departmentIds['CAM'], isActive: true } },
     skip: !departmentIds['CAM'],
@@ -208,12 +242,26 @@ const ExternalBroadcastsPage: React.FC = () => {
     skip: !departmentIds['DIR'],
   });
 
-  const employeesByRole: Record<string, Employee[]> = {
+  const employeesByRole: Record<string, Employee[]> = useMemo(() => ({
     cameraman: cameramenData?.users || [],
     soundman: soundmenData?.users || [],
     producer: producersData?.users || [],
     director: directorsData?.users || [],
-  };
+  }), [cameramenData, soundmenData, producersData, directorsData]);
+
+  const allEmployees = useMemo(() => {
+    const seen = new Set<string>();
+    const result: Employee[] = [];
+    Object.values(employeesByRole).forEach(list => {
+      list.forEach(emp => {
+        if (!seen.has(emp.id)) {
+          seen.add(emp.id);
+          result.push(emp);
+        }
+      });
+    });
+    return result;
+  }, [employeesByRole]);
 
   // ─── Mutations ──────────────────────────────────────────
 
@@ -255,47 +303,37 @@ const ExternalBroadcastsPage: React.FC = () => {
 
   useEffect(() => {
     if (!selectedEvent) return;
-    const metadata = selectedEvent.metadata || {};
-    const dept = metadata.departments?.externalBroadcasts || {};
+    const dept = selectedEvent.metadata?.departments?.externalBroadcasts || {};
     const cd = dept.customData || {};
 
-    const equipList = cd.equipmentList || dept.equipmentList || [];
-    const crew = cd.productionCrew || dept.productionCrew || [];
+    // Load crew
+    const crew: any[] = cd.productionCrew || dept.productionCrew || [];
+    setCrewAssignments(crew.map((m: any) => ({
+      roleKey: m.role || m.roleKey || '',
+      roleLabel: m.roleLabel || FIXED_ROLES.find(r => r.key === m.role)?.label || m.role || '',
+      userId: m.userId || '',
+      name: m.name || '',
+      phone: m.phone,
+      isCustom: !FIXED_ROLES.find(r => r.key === (m.role || m.roleKey)),
+    })));
 
-    // Load equipment
-    if (equipList.length > 0) {
-      setSelectedEquipment(equipList.map((item: any) => ({ id: item.equipmentId, quantity: item.quantity })));
+    // Load equipment requests
+    const reqs: any[] = cd.equipmentRequests || dept.equipmentRequests || [];
+    if (reqs.length > 0) {
+      setEquipmentRequests(reqs.map((r: any) => ({
+        category: r.category || '',
+        categoryLabel: r.categoryLabel || EQUIPMENT_CATEGORIES[r.category] || r.category || '',
+        count: r.count || 0,
+        unitSettings: (r.unitSettings || []).map((u: any) => ({
+          unitIndex: u.unitIndex ?? 0,
+          purpose: u.purpose || '',
+          audioConfig: u.audioConfig || '',
+        })),
+      })));
     } else {
-      setSelectedEquipment([]);
+      setEquipmentRequests([]);
     }
-
-    // Load crew into form
-    const formValues: any = {};
-    const customRolesFromData: typeof customRoles = [];
-    const crewByRole = crew.reduce((acc: any, m: any) => {
-      if (!acc[m.role]) acc[m.role] = [];
-      acc[m.role].push(m.userId);
-      return acc;
-    }, {});
-
-    FIXED_ROLES.forEach(r => {
-      if (crewByRole[r.key]) formValues[r.key] = crewByRole[r.key];
-    });
-
-    // Load custom roles
-    Object.keys(crewByRole).forEach(roleKey => {
-      if (!FIXED_ROLES.find(r => r.key === roleKey)) {
-        customRolesFromData.push({
-          key: roleKey,
-          label: roleKey,
-          assignedIds: crewByRole[roleKey],
-        });
-      }
-    });
-
-    form.setFieldsValue(formValues);
-    setCustomRoles(customRolesFromData);
-  }, [selectedEvent, form]);
+  }, [selectedEvent]);
 
   // Keep selectedEvent in sync with live data
   useEffect(() => {
@@ -307,17 +345,97 @@ const ExternalBroadcastsPage: React.FC = () => {
     }
   }, [allEvents]);
 
-  // ─── Equipment handlers ─────────────────────────────────
+  // ─── Crew handlers ─────────────────────────────────────
 
-  const handleEquipmentChange = (equipmentId: string, quantity: number) => {
-    setSelectedEquipment(prev => {
-      const existing = prev.find(e => e.id === equipmentId);
-      if (existing) {
-        if (quantity === 0) return prev.filter(e => e.id !== equipmentId);
-        return prev.map(e => e.id === equipmentId ? { ...e, quantity } : e);
+  const getEmployeesForRole = useCallback((roleKey: string): Employee[] => {
+    return employeesByRole[roleKey] || allEmployees;
+  }, [employeesByRole, allEmployees]);
+
+  const handleAddCrew = () => {
+    const isFixed = FIXED_ROLES.find(r => r.key === newCrewRole);
+    const roleKey = isFixed ? newCrewRole : newCrewCustomLabel.trim().replace(/\s+/g, '_').toLowerCase();
+    const roleLabel = isFixed ? isFixed.label : newCrewCustomLabel.trim();
+
+    if (!roleKey || !roleLabel) {
+      messageApi.warning('יש להזין שם תפקיד');
+      return;
+    }
+
+    let emp: Employee | undefined;
+    if (newCrewUserId) {
+      const employees = getEmployeesForRole(newCrewRole);
+      emp = employees.find(e => e.id === newCrewUserId) || allEmployees.find(e => e.id === newCrewUserId);
+    }
+
+    const count = newCrewUserId ? 1 : Math.max(1, newCrewCount);
+    const newEntries: CrewAssignment[] = Array.from({ length: count }, () => ({
+      roleKey,
+      roleLabel,
+      userId: newCrewUserId || '',
+      name: emp ? (emp.displayName || `${emp.firstName} ${emp.lastName}`) : '',
+      phone: emp?.phone,
+      isCustom: !isFixed,
+    }));
+    setCrewAssignments(prev => [...prev, ...newEntries]);
+
+    setNewCrewRole('');
+    setNewCrewCustomLabel('');
+    setNewCrewUserId('');
+    setNewCrewCount(1);
+    setAddCrewModalOpen(false);
+  };
+
+  const removeCrew = (index: number) => {
+    setCrewAssignments(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // ─── Equipment request handlers ────────────────────────
+
+  const addEquipmentRequest = () => {
+    if (!newEquipCategory) {
+      messageApi.warning('יש לבחור קטגוריה');
+      return;
+    }
+    if (equipmentRequests.find(r => r.category === newEquipCategory)) {
+      messageApi.warning('קטגוריה זו כבר קיימת');
+      return;
+    }
+    setEquipmentRequests(prev => [...prev, {
+      category: newEquipCategory,
+      categoryLabel: EQUIPMENT_CATEGORIES[newEquipCategory] || newEquipCategory,
+      count: 1,
+      unitSettings: [{ unitIndex: 0, purpose: '', audioConfig: '' }],
+    }]);
+    setNewEquipCategory('');
+  };
+
+  const updateEquipmentCount = (category: string, count: number) => {
+    setEquipmentRequests(prev => prev.map(req => {
+      if (req.category !== category) return req;
+      const newSettings = [...req.unitSettings];
+      if (count > newSettings.length) {
+        for (let i = newSettings.length; i < count; i++) {
+          newSettings.push({ unitIndex: i, purpose: '', audioConfig: '' });
+        }
+      } else {
+        newSettings.length = count;
       }
-      return [...prev, { id: equipmentId, quantity }];
-    });
+      return { ...req, count, unitSettings: newSettings };
+    }));
+  };
+
+  const updateUnitSetting = (category: string, unitIndex: number, field: 'purpose' | 'audioConfig', value: string) => {
+    setEquipmentRequests(prev => prev.map(req => {
+      if (req.category !== category) return req;
+      const newSettings = req.unitSettings.map(u =>
+        u.unitIndex === unitIndex ? { ...u, [field]: value } : u
+      );
+      return { ...req, unitSettings: newSettings };
+    }));
+  };
+
+  const removeEquipmentRequest = (category: string) => {
+    setEquipmentRequests(prev => prev.filter(r => r.category !== category));
   };
 
   // ─── Save handler ───────────────────────────────────────
@@ -326,43 +444,25 @@ const ExternalBroadcastsPage: React.FC = () => {
     if (!selectedEvent) return;
     setSaving(true);
     try {
-      const values = form.getFieldsValue();
-      const productionCrew: any[] = [];
+      const productionCrew = crewAssignments.map(c => ({
+        role: c.roleKey,
+        roleLabel: c.roleLabel,
+        userId: c.userId,
+        name: c.name,
+        phone: c.phone,
+        isCustom: c.isCustom,
+      }));
 
-      // Fixed roles
-      FIXED_ROLES.forEach(role => {
-        const ids = values[role.key];
-        if (ids?.length) {
-          ids.forEach((id: string) => {
-            const emp = employeesByRole[role.key]?.find(e => e.id === id);
-            if (emp) {
-              productionCrew.push({
-                role: role.key,
-                userId: id,
-                name: emp.displayName || `${emp.firstName} ${emp.lastName}`,
-                phone: emp.phone,
-              });
-            }
-          });
-        }
-      });
-
-      // Custom roles
-      customRoles.forEach(cr => {
-        cr.assignedIds.forEach(id => {
-          productionCrew.push({ role: cr.key, userId: id, name: id });
-        });
-      });
-
-      const equipmentList = selectedEquipment.map(item => {
-        const eq = equipment.find(e => e.id === item.id);
-        return {
-          equipmentId: item.id,
-          quantity: item.quantity,
-          name: eq?.name || '',
-          category: eq?.category || '',
-        };
-      });
+      const eqRequests = equipmentRequests.map(r => ({
+        category: r.category,
+        categoryLabel: r.categoryLabel,
+        count: r.count,
+        unitSettings: r.unitSettings.map(u => ({
+          unitIndex: u.unitIndex,
+          purpose: u.purpose,
+          audioConfig: u.audioConfig || undefined,
+        })),
+      }));
 
       await updateDepartmentData({
         variables: {
@@ -371,7 +471,7 @@ const ExternalBroadcastsPage: React.FC = () => {
           data: {
             customData: {
               productionCrew,
-              equipmentList,
+              equipmentRequests: eqRequests,
               notApplicable: false,
             },
           },
@@ -409,21 +509,34 @@ const ExternalBroadcastsPage: React.FC = () => {
     }
   };
 
-  // ─── Apply preset to current event form ─────────────────
+  // ─── Apply preset ───────────────────────────────────────
 
   const applyPreset = (preset: Preset) => {
-    // Apply equipment
-    const newEquip = preset.equipment.map(pe => ({
-      id: pe.equipmentId || '',
-      quantity: pe.count,
-    })).filter(e => e.id);
-    setSelectedEquipment(newEquip);
+    // Apply crew roles as empty slots (no specific people)
+    const newCrew: CrewAssignment[] = [];
+    preset.roles.forEach(r => {
+      for (let i = 0; i < r.count; i++) {
+        newCrew.push({
+          roleKey: r.roleKey,
+          roleLabel: r.roleLabel,
+          userId: '',
+          name: '',
+          isCustom: r.isCustom,
+        });
+      }
+    });
+    setCrewAssignments(newCrew);
 
-    // Apply custom roles
-    const newCustom = preset.roles
-      .filter(r => r.isCustom)
-      .map(r => ({ key: r.roleKey, label: r.roleLabel, assignedIds: [] as string[] }));
-    setCustomRoles(newCustom);
+    // Apply equipment requests with settings
+    const newEquip: EquipmentRequest[] = preset.equipment.map(pe => ({
+      category: pe.category,
+      categoryLabel: pe.categoryLabel,
+      count: pe.count,
+      unitSettings: pe.unitSettings?.length
+        ? pe.unitSettings.map(u => ({ unitIndex: u.unitIndex, purpose: u.purpose || '', audioConfig: u.audioConfig || '' }))
+        : Array.from({ length: pe.count }, (_, i) => ({ unitIndex: i, purpose: '', audioConfig: '' })),
+    }));
+    setEquipmentRequests(newEquip);
 
     messageApi.success(`פריסט "${preset.name}" הוחל בהצלחה`);
   };
@@ -433,11 +546,7 @@ const ExternalBroadcastsPage: React.FC = () => {
   const openPresetModal = (preset?: Preset) => {
     setEditingPreset(preset || null);
     if (preset) {
-      presetForm.setFieldsValue({
-        name: preset.name,
-        description: preset.description,
-        tags: preset.tags,
-      });
+      presetForm.setFieldsValue({ name: preset.name, description: preset.description, tags: preset.tags });
     } else {
       presetForm.resetFields();
     }
@@ -447,33 +556,32 @@ const ExternalBroadcastsPage: React.FC = () => {
   const handleSavePreset = async () => {
     try {
       const values = await presetForm.validateFields();
-      const formValues = form.getFieldsValue();
 
-      const roles: PresetRole[] = FIXED_ROLES.map(r => ({
-        roleKey: r.key,
-        roleLabel: r.label,
-        count: formValues[r.key]?.length || 0,
-        isCustom: false,
-      })).filter(r => r.count > 0);
-
-      customRoles.forEach(cr => {
-        roles.push({
-          roleKey: cr.key,
-          roleLabel: cr.label,
-          count: cr.assignedIds.length || 1,
-          isCustom: true,
-        });
+      // Build roles from current crew assignments
+      const roleCounts: Record<string, { label: string; count: number; isCustom: boolean }> = {};
+      crewAssignments.forEach(c => {
+        if (!roleCounts[c.roleKey]) {
+          roleCounts[c.roleKey] = { label: c.roleLabel, count: 0, isCustom: c.isCustom };
+        }
+        roleCounts[c.roleKey].count++;
       });
+      const roles: PresetRole[] = Object.entries(roleCounts).map(([key, v]) => ({
+        roleKey: key,
+        roleLabel: v.label,
+        count: v.count,
+        isCustom: v.isCustom,
+      }));
 
-      const presetEquipment: PresetEquipment[] = selectedEquipment.map(item => {
-        const eq = equipment.find(e => e.id === item.id);
-        return {
-          equipmentId: item.id,
-          name: eq?.name || '',
-          category: eq?.category || '',
-          count: item.quantity,
-        };
-      });
+      const presetEquipment: PresetEquipment[] = equipmentRequests.map(r => ({
+        category: r.category,
+        categoryLabel: r.categoryLabel,
+        count: r.count,
+        unitSettings: r.unitSettings.map(u => ({
+          unitIndex: u.unitIndex,
+          purpose: u.purpose,
+          audioConfig: u.audioConfig || undefined,
+        })),
+      }));
 
       const input = {
         name: values.name,
@@ -509,32 +617,6 @@ const ExternalBroadcastsPage: React.FC = () => {
       messageApi.error(`שגיאה במחיקת פריסט: ${err.message}`);
     }
   };
-
-  // ─── Custom role handlers ───────────────────────────────
-
-  const addCustomRole = () => {
-    if (!newRoleName.trim()) return;
-    const key = newRoleName.trim().replace(/\s+/g, '_').toLowerCase();
-    if (customRoles.find(r => r.key === key) || FIXED_ROLES.find(r => r.key === key)) {
-      messageApi.warning('תפקיד זה כבר קיים');
-      return;
-    }
-    setCustomRoles(prev => [...prev, { key, label: newRoleName.trim(), assignedIds: [] }]);
-    setNewRoleName('');
-  };
-
-  const removeCustomRole = (key: string) => {
-    setCustomRoles(prev => prev.filter(r => r.key !== key));
-  };
-
-  // ─── Render helpers ─────────────────────────────────────
-
-  const renderEmployeeOption = (emp: Employee) => (
-    <Option key={emp.id} value={emp.id}>
-      {emp.displayName || `${emp.firstName} ${emp.lastName}`}
-      {emp.systemRole && <span className="text-gray-500 text-sm mr-2"> - {emp.systemRole}</span>}
-    </Option>
-  );
 
   // ─── Event list columns ─────────────────────────────────
 
@@ -594,58 +676,16 @@ const ExternalBroadcastsPage: React.FC = () => {
     },
   ];
 
-  // ─── Equipment columns for assignment editor ────────────
+  // ─── Crew list grouped by role ──────────────────────────
 
-  const equipmentColumns = [
-    {
-      title: 'ציוד',
-      dataIndex: 'name',
-      key: 'name',
-      render: (name: string, record: Equipment) => (
-        <Space>
-          <ToolOutlined />
-          <span>{name}</span>
-          <Tag color="blue">{record.brand}</Tag>
-        </Space>
-      ),
-    },
-    {
-      title: 'קטגוריה',
-      dataIndex: 'category',
-      key: 'category',
-      filters: [
-        { text: 'מצלמות', value: 'camera' },
-        { text: 'אודיו', value: 'audio' },
-        { text: 'תאורה', value: 'lighting' },
-        { text: 'אחר', value: 'other' },
-      ],
-      onFilter: (value: any, record: Equipment) => record.category === value,
-    },
-    {
-      title: 'זמין',
-      dataIndex: 'quantityAvailable',
-      key: 'quantityAvailable',
-      render: (avail: number) => (
-        <Tag color={avail > 0 ? 'green' : 'red'}>{avail} יחידות</Tag>
-      ),
-    },
-    {
-      title: 'כמות',
-      key: 'quantity',
-      render: (_: any, record: Equipment) => {
-        const sel = selectedEquipment.find(e => e.id === record.id);
-        return (
-          <InputNumber
-            min={0}
-            max={record.quantityAvailable}
-            value={sel?.quantity || 0}
-            onChange={v => handleEquipmentChange(record.id, v || 0)}
-            disabled={record.quantityAvailable === 0}
-          />
-        );
-      },
-    },
-  ];
+  const crewByRole = useMemo(() => {
+    const grouped: Record<string, CrewAssignment[]> = {};
+    crewAssignments.forEach(c => {
+      if (!grouped[c.roleKey]) grouped[c.roleKey] = [];
+      grouped[c.roleKey].push(c);
+    });
+    return grouped;
+  }, [crewAssignments]);
 
   // ─── Render ─────────────────────────────────────────────
 
@@ -747,12 +787,8 @@ const ExternalBroadcastsPage: React.FC = () => {
                     })()}
                   </Space>
                   <Space>
-                    <Button onClick={handleNotApplicable} loading={saving}>
-                      לא עבורנו
-                    </Button>
-                    <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={saving}>
-                      שמור
-                    </Button>
+                    <Button onClick={handleNotApplicable} loading={saving}>לא עבורנו</Button>
+                    <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={saving}>שמור</Button>
                   </Space>
                 </div>
               }
@@ -774,40 +810,24 @@ const ExternalBroadcastsPage: React.FC = () => {
               {/* Presets bar */}
               <Card size="small" style={{ marginBottom: 16 }}>
                 <Row gutter={8} align="middle">
-                  <Col>
-                    <Text strong>פריסטים:</Text>
-                  </Col>
+                  <Col><Text strong>פריסטים:</Text></Col>
                   {presets.map(p => (
                     <Col key={p.id}>
-                      <Tooltip title={p.description || `${p.roles.length} תפקידים, ${p.equipment.length} ציוד`}>
-                        <Button
-                          size="small"
-                          icon={<CopyOutlined />}
-                          onClick={() => applyPreset(p)}
-                        >
+                      <Tooltip title={p.description || `${p.roles.length} תפקידים, ${p.equipment.length} קטגוריות ציוד`}>
+                        <Button size="small" icon={<CopyOutlined />} onClick={() => applyPreset(p)}>
                           {p.name}
                         </Button>
                       </Tooltip>
                     </Col>
                   ))}
                   <Col>
-                    <Button
-                      size="small"
-                      type="dashed"
-                      icon={<PlusOutlined />}
-                      onClick={() => openPresetModal()}
-                    >
+                    <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={() => openPresetModal()}>
                       שמור כפריסט
                     </Button>
                   </Col>
                   {presets.length > 0 && (
                     <Col>
-                      <Button
-                        size="small"
-                        type="link"
-                        icon={<EditOutlined />}
-                        onClick={() => openPresetModal(presets[0])}
-                      >
+                      <Button size="small" type="link" icon={<EditOutlined />} onClick={() => openPresetModal(presets[0])}>
                         ניהול
                       </Button>
                     </Col>
@@ -815,110 +835,270 @@ const ExternalBroadcastsPage: React.FC = () => {
                 </Row>
               </Card>
 
-              <Tabs defaultActiveKey="crew">
-                <TabPane tab={<span><TeamOutlined /> צוות הפקה</span>} key="crew">
-                  <Form form={form} layout="vertical">
-                    <Row gutter={[16, 16]}>
-                      {FIXED_ROLES.map(role => (
-                        <Col key={role.key} xs={24} sm={12}>
-                          <Form.Item
-                            name={role.key}
-                            label={<Space>{role.icon}{role.label}</Space>}
-                          >
-                            <Select
-                              mode="multiple"
-                              placeholder={`בחר ${role.label}`}
-                              loading={!employeesByRole[role.key]?.length}
-                              notFoundContent={`אין ${role.label}ים זמינים`}
-                              filterOption={(input, option) => {
-                                const emp = employeesByRole[role.key]?.find(e => e.id === option?.value);
-                                if (!emp) return false;
-                                const name = emp.displayName || `${emp.firstName} ${emp.lastName}`;
-                                return name.toLowerCase().includes(input.toLowerCase());
-                              }}
+              <Tabs
+                defaultActiveKey="crew"
+                items={[
+                  {
+                    key: 'crew',
+                    label: <span><TeamOutlined /> צוות הפקה ({crewAssignments.length})</span>,
+                    children: (
+                      <div>
+                        {/* Crew list grouped by role */}
+                        {Object.entries(crewByRole).length === 0 && (
+                          <Empty description="לא הוקצו אנשי צוות" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                        )}
+
+                        {Object.entries(crewByRole).map(([roleKey, members]) => {
+                          const fixedRole = FIXED_ROLES.find(r => r.key === roleKey);
+                          return (
+                            <Card key={roleKey} size="small" style={{ marginBottom: 8 }}
+                              title={
+                                <Space>
+                                  {fixedRole?.icon || <UserOutlined />}
+                                  <Text strong>{members[0]?.roleLabel || roleKey}</Text>
+                                  <Badge count={members.length} style={{ backgroundColor: '#1890ff' }} />
+                                </Space>
+                              }
                             >
-                              {employeesByRole[role.key]?.map(renderEmployeeOption)}
-                            </Select>
-                          </Form.Item>
-                        </Col>
-                      ))}
-                    </Row>
-
-                    {/* Custom roles */}
-                    <Divider orientation="right">תפקידים מותאמים אישית</Divider>
-
-                    <Row gutter={[16, 16]}>
-                      {customRoles.map(cr => (
-                        <Col key={cr.key} xs={24} sm={12}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                            <Text strong>{cr.label}</Text>
-                            <Button
-                              type="text"
-                              danger
-                              size="small"
-                              icon={<DeleteOutlined />}
-                              onClick={() => removeCustomRole(cr.key)}
-                            />
-                          </div>
-                          <Input
-                            placeholder="שמות / מזהים מופרדים בפסיקים"
-                            value={cr.assignedIds.join(', ')}
-                            onChange={e => {
-                              const ids = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
-                              setCustomRoles(prev =>
-                                prev.map(r => r.key === cr.key ? { ...r, assignedIds: ids } : r)
-                              );
-                            }}
-                          />
-                        </Col>
-                      ))}
-                    </Row>
-
-                    <Row gutter={8} style={{ marginTop: 12 }}>
-                      <Col flex="auto">
-                        <Input
-                          placeholder="שם התפקיד החדש (למשל: רחפן, גריפ)"
-                          value={newRoleName}
-                          onChange={e => setNewRoleName(e.target.value)}
-                          onPressEnter={addCustomRole}
-                        />
-                      </Col>
-                      <Col>
-                        <Button icon={<PlusOutlined />} onClick={addCustomRole}>
-                          הוסף תפקיד
-                        </Button>
-                      </Col>
-                    </Row>
-                  </Form>
-                </TabPane>
-
-                <TabPane tab={<span><ToolOutlined /> ציוד נדרש</span>} key="equipment">
-                  <Table
-                    columns={equipmentColumns}
-                    dataSource={equipment}
-                    rowKey="id"
-                    size="small"
-                    pagination={{ pageSize: 10 }}
-                  />
-
-                  {selectedEquipment.length > 0 && (
-                    <Card title="סיכום ציוד נבחר" size="small" style={{ marginTop: 16 }}>
-                      <Space wrap>
-                        {selectedEquipment.map(item => {
-                          const eq = equipment.find(e => e.id === item.id);
-                          return eq ? (
-                            <Tag key={item.id} color="orange">{eq.name} x{item.quantity}</Tag>
-                          ) : null;
+                              {members.map((member, idx) => {
+                                const globalIdx = crewAssignments.indexOf(member);
+                                return (
+                                  <div key={globalIdx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 0', borderBottom: idx < members.length - 1 ? '1px solid #f0f0f0' : undefined }}>
+                                    <Space>
+                                      <UserOutlined />
+                                      {member.userId ? (
+                                        <Text>{member.name}</Text>
+                                      ) : (
+                                        <Text type="secondary" italic>לא הוקצה</Text>
+                                      )}
+                                      {member.phone && <Text type="secondary" style={{ fontSize: 12 }}>{member.phone}</Text>}
+                                    </Space>
+                                    <Button type="text" danger size="small" icon={<MinusCircleOutlined />} onClick={() => removeCrew(globalIdx)} />
+                                  </div>
+                                );
+                              })}
+                            </Card>
+                          );
                         })}
-                      </Space>
-                    </Card>
-                  )}
-                </TabPane>
-              </Tabs>
+
+                        <Button
+                          type="dashed"
+                          icon={<PlusOutlined />}
+                          onClick={() => setAddCrewModalOpen(true)}
+                          style={{ width: '100%', marginTop: 12 }}
+                        >
+                          הוסף איש צוות
+                        </Button>
+                      </div>
+                    ),
+                  },
+                  {
+                    key: 'equipment',
+                    label: <span><ToolOutlined /> ציוד נדרש ({equipmentRequests.reduce((s, r) => s + r.count, 0)})</span>,
+                    children: (
+                      <div>
+                        {/* Add equipment request */}
+                        <Row gutter={8} style={{ marginBottom: 16 }}>
+                          <Col flex="auto">
+                            <Select
+                              placeholder="בחר קטגוריית ציוד"
+                              value={newEquipCategory || undefined}
+                              onChange={setNewEquipCategory}
+                              style={{ width: '100%' }}
+                              showSearch
+                              filterOption={(input, option) =>
+                                (option?.children as unknown as string)?.includes(input) ?? false
+                              }
+                            >
+                              {Object.entries(EQUIPMENT_CATEGORIES)
+                                .filter(([cat]) => !equipmentRequests.find(r => r.category === cat))
+                                .map(([cat, label]) => (
+                                  <Option key={cat} value={cat}>{label}</Option>
+                                ))}
+                            </Select>
+                          </Col>
+                          <Col>
+                            <Button icon={<PlusOutlined />} onClick={addEquipmentRequest}>הוסף</Button>
+                          </Col>
+                        </Row>
+
+                        {equipmentRequests.length === 0 && (
+                          <Empty description="לא הוגדרו דרישות ציוד" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                        )}
+
+                        {/* Equipment request cards with settings map */}
+                        {equipmentRequests.map(req => (
+                          <Card
+                            key={req.category}
+                            size="small"
+                            style={{ marginBottom: 12 }}
+                            title={
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <Space>
+                                  <ToolOutlined />
+                                  <Text strong>{req.categoryLabel}</Text>
+                                </Space>
+                                <Space>
+                                  <Text type="secondary">כמות:</Text>
+                                  <InputNumber
+                                    min={1}
+                                    max={50}
+                                    value={req.count}
+                                    onChange={v => updateEquipmentCount(req.category, v || 1)}
+                                    size="small"
+                                  />
+                                  <Button
+                                    type="text"
+                                    danger
+                                    size="small"
+                                    icon={<DeleteOutlined />}
+                                    onClick={() => removeEquipmentRequest(req.category)}
+                                  />
+                                </Space>
+                              </div>
+                            }
+                          >
+                            <Collapse
+                              ghost
+                              items={[{
+                                key: 'settings',
+                                label: (
+                                  <Space>
+                                    <SettingOutlined />
+                                    <Text type="secondary">מפת הגדרות ({req.unitSettings.filter(u => u.purpose).length}/{req.count})</Text>
+                                  </Space>
+                                ),
+                                children: (
+                                  <div>
+                                    {req.unitSettings.map((unit, idx) => (
+                                      <Row key={idx} gutter={8} style={{ marginBottom: 8, alignItems: 'center' }}>
+                                        <Col style={{ width: 40 }}>
+                                          <Tag>{idx + 1}</Tag>
+                                        </Col>
+                                        <Col flex="auto">
+                                          <Input
+                                            placeholder="תפקיד / ייעוד"
+                                            value={unit.purpose}
+                                            onChange={e => updateUnitSetting(req.category, unit.unitIndex, 'purpose', e.target.value)}
+                                            size="small"
+                                          />
+                                        </Col>
+                                        {req.category === 'cameras' && (
+                                          <Col flex="auto">
+                                            <Input
+                                              placeholder="הגדרת אודיו"
+                                              prefix={<AudioOutlined />}
+                                              value={unit.audioConfig || ''}
+                                              onChange={e => updateUnitSetting(req.category, unit.unitIndex, 'audioConfig', e.target.value)}
+                                              size="small"
+                                            />
+                                          </Col>
+                                        )}
+                                      </Row>
+                                    ))}
+                                  </div>
+                                ),
+                              }]}
+                            />
+                          </Card>
+                        ))}
+
+                        {/* Summary */}
+                        {equipmentRequests.length > 0 && (
+                          <Card title="סיכום דרישות ציוד" size="small" style={{ marginTop: 16 }}>
+                            <Space wrap>
+                              {equipmentRequests.map(r => (
+                                <Tag key={r.category} color="orange">{r.categoryLabel} x{r.count}</Tag>
+                              ))}
+                            </Space>
+                          </Card>
+                        )}
+                      </div>
+                    ),
+                  },
+                ]}
+              />
             </Card>
           )}
         </Col>
       </Row>
+
+      {/* ─── Add Crew Member Modal ─── */}
+      <Modal
+        title="הוסף איש צוות"
+        open={addCrewModalOpen}
+        onCancel={() => { setAddCrewModalOpen(false); setNewCrewRole(''); setNewCrewCustomLabel(''); setNewCrewUserId(''); setNewCrewCount(1); }}
+        onOk={handleAddCrew}
+        okText="הוסף"
+        cancelText="ביטול"
+      >
+        <Form layout="vertical">
+          <Form.Item label="תפקיד">
+            <Select
+              placeholder="בחר תפקיד"
+              value={newCrewRole || undefined}
+              onChange={v => { setNewCrewRole(v); setNewCrewCustomLabel(''); setNewCrewUserId(''); }}
+            >
+              {FIXED_ROLES.map(r => (
+                <Option key={r.key} value={r.key}>
+                  <Space>{r.icon}{r.label}</Space>
+                </Option>
+              ))}
+              <Option value="__custom__">
+                <Space><EditOutlined />תפקיד מותאם אישית</Space>
+              </Option>
+            </Select>
+          </Form.Item>
+
+          {newCrewRole === '__custom__' && (
+            <Form.Item label="שם התפקיד">
+              <Input
+                placeholder="למשל: רחפן, גריפ, עוזר במאי"
+                value={newCrewCustomLabel}
+                onChange={e => setNewCrewCustomLabel(e.target.value)}
+              />
+            </Form.Item>
+          )}
+
+          <Form.Item label="איש צוות (אופציונלי - השאר ריק ליצירת משבצת פנויה)">
+            <Select
+              placeholder="בחר איש צוות או השאר ריק"
+              value={newCrewUserId || undefined}
+              onChange={setNewCrewUserId}
+              allowClear
+              showSearch
+              filterOption={(input, option) => {
+                const label = option?.children as unknown as string;
+                return typeof label === 'string' && label.toLowerCase().includes(input.toLowerCase());
+              }}
+            >
+              {(newCrewRole && newCrewRole !== '__custom__'
+                ? getEmployeesForRole(newCrewRole)
+                : allEmployees
+              ).map(emp => (
+                <Option key={emp.id} value={emp.id}>
+                  {emp.displayName || `${emp.firstName} ${emp.lastName}`}
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+
+          {!newCrewUserId && (
+            <Form.Item label="כמות משבצות">
+              <InputNumber
+                min={1}
+                max={20}
+                value={newCrewCount}
+                onChange={v => setNewCrewCount(v || 1)}
+                style={{ width: '100%' }}
+              />
+              <Text type="secondary" style={{ fontSize: 12, marginTop: 4, display: 'block' }}>
+                ניתן להוסיף מספר משבצות ריקות בבת אחת (למשל 5 צלמים)
+              </Text>
+            </Form.Item>
+          )}
+        </Form>
+      </Modal>
 
       {/* ─── Preset Management Modal ─── */}
       <Modal
@@ -949,32 +1129,25 @@ const ExternalBroadcastsPage: React.FC = () => {
           <Card size="small" style={{ marginBottom: 16 }}>
             <Text type="secondary">צוות:</Text>
             <div style={{ marginTop: 8 }}>
-              {FIXED_ROLES.map(r => {
-                const count = form.getFieldValue(r.key)?.length || 0;
-                return count > 0 ? (
-                  <Tag key={r.key} color="blue">{r.label}: {count}</Tag>
-                ) : null;
-              })}
-              {customRoles.map(cr => (
-                <Tag key={cr.key} color="purple">{cr.label}: {cr.assignedIds.length || 1}</Tag>
+              {Object.entries(crewByRole).map(([roleKey, members]) => (
+                <Tag key={roleKey} color={members[0]?.isCustom ? 'purple' : 'blue'}>
+                  {members[0]?.roleLabel}: {members.length}
+                </Tag>
               ))}
-              {!FIXED_ROLES.some(r => (form.getFieldValue(r.key)?.length || 0) > 0) && customRoles.length === 0 && (
-                <Text type="secondary">אין תפקידים</Text>
-              )}
+              {crewAssignments.length === 0 && <Text type="secondary">אין צוות</Text>}
             </div>
           </Card>
 
           <Card size="small" style={{ marginBottom: 16 }}>
             <Text type="secondary">ציוד:</Text>
             <div style={{ marginTop: 8 }}>
-              {selectedEquipment.length > 0 ? (
+              {equipmentRequests.length > 0 ? (
                 <Space wrap>
-                  {selectedEquipment.map(item => {
-                    const eq = equipment.find(e => e.id === item.id);
-                    return eq ? (
-                      <Tag key={item.id} color="orange">{eq.name} x{item.quantity}</Tag>
-                    ) : null;
-                  })}
+                  {equipmentRequests.map(r => (
+                    <Tooltip key={r.category} title={r.unitSettings.filter(u => u.purpose).length > 0 ? `${r.unitSettings.filter(u => u.purpose).length} יחידות עם הגדרות` : undefined}>
+                      <Tag color="orange">{r.categoryLabel} x{r.count}</Tag>
+                    </Tooltip>
+                  ))}
                 </Space>
               ) : (
                 <Text type="secondary">אין ציוד</Text>
@@ -986,13 +1159,11 @@ const ExternalBroadcastsPage: React.FC = () => {
             <Button type="primary" htmlType="submit">
               {editingPreset ? 'עדכן פריסט' : 'שמור פריסט'}
             </Button>
-            <Button onClick={() => { setPresetModalOpen(false); presetForm.resetFields(); }}>
-              ביטול
-            </Button>
+            <Button onClick={() => { setPresetModalOpen(false); presetForm.resetFields(); }}>ביטול</Button>
           </Space>
         </Form>
 
-        {/* Existing presets list for management */}
+        {/* Existing presets list */}
         {presets.length > 0 && (
           <>
             <Divider>פריסטים קיימים</Divider>
@@ -1009,18 +1180,10 @@ const ExternalBroadcastsPage: React.FC = () => {
                       icon={<EditOutlined />}
                       onClick={() => {
                         setEditingPreset(p);
-                        presetForm.setFieldsValue({
-                          name: p.name,
-                          description: p.description,
-                          tags: p.tags,
-                        });
+                        presetForm.setFieldsValue({ name: p.name, description: p.description, tags: p.tags });
                       }}
                     />,
-                    <Popconfirm
-                      key="delete"
-                      title="למחוק את הפריסט?"
-                      onConfirm={() => handleDeletePreset(p.id)}
-                    >
+                    <Popconfirm key="delete" title="למחוק את הפריסט?" onConfirm={() => handleDeletePreset(p.id)}>
                       <Button type="link" size="small" danger icon={<DeleteOutlined />} />
                     </Popconfirm>,
                   ]}
@@ -1028,12 +1191,12 @@ const ExternalBroadcastsPage: React.FC = () => {
                   <List.Item.Meta
                     title={p.name}
                     description={
-                      <Space size={4}>
+                      <Space size={4} wrap>
                         {p.roles.map(r => (
-                          <Tag key={r.roleKey} size="small">{r.roleLabel}: {r.count}</Tag>
+                          <Tag key={r.roleKey}>{r.roleLabel}: {r.count}</Tag>
                         ))}
                         {p.equipment.map((e, i) => (
-                          <Tag key={i} color="orange" size="small">{e.name}: {e.count}</Tag>
+                          <Tag key={i} color="orange">{e.categoryLabel} x{e.count}</Tag>
                         ))}
                       </Space>
                     }

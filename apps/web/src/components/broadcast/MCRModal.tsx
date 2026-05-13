@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Form, Input, Button, Card, Row, Col, Divider, Typography } from 'antd';
+import { Modal, Form, Input, Button, Card, Row, Col, Divider, Typography, Select, Tag, App } from 'antd';
 import { 
   ControlOutlined,
   VideoCameraOutlined,
-  UserOutlined
+  UserOutlined,
+  ToolOutlined
 } from '@ant-design/icons';
 import { useMutation, useQuery } from '@apollo/client';
+import { UPDATE_ACTIVITY_ROW } from '../../graphql/mcrMutations';
+import { GET_ACTIVITY_ROW_BY_BROADCAST_EVENT, GET_ACTIVITY_ROWS } from '../../graphql/mcrQueries';
 import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA } from '../../graphql/mutations';
-import { GET_BROADCAST_EVENT } from '../../graphql/queries';
 import dayjs from 'dayjs';
 import 'dayjs/locale/he';
 
@@ -29,108 +31,130 @@ interface MCRModalProps {
   onDataSaved?: () => void;
 }
 
-interface CameramanData {
-  name: string;
-  cameraBarcode: string;
-  cameraModel?: string;
+interface WarehouseEquipmentItem {
+  id: string;
+  equipmentId: string;
+  eventName: string;
+  status: string;
+  quantityAssigned: number;
+  assignmentStatus: string;
+  assignedToName?: string;
+  assignmentNotes?: string;
 }
+
+const statusOptions = [
+  { value: 'UNKNOWN', label: 'לא הוגדר' },
+  { value: 'READY', label: 'מוכן לשידור' },
+  { value: 'NOT_READY', label: 'לא מוכן לשידור' },
+  { value: 'ERROR', label: 'תקלה' },
+];
 
 const MCRModal: React.FC<MCRModalProps> = ({ visible, event, onClose, onDataSaved }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
-  const [cameramanData, setCameramanData] = useState<CameramanData[]>([]);
+  const [activityRowId, setActivityRowId] = useState<string | null>(null);
+  const { message } = App.useApp();
 
-  // GraphQL mutation for updating department data
-  const [updateDepartmentData] = useMutation(UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA, {
+  const eventDate = event?.startTime
+    ? new Date(event.startTime).toISOString()
+    : new Date().toISOString();
+
+  const { data: activityData, loading: activityLoading } = useQuery(GET_ACTIVITY_ROW_BY_BROADCAST_EVENT, {
+    variables: {
+      broadcastEventId: event?.id,
+      date: eventDate,
+    },
+    skip: !event?.id || !visible,
+    fetchPolicy: 'network-only',
+  });
+
+  const [updateActivityRow] = useMutation(UPDATE_ACTIVITY_ROW, {
+    refetchQueries: ['GetActivityRows', 'GetActivityRowByBroadcastEvent'],
     onCompleted: () => {
-      console.log('✅ MCR data saved successfully');
       if (onDataSaved) {
         onDataSaved();
       }
     },
     onError: (error) => {
-      console.error('❌ Error saving MCR data:', error);
+      message.error('שגיאה בשמירת נתוני MCR: ' + error.message);
     }
   });
 
-  // Query for existing MCR data
-  const { data: existingData, refetch } = useQuery(GET_BROADCAST_EVENT, {
-    variables: { id: event?.id },
-    skip: !event?.id || !visible
-  });
+  const [updateDepartmentData] = useMutation(UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA);
 
-  // Initialize form with existing data
   useEffect(() => {
-    if (visible && event) {
-      const eventData = existingData?.broadcastEvent || event;
-      const mcrData = eventData.metadata?.departments?.mcr || {};
-      
-      // Format date and time from the event
-      const formattedDate = eventData.startTime ? dayjs(eventData.startTime).format('DD/MM/YYYY') : 
-                           eventData.metadata?.rawHebrewData?.תאריך || 
-                           eventData.metadata?.eventDetails?.date || '';
-      const formattedTime = eventData.startTime ? dayjs(eventData.startTime).format('HH:mm') : 
-                           eventData.metadata?.rawHebrewData?.שעה || 
-                           eventData.metadata?.eventDetails?.time || '';
-      
+    if (visible && activityData?.activityRowByBroadcastEvent) {
+      const row = activityData.activityRowByBroadcastEvent;
+      setActivityRowId(row.id);
+
+      const formattedDate = event.startTime ? dayjs(event.startTime).format('DD/MM/YYYY') : '';
+      const formattedTime = event.startTime ? dayjs(event.startTime).format('HH:mm') : '';
+
       form.setFieldsValue({
-        אירוע: eventData.title || eventData.hebrewTitle || '',
+        אירוע: event.title || '',
         תאריך: formattedDate,
         שעה: formattedTime,
-        מקור: mcrData.מקור || '',
-        גיבוי: mcrData.גיבוי || '',
-        מכשירים: mcrData.מכשירים || '',
-        ניתובים: mcrData.ניתובים || ''
+        מקור: row.source || '',
+        גיבוי: row.backup || '',
+        מכשירים: row.equipment || '',
+        ניתובים: row.routing || '',
+        הערות: row.notes || '',
+        סטטוס: row.status || 'UNKNOWN',
       });
 
-      // TODO: Fetch cameraman data from warehouse/equipment assignments
-      // For now, using mock data or showing "No Available Data"
-      if (mcrData.cameramanData) {
-        setCameramanData(mcrData.cameramanData);
-      } else {
-        setCameramanData([]);
+      // Backfill from legacy department data if the ActivityRow is empty
+      const mcrData = event.metadata?.departments?.mcr;
+      if (mcrData && !row.source && !row.backup && !row.equipment && !row.routing) {
+        const legacySource = mcrData.מקור || mcrData.source || '';
+        const legacyBackup = mcrData.גיבוי || mcrData.backup || '';
+        const legacyEquipment = mcrData.מכשירים || mcrData.equipment || '';
+        const legacyRouting = mcrData.ניתובים || mcrData.routing || '';
+
+        if (legacySource || legacyBackup || legacyEquipment || legacyRouting) {
+          form.setFieldsValue({
+            מקור: legacySource,
+            גיבוי: legacyBackup,
+            מכשירים: legacyEquipment,
+            ניתובים: legacyRouting,
+          });
+        }
       }
     }
-  }, [visible, event, existingData, form]);
+  }, [visible, activityData, event, form]);
 
   const handleSubmit = async (values: any) => {
+    if (!activityRowId) {
+      message.error('שגיאה: לא נמצאה שורת פעילות');
+      return;
+    }
+
     setLoading(true);
     try {
-      // Prepare the data for saving - the backend expects customData at the root level
-      const departmentData = {
-        customData: {
-          מקור: values.מקור,
-          גיבוי: values.גיבוי,
-          מכשירים: values.מכשירים,
-          ניתובים: values.ניתובים,
-          // Store cameraman data if available
-          cameramanData: cameramanData.length > 0 ? cameramanData : null,
-          notApplicable: false // Clear the not applicable flag when saving data
-        }
-      };
-
-      console.log('📤 MCR Modal - Saving data:', departmentData);
-
-      // Call the mutation to save to MongoDB
-      const result = await updateDepartmentData({
+      await updateActivityRow({
         variables: {
-          eventId: event.id,
-          department: 'mcr',
-          data: departmentData
+          id: activityRowId,
+          input: {
+            source: values.מקור || '',
+            backup: values.גיבוי || '',
+            equipment: values.מכשירים || '',
+            routing: values.ניתובים || '',
+            notes: values.הערות || '',
+            status: values.סטטוס || 'UNKNOWN',
+          }
         }
       });
-      
-      console.log('📥 MCR Modal - Save result:', result);
-      
+
+      message.success('נתוני MCR נשמרו בהצלחה');
       onClose();
     } catch (error) {
-      console.error('Error saving MCR configuration:', error);
-      // Add user-facing error message
-      alert('שגיאה בשמירת נתוני MCR: ' + (error as any).message);
+      message.error('שגיאה בשמירת נתוני MCR: ' + (error as any).message);
     } finally {
       setLoading(false);
     }
   };
+
+  const warehouseEquipment: WarehouseEquipmentItem[] =
+    activityData?.activityRowByBroadcastEvent?.warehouseEquipment || [];
 
   return (
     <Modal
@@ -152,30 +176,35 @@ const MCRModal: React.FC<MCRModalProps> = ({ visible, event, onClose, onDataSave
           type="default"
           loading={loading}
           onClick={async () => {
+            if (!activityRowId) return;
             setLoading(true);
             try {
-              // Save only the not applicable flag
-              const departmentData = {
-                customData: {
-                  notApplicable: true
+              await updateActivityRow({
+                variables: {
+                  id: activityRowId,
+                  input: {
+                    status: 'UNKNOWN',
+                    source: '',
+                    equipment: '',
+                    backup: '',
+                    routing: '',
+                    notes: 'לא עבורנו',
+                  }
                 }
-              };
-              
+              });
+
               await updateDepartmentData({
                 variables: {
                   eventId: event.id,
                   department: 'mcr',
-                  data: departmentData
+                  data: { customData: { notApplicable: true } }
                 }
               });
-              
-              if (onDataSaved) {
-                onDataSaved();
-              }
+
+              if (onDataSaved) onDataSaved();
               onClose();
             } catch (error) {
-              console.error('Error marking as not applicable:', error);
-              alert('שגיאה בסימון כלא רלוונטי: ' + (error as any).message);
+              message.error('שגיאה בסימון כלא רלוונטי: ' + (error as any).message);
             } finally {
               setLoading(false);
             }
@@ -186,141 +215,128 @@ const MCRModal: React.FC<MCRModalProps> = ({ visible, event, onClose, onDataSave
         <Button 
           key="save" 
           type="primary" 
-          loading={loading}
+          loading={loading || activityLoading}
           onClick={() => form.submit()}
         >
           שמור
         </Button>
       ]}
     >
-      <Form
-        form={form}
-        layout="vertical"
-        onFinish={handleSubmit}
-        dir="rtl"
-      >
-        {/* Read-only fields from Broadcast Planning */}
-        <Row gutter={16}>
-          <Col span={8}>
-            <Form.Item name="אירוע" label="אירוע">
-              <Input disabled className="bg-gray-50" />
-            </Form.Item>
-          </Col>
-          <Col span={8}>
-            <Form.Item name="תאריך" label="תאריך">
-              <Input disabled className="bg-gray-50" />
-            </Form.Item>
-          </Col>
-          <Col span={8}>
-            <Form.Item name="שעה" label="שעה">
-              <Input disabled className="bg-gray-50" />
-            </Form.Item>
-          </Col>
-        </Row>
+      {activityLoading ? (
+        <div className="text-center py-8 text-gray-400">טוען נתונים...</div>
+      ) : (
+        <>
+          <Form
+            form={form}
+            layout="vertical"
+            onFinish={handleSubmit}
+            dir="rtl"
+          >
+            <Row gutter={16}>
+              <Col span={8}>
+                <Form.Item name="אירוע" label="אירוע">
+                  <Input disabled className="bg-gray-50" />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="תאריך" label="תאריך">
+                  <Input disabled className="bg-gray-50" />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="שעה" label="שעה">
+                  <Input disabled className="bg-gray-50" />
+                </Form.Item>
+              </Col>
+            </Row>
 
-        <Divider />
+            <Divider />
 
-        {/* Fillable containers */}
-        <Row gutter={16}>
-          <Col span={12}>
-            <Form.Item 
-              name="מקור" 
-              label="מקור"
-            >
-              <TextArea 
-                rows={4} 
-                placeholder="הזן פרטי מקור..."
-                className="font-mono"
-              />
-            </Form.Item>
-          </Col>
-          <Col span={12}>
-            <Form.Item 
-              name="גיבוי" 
-              label="גיבוי"
-            >
-              <TextArea 
-                rows={4} 
-                placeholder="הזן פרטי גיבוי..."
-                className="font-mono"
-              />
-            </Form.Item>
-          </Col>
-        </Row>
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item name="סטטוס" label="סטטוס">
+                  <Select options={statusOptions} />
+                </Form.Item>
+              </Col>
+            </Row>
 
-        <Row gutter={16}>
-          <Col span={12}>
-            <Form.Item 
-              name="מכשירים" 
-              label="מכשירים"
-            >
-              <TextArea 
-                rows={4} 
-                placeholder="הזן רשימת מכשירים..."
-                className="font-mono"
-              />
-            </Form.Item>
-          </Col>
-          <Col span={12}>
-            <Form.Item 
-              name="ניתובים" 
-              label="ניתובים"
-            >
-              <TextArea 
-                rows={4} 
-                placeholder="הזן פרטי ניתובים..."
-                className="font-mono"
-              />
-            </Form.Item>
-          </Col>
-        </Row>
-      </Form>
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item name="מקור" label="מקור">
+                  <TextArea rows={3} placeholder="הזן פרטי מקור..." className="font-mono" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="גיבוי" label="גיבוי">
+                  <TextArea rows={3} placeholder="הזן פרטי גיבוי..." className="font-mono" />
+                </Form.Item>
+              </Col>
+            </Row>
 
-      <Divider />
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item name="מכשירים" label="מכשירים">
+                  <TextArea rows={3} placeholder="הזן רשימת מכשירים..." className="font-mono" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="ניתובים" label="ניתובים">
+                  <TextArea rows={3} placeholder="הזן פרטי ניתובים..." className="font-mono" />
+                </Form.Item>
+              </Col>
+            </Row>
 
-      {/* Cameraman Data Section */}
-      <div className="mt-4">
-        <Title level={5} className="mb-3">
-          <VideoCameraOutlined className="ml-2" />
-          נתוני צלמים ומצלמות
-        </Title>
-        
-        {cameramanData.length > 0 ? (
-          <div className="space-y-2">
-            {cameramanData.map((cameraman, index) => (
-              <Card key={index} size="small" className="bg-gray-50">
-                <Row>
-                  <Col span={12}>
-                    <Text strong>
-                      <UserOutlined className="ml-1" />
-                      שם הצלם:
-                    </Text>{' '}
-                    {cameraman.name}
-                  </Col>
-                  <Col span={12}>
-                    <Text strong>
-                      <VideoCameraOutlined className="ml-1" />
-                      ברקוד מצלמה:
-                    </Text>{' '}
-                    {cameraman.cameraBarcode}
-                    {cameraman.cameraModel && (
-                      <Text className="text-gray-500 mr-2">
-                        ({cameraman.cameraModel})
-                      </Text>
-                    )}
-                  </Col>
-                </Row>
+            <Row gutter={16}>
+              <Col span={24}>
+                <Form.Item name="הערות" label="הערות">
+                  <TextArea rows={2} placeholder="הזן הערות..." />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Form>
+
+          <Divider />
+
+          <div className="mt-4">
+            <Title level={5} className="mb-3">
+              <ToolOutlined className="ml-2" />
+              ציוד מהמחסן (שוייך לאירוע)
+            </Title>
+            
+            {warehouseEquipment.length > 0 ? (
+              <div className="space-y-2">
+                {warehouseEquipment.map((item) => (
+                  <Card key={item.id} size="small" className="bg-blue-50">
+                    <Row>
+                      <Col span={12}>
+                        <Text strong>ציוד:</Text>{' '}
+                        {item.eventName}
+                        <Tag color={item.status === 'active' ? 'green' : 'default'} className="mr-2">
+                          {item.status === 'active' ? 'פעיל' : item.status}
+                        </Tag>
+                      </Col>
+                      <Col span={12}>
+                        <Text strong>כמות:</Text> {item.quantityAssigned}
+                        {item.assignedToName && (
+                          <span className="mr-4">
+                            <Text strong>שוייך ע"י:</Text> {item.assignedToName}
+                          </span>
+                        )}
+                      </Col>
+                    </Row>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <Card size="small" className="bg-gray-100 text-center">
+                <Text className="text-gray-500">אין ציוד משוייך מהמחסן</Text>
               </Card>
-            ))}
+            )}
           </div>
-        ) : (
-          <Card size="small" className="bg-gray-100 text-center">
-            <Text className="text-gray-500">No Available Data</Text>
-          </Card>
-        )}
-      </div>
+        </>
+      )}
     </Modal>
   );
 };
 
-export default MCRModal; 
+export default MCRModal;

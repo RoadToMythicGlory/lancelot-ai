@@ -12,10 +12,16 @@ export interface IExternalBroadcastPreset extends Document {
     isCustom: boolean;
   }>;
   equipment: Array<{
-    equipmentId?: string;
-    name: string;
-    category?: string;
+    category: string;
+    categoryLabel: string;
     count: number;
+    unitSettings?: Array<{
+      unitIndex: number;
+      purpose?: string;
+      audioConfig?: string;
+      assignedEquipmentId?: string;
+      assignedEquipmentName?: string;
+    }>;
   }>;
   createdBy?: string;
   createdAt: Date;
@@ -37,10 +43,18 @@ const ExternalBroadcastPresetSchema = new Schema<IExternalBroadcastPreset>(
     ],
     equipment: [
       {
-        equipmentId: { type: String },
-        name: { type: String, required: true },
-        category: { type: String },
+        category: { type: String, required: true },
+        categoryLabel: { type: String, required: true },
         count: { type: Number, required: true },
+        unitSettings: [
+          {
+            unitIndex: { type: Number, required: true },
+            purpose: { type: String },
+            audioConfig: { type: String },
+            assignedEquipmentId: { type: String },
+            assignedEquipmentName: { type: String },
+          },
+        ],
       },
     ],
     createdBy: { type: String },

@@ -44,7 +44,7 @@
 
 /* Ensure events are visible */
 .mcr-calendar .rbc-event {
-  opacity: 1 !important;
+  opacity: 1;
 }
 
 /* Remove unwanted backgrounds */

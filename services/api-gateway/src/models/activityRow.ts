@@ -5,6 +5,7 @@ export interface IActivityRow extends Document {
   activityName: string;
   time: string;
   endTime: string;
+  source?: string;
   equipment?: string;
   backup?: string;
   routing?: string;
@@ -38,6 +39,10 @@ const activityRowSchema = new Schema<IActivityRow>({
   endTime: {
     type: String,
     required: true
+  },
+  source: {
+    type: String,
+    trim: true
   },
   equipment: {
     type: String,
@@ -111,14 +116,6 @@ activityRowSchema.index({ date: 1, isHidden: 1 });
 activityRowSchema.index({ createdBy: 1 });
 activityRowSchema.index({ status: 1 });
 activityRowSchema.index({ broadcastEventId: 1 });
-
-// Pre-save middleware to set updatedBy
-activityRowSchema.pre('save', function(next) {
-  if (this.isModified() && !this.isNew) {
-    this.updatedBy = this.createdBy;
-  }
-  next();
-});
 
 const ActivityRow = model<IActivityRow>('ActivityRow', activityRowSchema);
 

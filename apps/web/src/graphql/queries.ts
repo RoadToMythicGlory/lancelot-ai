@@ -211,9 +211,12 @@ export const GET_WAREHOUSE_EQUIPMENT = gql`
         shelf
         cell
       }
+      isQuantityBased
       isDisabled
       disabledAt
       disabledReason
+      suspensionStatus
+      lastUsedAt
       createdAt
       updatedAt
     }
@@ -243,6 +246,28 @@ export const SCAN_BARCODE = gql`
         barcode
         category
       }
+    }
+  }
+`;
+
+// Returns every broadcast event that currently has equipment "out" of the
+// warehouse (active assignment records OR equipment embedded in event metadata).
+// Not date-filtered — this is what powers the equipment return modal so old
+// productions with un-returned gear still show up.
+export const GET_EVENTS_WITH_ASSIGNED_EQUIPMENT = gql`
+  query GetEventsWithAssignedEquipment {
+    eventsWithAssignedEquipment {
+      id
+      eventNumber
+      title
+      hebrewTitle
+      startTime
+      endTime
+      location
+      venue
+      channel
+      equipment_list
+      metadata
     }
   }
 `;
@@ -610,6 +635,230 @@ export const GET_EXTERNAL_BROADCAST_PRESET = gql`
       createdBy
       createdAt
       updatedAt
+    }
+  }
+`;
+
+// Equipment Sets
+export const GET_EQUIPMENT_SETS = gql`
+  query GetEquipmentSets {
+    equipmentSets {
+      id
+      name
+      barcode
+      description
+      items {
+        equipmentId
+        equipment {
+          id
+          name
+          barcode
+          category
+          status
+          quantityAvailable
+        }
+        quantity
+        required
+      }
+      notes
+      isActive
+      createdBy
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const GET_EQUIPMENT_SET_BY_BARCODE = gql`
+  query GetEquipmentSetByBarcode($barcode: String!) {
+    equipmentSetByBarcode(barcode: $barcode) {
+      id
+      name
+      barcode
+      description
+      items {
+        equipmentId
+        equipment {
+          id
+          name
+          barcode
+          category
+          status
+          quantityAvailable
+        }
+        quantity
+        required
+      }
+      notes
+      isActive
+      createdBy
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const GET_STALE_EQUIPMENT = gql`
+  query GetStaleEquipment($daysUnused: Int) {
+    staleEquipment(daysUnused: $daysUnused) {
+      id
+      name
+      barcode
+      category
+      status
+      lastUsedAt
+      isDisabled
+    }
+  }
+`;
+
+// ==================== BLE Tracking Queries ====================
+
+export const GET_TRACKER_SITES = gql`
+  query GetTrackerSites {
+    trackerSites {
+      id
+      name
+      floorPlanImageUrl
+      widthMeters
+      heightMeters
+      geoAnchor {
+        lat
+        lng
+        rotationDeg
+      }
+      isActive
+      gateways {
+        id
+        gatewayKey
+        name
+        kind
+        position {
+          x
+          y
+        }
+        zoneName
+        vehicleLabel
+        lastHeartbeatAt
+        online
+      }
+      createdAt
+    }
+  }
+`;
+
+export const GET_TRACKER_TAGS = gql`
+  query GetTrackerTags($siteId: ID) {
+    trackerTags(siteId: $siteId) {
+      id
+      bleAddress
+      equipmentId
+      equipmentName
+      label
+      status
+      lastBattery
+      lastTemperature
+      lastSeenAt
+      latestPosition {
+        tagId
+        kind
+        siteId
+        gatewayId
+        gatewayName
+        zoneName
+        x
+        y
+        lat
+        lng
+        rssi
+        confidence
+        computedAt
+      }
+    }
+  }
+`;
+
+export const GET_TRACKER_LATEST_POSITIONS = gql`
+  query GetTrackerLatestPositions($siteId: ID) {
+    trackerLatestPositions(siteId: $siteId) {
+      tagId
+      bleAddress
+      equipmentId
+      label
+      battery
+      kind
+      siteId
+      gatewayId
+      gatewayName
+      zoneName
+      x
+      y
+      lat
+      lng
+      rssi
+      confidence
+      computedAt
+    }
+  }
+`;
+
+export const GET_TRACKER_TAG_HISTORY = gql`
+  query GetTrackerTagHistory($tagId: ID!, $since: DateTime, $until: DateTime, $limit: Int) {
+    trackerTagHistory(tagId: $tagId, since: $since, until: $until, limit: $limit) {
+      id
+      gatewayId
+      gatewayName
+      rssi
+      battery
+      temperature
+      lat
+      lng
+      ts
+    }
+  }
+`;
+
+export const GET_TRACKER_GATEWAYS = gql`
+  query GetTrackerGateways($siteId: ID) {
+    trackerGateways(siteId: $siteId) {
+      id
+      gatewayKey
+      name
+      kind
+      siteId
+      position {
+        x
+        y
+      }
+      zoneName
+      vehicleLabel
+      lastHeartbeatAt
+      isActive
+      online
+    }
+  }
+`;
+
+export const TRACKER_POSITION_UPDATED = gql`
+  subscription TrackerPositionUpdated($siteId: ID) {
+    trackerPositionUpdated(siteId: $siteId) {
+      tagId
+      bleAddress
+      equipmentId
+      label
+      battery
+      kind
+      siteId
+      gatewayId
+      gatewayName
+      zoneName
+      x
+      y
+      lat
+      lng
+      rssi
+      confidence
+      computedAt
     }
   }
 `;

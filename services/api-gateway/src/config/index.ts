@@ -156,6 +156,15 @@ export const config = {
 
   // Routing Engine
   ROUTING_ENGINE_URL: process.env.ROUTING_ENGINE_URL || 'http://localhost:5002',
+  
+  // BLE Tracking (MQTT)
+  MQTT_BROKER_URL: process.env.MQTT_BROKER_URL || 'mqtt://localhost:1883',
+  MQTT_USERNAME: process.env.MQTT_USERNAME || '',
+  MQTT_PASSWORD: process.env.MQTT_PASSWORD || '',
+  MQTT_TOPIC_PREFIX: process.env.MQTT_TOPIC_PREFIX || 'lancelot/tracking',
+  TRACKING_RETENTION_DAYS: parseInt(process.env.TRACKING_RETENTION_DAYS || '30', 10),
+  TRACKING_STALE_THRESHOLD_SECONDS: parseInt(process.env.TRACKING_STALE_THRESHOLD_SECONDS || '300', 10),
+  ENABLE_TRACKING: process.env.ENABLE_TRACKING !== 'false',
 };
 
 // Security validation on startup

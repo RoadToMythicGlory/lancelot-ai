@@ -11,9 +11,9 @@ import {
   FilePdfOutlined
 } from '@ant-design/icons';
 import WarehousePdfImportModal from '../warehouse/WarehousePdfImportModal';
-import { useQuery, useMutation } from '@apollo/client';
-import { GET_WAREHOUSE_EQUIPMENT, GET_BROADCAST_EVENT, GET_EQUIPMENT_ASSIGNMENTS_BY_EVENT } from '../../graphql/queries';
-import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA, CREATE_EQUIPMENT_ASSIGNMENT, UPDATE_EQUIPMENT_ASSIGNMENT, UPDATE_WAREHOUSE_EQUIPMENT_QUANTITY } from '../../graphql/mutations';
+import { useQuery, useMutation, useLazyQuery } from '@apollo/client';
+import { GET_WAREHOUSE_EQUIPMENT, GET_BROADCAST_EVENT, GET_EQUIPMENT_ASSIGNMENTS_BY_EVENT, GET_EQUIPMENT_SET_BY_BARCODE } from '../../graphql/queries';
+import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA, CREATE_EQUIPMENT_ASSIGNMENT, UPDATE_EQUIPMENT_ASSIGNMENT, UPDATE_WAREHOUSE_EQUIPMENT_QUANTITY, ASSIGN_EQUIPMENT_SET_TO_EVENT } from '../../graphql/mutations';
 
 interface BroadcastEvent {
   id: string;
@@ -104,6 +104,18 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
     }
   });
 
+  // Lazy query to check if a scanned barcode is an equipment set
+  const [fetchSetByBarcode] = useLazyQuery(GET_EQUIPMENT_SET_BY_BARCODE);
+
+  // Mutation to assign an entire set to an event
+  const [assignSetToEvent] = useMutation(ASSIGN_EQUIPMENT_SET_TO_EVENT, {
+    refetchQueries: ['GetWarehouseEquipment', 'GetEquipmentAssignmentsByEvent', 'GetBroadcastEvent'],
+    awaitRefetchQueries: true,
+    onError: (error) => {
+      console.error('Error assigning equipment set:', error);
+    },
+  });
+
   // Query for existing equipment assignments
   const { data: assignmentsData } = useQuery(GET_EQUIPMENT_ASSIGNMENTS_BY_EVENT, {
     variables: { broadcastEventId: event?.id },
@@ -151,7 +163,7 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
     }
   }, [eventData, visible]);
 
-  const handleBarcodeScan = () => {
+  const handleBarcodeScan = async () => {
     const trimmedBarcode = scannedBarcode.trim();
     
     if (!trimmedBarcode) {
@@ -168,6 +180,59 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
       message.error('שגיאה בטעינת נתוני ציוד');
       console.error('Equipment query error:', equipmentError);
       return;
+    }
+
+    // Check if barcode belongs to an equipment set first
+    try {
+      const { data: setData } = await fetchSetByBarcode({ variables: { barcode: trimmedBarcode } });
+      if (setData?.equipmentSetByBarcode) {
+        const eqSet = setData.equipmentSetByBarcode;
+        setScannedBarcode('');
+        Modal.confirm({
+          title: `סט ציוד: ${eqSet.name}`,
+          width: 600,
+          okText: 'הקצה סט',
+          cancelText: 'ביטול',
+          content: (
+            <div style={{ direction: 'rtl' }}>
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message="נא לוודא שהסט מכיל את הציוד הבא:"
+              />
+              <ul style={{ paddingInlineStart: 20 }}>
+                {(eqSet.items || []).map((item: any, idx: number) => (
+                  <li key={idx} style={{ marginBottom: 4 }}>
+                    <strong>{item.equipment?.name || item.equipmentId}</strong>
+                    {' — '}
+                    כמות: {item.quantity}
+                    {item.required ? ' (חובה)' : ' (אופציונלי)'}
+                  </li>
+                ))}
+              </ul>
+              {eqSet.description && <p style={{ marginTop: 8, color: '#666' }}>{eqSet.description}</p>}
+            </div>
+          ),
+          onOk: async () => {
+            try {
+              const result = await assignSetToEvent({
+                variables: { eventId: event.id, setId: eqSet.id },
+              });
+              if (result.data?.assignEquipmentSetToEvent?.success) {
+                message.success(result.data.assignEquipmentSetToEvent.message);
+              } else {
+                message.error('שגיאה בהקצאת הסט');
+              }
+            } catch (err: any) {
+              message.error(err.message || 'שגיאה בהקצאת הסט');
+            }
+          },
+        });
+        return;
+      }
+    } catch {
+      // Not a set barcode, continue to individual equipment lookup
     }
 
     // Find equipment by barcode (case-insensitive)

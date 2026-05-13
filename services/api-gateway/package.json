@@ -20,7 +20,10 @@
     "seed:production-mcr": "cross-env NODE_ENV=production ts-node src/scripts/seed-production-mcr-admin.ts",
     "fix:mcr-permissions": "cross-env NODE_ENV=production ts-node src/scripts/fix-mcr-admin-permissions.ts",
     "test:production-db": "cross-env NODE_ENV=production ts-node src/scripts/test-production-connection.ts",
-    "generate:service-jwt": "ts-node src/scripts/generate-service-jwt.ts"
+    "generate:service-jwt": "ts-node src/scripts/generate-service-jwt.ts",
+    "repair:equipment": "ts-node src/scripts/repair-equipment-orphans.ts",
+    "repair:equipment:apply": "ts-node src/scripts/repair-equipment-orphans.ts --apply",
+    "repair:equipment:apply:canon": "ts-node src/scripts/repair-equipment-orphans.ts --apply --restore-canon-c300"
   },
   "dependencies": {
     "@apollo/client": "^4.0.4",
@@ -43,6 +46,7 @@
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.17.0",
     "mongoose": "^8.16.1",
+    "mqtt": "^5.15.1",
     "multer": "^2.1.1",
     "node-fetch": "^2.7.0",
     "pdfjs-dist": "^5.7.284",

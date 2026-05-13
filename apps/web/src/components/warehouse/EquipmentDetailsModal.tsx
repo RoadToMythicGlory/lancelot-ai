@@ -1,9 +1,10 @@
-import React, { useState, useRef } from 'react';
-import { Modal, Tabs, Descriptions, Tag, Table, Empty, Badge, Spin, Alert, Image, Button, App } from 'antd';
-import { CalendarOutlined, HistoryOutlined, InfoCircleOutlined, EnvironmentOutlined, PrinterOutlined, UndoOutlined } from '@ant-design/icons';
+import React, { useState, useRef, useMemo } from 'react';
+import { Modal, Tabs, Descriptions, Tag, Table, Empty, Badge, Spin, Alert, Image, Button, App, Input, Select, DatePicker, Space, Card, Tooltip } from 'antd';
+import { CalendarOutlined, HistoryOutlined, InfoCircleOutlined, EnvironmentOutlined, PrinterOutlined, UndoOutlined, WarningOutlined, WifiOutlined, ThunderboltOutlined, LinkOutlined } from '@ant-design/icons';
 import { useQuery, useMutation } from '@apollo/client';
-import { GET_EQUIPMENT_ASSIGNMENTS, GET_EQUIPMENT_HISTORY } from '../../graphql/queries';
-import { UNDO_EQUIPMENT_TRANSFER } from '../../graphql/mutations';
+import { GET_EQUIPMENT_ASSIGNMENTS, GET_EQUIPMENT_HISTORY, GET_WAREHOUSE_EQUIPMENT, GET_TRACKER_TAGS } from '../../graphql/queries';
+import { UNDO_EQUIPMENT_TRANSFER, FORCE_RELEASE_EQUIPMENT } from '../../graphql/mutations';
+import TrackerTagBindingModal from './tracking/TrackerTagBindingModal';
 import dayjs from 'dayjs';
 import JsBarcode from 'jsbarcode';
 import { useReactToPrint } from 'react-to-print';
@@ -38,6 +39,8 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
   const componentRef = useRef<HTMLDivElement>(null);
   const [barcodeData, setBarcodeData] = useState<string>('');
   const [isPrintReady, setIsPrintReady] = useState(false);
+  const [historyActionFilter, setHistoryActionFilter] = useState<string[]>([]);
+  const [historyDateRange, setHistoryDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([null, null]);
   const { message } = App.useApp();
 
   // Query for current assignments
@@ -55,6 +58,22 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
   const currentAssignments = assignmentsData?.equipmentAssignments || [];
   const assignmentHistory = historyData?.equipmentHistory || [];
 
+  const filteredHistory = useMemo(() => {
+    let result = assignmentHistory;
+    if (historyActionFilter.length > 0) {
+      result = result.filter((h: any) => historyActionFilter.includes(h.action));
+    }
+    if (historyDateRange[0] && historyDateRange[1]) {
+      const start = historyDateRange[0].startOf('day');
+      const end = historyDateRange[1].endOf('day');
+      result = result.filter((h: any) => {
+        const d = dayjs(h.date);
+        return d.isAfter(start) && d.isBefore(end);
+      });
+    }
+    return result;
+  }, [assignmentHistory, historyActionFilter, historyDateRange]);
+
   // Undo transfer mutation
   const [undoTransfer] = useMutation(UNDO_EQUIPMENT_TRANSFER, {
     onCompleted: () => {
@@ -65,6 +84,96 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
       message.error(`שגיאה בביטול ההעברה: ${error.message}`);
     }
   });
+
+  // Force release mutation — clears stuck "ghost-assigned" units
+  // (e.g. when the owning event was deleted while equipment was checked out).
+  const [forceReleaseEquipment, { loading: forceReleaseLoading }] = useMutation(
+    FORCE_RELEASE_EQUIPMENT,
+    {
+      refetchQueries: [
+        { query: GET_WAREHOUSE_EQUIPMENT },
+        { query: GET_EQUIPMENT_ASSIGNMENTS, variables: { equipmentId: equipment?.id } },
+        { query: GET_EQUIPMENT_HISTORY, variables: { equipmentId: equipment?.id } },
+        'GetEventsWithAssignedEquipment',
+      ],
+      awaitRefetchQueries: true,
+      onCompleted: () => {
+        message.success('הציוד שוחרר בהצלחה. הכמות המוקצית אופסה.');
+        refetchHistory();
+      },
+      onError: (error) => {
+        message.error(`שגיאה בשחרור ציוד: ${error.message}`);
+      },
+    },
+  );
+
+  const isOrphanState =
+    !!equipment &&
+    ((equipment.quantityAvailable ?? 0) < 0 ||
+      (equipment.quantityAssigned ?? 0) > (equipment.quantityTotal ?? 0) ||
+      ((equipment.quantityAssigned ?? 0) > 0 &&
+        activeTab === '2' &&
+        !assignmentsLoading &&
+        currentAssignments.length === 0));
+
+  // BLE tracker tag binding state
+  const [isTrackerBindingVisible, setIsTrackerBindingVisible] = useState(false);
+  const { data: trackerTagData, refetch: refetchTrackerTag } = useQuery(GET_TRACKER_TAGS, {
+    variables: {},
+    skip: !equipment?.id,
+  });
+  const boundTag = (trackerTagData?.trackerTags || []).find(
+    (t: any) => t.equipmentId === equipment?.id,
+  );
+
+  const handleForceRelease = () => {
+    if (!equipment?.id) return;
+    let reasonValue = '';
+    Modal.confirm({
+      title: 'שחרור כפוי של ציוד תקוע',
+      width: 560,
+      okText: 'אישור — שחרר ציוד',
+      okButtonProps: { danger: true },
+      cancelText: 'ביטול',
+      content: (
+        <div style={{ direction: 'rtl' }}>
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="פעולה זו תאפס את הכמות המוקצית"
+            description={
+              <span>
+                {equipment.quantityAssigned} יחידות מסומנות כמוקצות, אך לא נמצאה עבורן הקצאה פעילה.
+                האישור יאפס את הכמות המוקצית ל-0, יחזיר את כל היחידות למלאי, ויבטל הקצאות יתומות.
+                הפעולה תתועד בהיסטוריית הציוד.
+              </span>
+            }
+          />
+          <label style={{ display: 'block', marginBottom: 6, fontWeight: 500 }}>
+            סיבת השחרור (חובה):
+          </label>
+          <Input.TextArea
+            rows={3}
+            placeholder="לדוגמה: האירוע נמחק לפני החזרת הציוד"
+            onChange={(e) => {
+              reasonValue = e.target.value;
+            }}
+          />
+        </div>
+      ),
+      onOk: async () => {
+        const reason = reasonValue.trim();
+        if (!reason) {
+          message.error('יש להזין סיבה לשחרור');
+          throw new Error('reason required');
+        }
+        await forceReleaseEquipment({
+          variables: { id: equipment.id, reason },
+        });
+      },
+    });
+  };
 
   // Generate barcode SVG
   React.useEffect(() => {
@@ -350,7 +459,11 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
           'transferred': 'orange',
           'quantity_adjusted': 'purple',
           'disabled': 'red',
-          'enabled': 'green'
+          'enabled': 'green',
+          'set_assigned': 'cyan',
+          'set_returned': 'lime',
+          'item_replaced': 'gold',
+          'item_missing': 'magenta'
         };
         const actionTexts: Record<string, string> = {
           'assigned': 'הוקצה',
@@ -358,7 +471,11 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
           'transferred': 'הועבר',
           'quantity_adjusted': 'כמות עודכנה',
           'disabled': 'הושבת',
-          'enabled': 'הופעל'
+          'enabled': 'הופעל',
+          'set_assigned': 'סט הוקצה',
+          'set_returned': 'סט הוחזר',
+          'item_replaced': 'פריט הוחלף',
+          'item_missing': 'פריט חסר'
         };
         const actionText = actionTexts[action] || action;
         
@@ -435,6 +552,31 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
       ),
       children: (
         <div>
+          {isOrphanState && (
+            <Alert
+              type="warning"
+              showIcon
+              icon={<WarningOutlined />}
+              style={{ marginBottom: 12, direction: 'rtl' }}
+              message="כמות מוקצית תקועה (Ghost-Assigned)"
+              description={
+                <span>
+                  הציוד מסומן כ-{equipment?.quantityAssigned} יחידות מוקצות,
+                  אך לא נמצאה הקצאה פעילה תואמת. ניתן לשחרר את הציוד באופן ידני.
+                </span>
+              }
+              action={
+                <Button
+                  size="small"
+                  danger
+                  loading={forceReleaseLoading}
+                  onClick={handleForceRelease}
+                >
+                  שחרר ציוד
+                </Button>
+              }
+            />
+          )}
           <Descriptions bordered column={2} size="small">
             <Descriptions.Item label="שם המוצר" span={2}>
               {equipment?.name}
@@ -564,6 +706,76 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
               />
             </div>
           )}
+
+          {/* BLE Live Location Section */}
+          <Card
+            size="small"
+            style={{ marginTop: 16 }}
+            title={
+              <Space>
+                <WifiOutlined />
+                מיקום חי (BLE)
+              </Space>
+            }
+            extra={
+              <Button
+                size="small"
+                icon={<LinkOutlined />}
+                onClick={() => setIsTrackerBindingVisible(true)}
+              >
+                {boundTag ? 'ערוך תגית' : 'קשר תגית'}
+              </Button>
+            }
+          >
+            {boundTag ? (
+              <Descriptions size="small" column={2} bordered>
+                <Descriptions.Item label="כתובת BLE">
+                  <code>{boundTag.bleAddress}</code>
+                </Descriptions.Item>
+                <Descriptions.Item label="סטטוס">
+                  <Tag color={boundTag.status === 'active' ? 'green' : 'default'}>
+                    {boundTag.status === 'active' ? 'פעיל' : boundTag.status}
+                  </Tag>
+                </Descriptions.Item>
+                {boundTag.lastBattery != null && (
+                  <Descriptions.Item label="סוללה">
+                    <Tooltip title={`${boundTag.lastBattery}%`}>
+                      <ThunderboltOutlined style={{ color: boundTag.lastBattery > 20 ? '#52c41a' : '#ff4d4f' }} />
+                      {' '}{boundTag.lastBattery}%
+                    </Tooltip>
+                  </Descriptions.Item>
+                )}
+                {boundTag.lastSeenAt && (
+                  <Descriptions.Item label="נראה לאחרונה">
+                    {dayjs(boundTag.lastSeenAt).format('DD/MM/YYYY HH:mm:ss')}
+                  </Descriptions.Item>
+                )}
+                {boundTag.latestPosition && (
+                  <Descriptions.Item label="מיקום" span={2}>
+                    <Tag color={boundTag.latestPosition.kind === 'indoor' ? 'cyan' : 'orange'}>
+                      {boundTag.latestPosition.kind === 'indoor' ? 'במחסן' : 'בשטח'}
+                    </Tag>
+                    {boundTag.latestPosition.zoneName && ` ${boundTag.latestPosition.zoneName}`}
+                    {boundTag.latestPosition.gatewayName && ` (${boundTag.latestPosition.gatewayName})`}
+                  </Descriptions.Item>
+                )}
+              </Descriptions>
+            ) : (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description="לא קושרה תגית BLE לציוד זה"
+              >
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<LinkOutlined />}
+                  onClick={() => setIsTrackerBindingVisible(true)}
+                >
+                  קשר תגית עכשיו
+                </Button>
+              </Empty>
+            )}
+          </Card>
         </div>
       ),
     },
@@ -609,14 +821,42 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
       ),
       children: (
         <div>
+          <Space style={{ marginBottom: 12, width: '100%' }} wrap>
+            <Select
+              mode="multiple"
+              allowClear
+              placeholder="סנן לפי פעולה"
+              style={{ minWidth: 220 }}
+              value={historyActionFilter}
+              onChange={setHistoryActionFilter}
+              options={[
+                { value: 'assigned', label: 'הוקצה' },
+                { value: 'returned', label: 'הוחזר' },
+                { value: 'transferred', label: 'הועבר' },
+                { value: 'quantity_adjusted', label: 'כמות עודכנה' },
+                { value: 'disabled', label: 'הושבת' },
+                { value: 'enabled', label: 'הופעל' },
+                { value: 'set_assigned', label: 'סט הוקצה' },
+                { value: 'set_returned', label: 'סט הוחזר' },
+                { value: 'item_replaced', label: 'פריט הוחלף' },
+                { value: 'item_missing', label: 'פריט חסר' },
+              ]}
+            />
+            <DatePicker.RangePicker
+              value={historyDateRange}
+              onChange={(dates) => setHistoryDateRange(dates as [dayjs.Dayjs | null, dayjs.Dayjs | null])}
+              placeholder={['מתאריך', 'עד תאריך']}
+              allowClear
+            />
+          </Space>
           {historyLoading ? (
             <div style={{ textAlign: 'center', padding: '40px' }}>
               <Spin size="large" />
               <div style={{ marginTop: '10px' }}>טוען היסטוריה...</div>
             </div>
-          ) : assignmentHistory.length > 0 ? (
+          ) : filteredHistory.length > 0 ? (
             <Table
-              dataSource={assignmentHistory}
+              dataSource={filteredHistory}
               columns={historyColumns}
               rowKey="id"
               pagination={{ pageSize: 10 }}
@@ -643,6 +883,17 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
         <Button key="close" onClick={onClose}>
           סגור
         </Button>,
+        isOrphanState && (
+          <Button
+            key="force-release"
+            danger
+            icon={<WarningOutlined />}
+            loading={forceReleaseLoading}
+            onClick={handleForceRelease}
+          >
+            שחרר ציוד תקוע
+          </Button>
+        ),
         equipment?.barcode && (
           <Button 
             key="print" 
@@ -662,6 +913,18 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
         items={tabItems}
       />
       <BarcodeLabel ref={componentRef} />
+
+      {equipment?.id && (
+        <TrackerTagBindingModal
+          visible={isTrackerBindingVisible}
+          equipmentId={equipment.id}
+          equipmentName={equipment.name || ''}
+          currentTagId={boundTag?.id}
+          currentBleAddress={boundTag?.bleAddress}
+          onClose={() => setIsTrackerBindingVisible(false)}
+          onSuccess={() => refetchTrackerTag()}
+        />
+      )}
     </Modal>
   );
 };

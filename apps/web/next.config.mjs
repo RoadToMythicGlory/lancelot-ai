@@ -49,6 +49,20 @@ const nextConfig = {
     config.ignoreWarnings = [
       { module: /node_modules\/punycode/ },
     ];
+
+    // Konva's Node.js entry point hard-requires the optional 'canvas' native module.
+    // We don't want to install it (huge native build), so tell webpack to ignore it
+    // on both client and server bundles.
+    config.resolve.fallback = {
+      ...config.resolve.fallback,
+      canvas: false,
+    };
+    if (isServer) {
+      config.externals = [
+        ...(Array.isArray(config.externals) ? config.externals : []),
+        'canvas',
+      ];
+    }
     
     // Fix antd ES module resolution
     if (!isServer) {

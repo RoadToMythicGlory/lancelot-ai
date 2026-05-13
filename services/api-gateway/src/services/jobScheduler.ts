@@ -3,6 +3,7 @@ import { BroadcastRightManaged } from '../models/rights.models';
 import { Notification } from '../models/notification.models';
 import { Subscription } from '../models/billing.models';
 import { AuditLog } from '../models/audit.models';
+import { Equipment } from '../models/equipment.models';
 import { sendEmail } from './emailService';
 
 const logger = createLogger('job-scheduler');
@@ -172,6 +173,83 @@ async function updateUsageStats() {
   }
 }
 
+async function checkStaleEquipment() {
+  logger.info('Running job: checkStaleEquipment');
+  try {
+    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+
+    const staleItems = await Equipment.find({
+      isDisabled: false,
+      $or: [
+        { lastUsedAt: { $lt: fourteenDaysAgo } },
+        { lastUsedAt: { $exists: false } },
+      ],
+      $and: [
+        {
+          $or: [
+            { unusedNotificationSentAt: { $exists: false } },
+            { unusedNotificationSentAt: { $lt: fourteenDaysAgo } },
+          ],
+        },
+      ],
+    });
+
+    if (staleItems.length === 0) return;
+
+    // Find warehouse admin users (fall back to 'system')
+    const { connectMongoDB } = await import('../config/mongodb');
+    const db = await connectMongoDB();
+    const warehouseAdmins = await db
+      .collection('users')
+      .find({
+        isActive: true,
+        $or: [
+          { systemRole: 'admin' },
+          { 'departments.departmentId': 'warehouse' },
+        ],
+      })
+      .project({ _id: 1 })
+      .toArray();
+
+    const recipientIds =
+      warehouseAdmins.length > 0
+        ? warehouseAdmins.map((u: any) => u._id.toString())
+        : ['system'];
+
+    const itemNames = staleItems
+      .slice(0, 10)
+      .map((e) => e.name)
+      .join(', ');
+    const suffix = staleItems.length > 10 ? ` ועוד ${staleItems.length - 10}...` : '';
+
+    for (const recipientId of recipientIds) {
+      await Notification.create({
+        recipientId,
+        type: 'warning',
+        title: `${staleItems.length} פריטי ציוד לא בשימוש מעל שבועיים`,
+        titleHe: `${staleItems.length} פריטי ציוד לא בשימוש מעל שבועיים`,
+        message: `The following equipment has not been used for over 14 days: ${itemNames}${suffix}`,
+        messageHe: `הציוד הבא לא היה בשימוש מעל 14 יום: ${itemNames}${suffix}`,
+        resource: 'equipment',
+        actionUrl: '/warehouse',
+        channels: ['in_app'],
+        priority: 'normal',
+      });
+    }
+
+    // Stamp notification sent so we don't re-alert until the next cycle
+    const ids = staleItems.map((e) => e._id);
+    await Equipment.updateMany(
+      { _id: { $in: ids } },
+      { $set: { unusedNotificationSentAt: new Date() } },
+    );
+
+    logger.info(`Sent stale-equipment notifications for ${staleItems.length} items`);
+  } catch (error) {
+    logger.error('Error in checkStaleEquipment job', { error });
+  }
+}
+
 // ==================== SCHEDULER ====================
 
 export function registerJob(name: string, intervalMs: number, handler: () => Promise<void>) {
@@ -185,6 +263,7 @@ export function startScheduler() {
   registerJob('checkSubscriptionExpiry', 12 * 60 * 60 * 1000, checkSubscriptionExpiry); // Every 12 hours
   registerJob('cleanupOldData', 24 * 60 * 60 * 1000, cleanupOldData);              // Daily
   registerJob('updateUsageStats', 1 * 60 * 60 * 1000, updateUsageStats);           // Every hour
+  registerJob('checkStaleEquipment', 24 * 60 * 60 * 1000, checkStaleEquipment);   // Daily
 
   // Check every minute if any job needs to run
   intervalId = setInterval(async () => {

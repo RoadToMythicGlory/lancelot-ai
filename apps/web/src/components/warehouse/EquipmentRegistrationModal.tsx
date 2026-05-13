@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Modal, Form, Input, Select, DatePicker, InputNumber, Button, Tabs, message, Space, Upload } from 'antd';
+import { Modal, Form, Input, Select, DatePicker, InputNumber, Button, Tabs, message, Space, Upload, Switch } from 'antd';
 import { PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import { useMutation } from '@apollo/client';
 import { CREATE_EQUIPMENT } from '../../graphql/mutations';
@@ -30,6 +30,8 @@ const EQUIPMENT_CATEGORIES = {
   matrix_components: 'רכיבי מטריצה',
   other: 'אחר'
 };
+
+const QUANTITY_BASED_DEFAULT_CATEGORIES = new Set(['batteries', 'cards', 'adapters']);
 
 const EquipmentRegistrationModal: React.FC<EquipmentRegistrationModalProps> = ({ 
   visible, 
@@ -79,7 +81,8 @@ const EquipmentRegistrationModal: React.FC<EquipmentRegistrationModalProps> = ({
           shelf: values.shelf || null,
           cell: values.cell || null
         },
-        quantityTotal: values.quantityTotal || 1
+        quantityTotal: values.quantityTotal || 1,
+        isQuantityBased: values.isQuantityBased ?? false
       };
 
       await createEquipment({
@@ -157,7 +160,12 @@ const EquipmentRegistrationModal: React.FC<EquipmentRegistrationModalProps> = ({
                     label="קטגוריה"
                     rules={[{ required: true, message: 'נא לבחור קטגוריה' }]}
                   >
-                    <Select placeholder="בחר קטגוריה">
+                    <Select
+                      placeholder="בחר קטגוריה"
+                      onChange={(val: string) => {
+                        form.setFieldValue('isQuantityBased', QUANTITY_BASED_DEFAULT_CATEGORIES.has(val));
+                      }}
+                    >
                       {Object.entries(EQUIPMENT_CATEGORIES).map(([key, value]) => (
                         <Select.Option key={key} value={key}>
                           {value}
@@ -172,6 +180,15 @@ const EquipmentRegistrationModal: React.FC<EquipmentRegistrationModalProps> = ({
                     rules={[{ required: true, message: 'נא להזין כמות' }]}
                   >
                     <InputNumber min={1} style={{ width: '100%' }} />
+                  </Form.Item>
+
+                  <Form.Item
+                    name="isQuantityBased"
+                    label="מעקב כמותי (ללא ברקוד ליחידה)"
+                    valuePropName="checked"
+                    tooltip="פריטים כמותיים מנוהלים כמאגר עם כפתור 'התאם כמות' במקום סריקת ברקוד ליחידה"
+                  >
+                    <Switch />
                   </Form.Item>
                 </>
               ),

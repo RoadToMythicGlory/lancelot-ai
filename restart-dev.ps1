@@ -6,6 +6,19 @@ Get-Process -Name node -ErrorAction SilentlyContinue | Stop-Process -Force
 Write-Host "Clearing Next.js cache..." -ForegroundColor Yellow
 Remove-Item -Path "apps\web\.next" -Recurse -Force -ErrorAction SilentlyContinue
 
+# Start Mosquitto MQTT broker (for BLE equipment tracking)
+Write-Host "Starting Mosquitto MQTT broker..." -ForegroundColor Green
+$mosquittoRunning = docker ps --filter "name=lancelot-mosquitto" --format "{{.Names}}" 2>$null
+if ($mosquittoRunning -eq "lancelot-mosquitto") {
+    Write-Host "  Mosquitto already running." -ForegroundColor DarkGray
+} else {
+    docker-compose -f docker-compose.tracking.yml up -d 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  WARNING: Could not start Mosquitto. BLE tracking will be unavailable." -ForegroundColor DarkYellow
+        Write-Host "  Make sure Docker is running and try: docker-compose -f docker-compose.tracking.yml up -d" -ForegroundColor DarkYellow
+    }
+}
+
 # Wait a moment
 Start-Sleep -Seconds 2
 
@@ -41,3 +54,4 @@ Write-Host "Excel Parser:  http://localhost:3002" -ForegroundColor Cyan
 Write-Host "Web App (ERP): http://localhost:3000" -ForegroundColor Cyan
 Write-Host "Streamer App:  http://localhost:3100" -ForegroundColor Cyan
 Write-Host "AI Agent:      http://localhost:4001/health" -ForegroundColor Cyan
+Write-Host "MQTT Broker:   mqtt://localhost:1883" -ForegroundColor Cyan

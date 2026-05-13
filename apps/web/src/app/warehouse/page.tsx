@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Alert, List, Card, Input, Button, Space, Tag, Row, Col, Empty, App, Breadcrumb, Select, Statistic, Tabs, DatePicker } from 'antd';
-import { 
+import { Alert, List, Card, Input, Button, Space, Tag, Row, Col, Empty, App, Breadcrumb, Select, Statistic, Tabs, DatePicker, Modal } from 'antd';
+import {
   InboxOutlined,
   CheckCircleOutlined,
   HomeOutlined,
@@ -17,10 +17,11 @@ import {
   DownloadOutlined,
   ExclamationCircleOutlined,
   PhoneOutlined,
-  FilePdfOutlined
+  FilePdfOutlined,
+  EnvironmentOutlined,
 } from '@ant-design/icons';
 import { useQuery } from '@apollo/client';
-import { GET_WAREHOUSE_EQUIPMENT, GET_BROADCAST_EVENTS } from '../../graphql/queries';
+import { GET_WAREHOUSE_EQUIPMENT, GET_BROADCAST_EVENTS, GET_STALE_EQUIPMENT } from '../../graphql/queries';
 import Link from 'next/link';
 import EquipmentRegistrationModal from '../../components/warehouse/EquipmentRegistrationModal';
 import EquipmentReturnModal from '../../components/warehouse/EquipmentReturnModal';
@@ -31,6 +32,8 @@ import VendorManagement from '../../components/warehouse/VendorManagement';
 import UpcomingEvents from '../../components/warehouse/UpcomingEvents';
 import ExternalBroadcastRequests from '../../components/warehouse/ExternalBroadcastRequests';
 import WarehousePdfImportModal from '../../components/warehouse/WarehousePdfImportModal';
+import EquipmentSetsManager from '../../components/warehouse/EquipmentSetsManager';
+import EquipmentLiveTracking from '../../components/warehouse/tracking/EquipmentLiveTracking';
 import dayjs from 'dayjs';
 
 const { RangePicker } = DatePicker;
@@ -60,9 +63,12 @@ interface Equipment {
     shelf: string;
     cell: string;
   };
+  isQuantityBased: boolean;
   isDisabled: boolean;
   disabledAt?: string;
   disabledReason?: string;
+  suspensionStatus?: string;
+  lastUsedAt?: string;
 }
 
 /** Avoid crashes when metadata lists are missing or not arrays */
@@ -85,6 +91,8 @@ const WarehousePage: React.FC = () => {
   const [searchText, setSearchText] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const [isRegistrationModalVisible, setIsRegistrationModalVisible] = useState(false);
   const [isReturnModalVisible, setIsReturnModalVisible] = useState(false);
   const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null);
@@ -93,6 +101,7 @@ const WarehousePage: React.FC = () => {
   const [isDisableModalVisible, setIsDisableModalVisible] = useState(false);
   const [activeTab, setActiveTab] = useState('equipment');
   const [isPdfImportVisible, setIsPdfImportVisible] = useState(false);
+  const [isStaleModalVisible, setIsStaleModalVisible] = useState(false);
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([
     dayjs().subtract(30, 'days'),
     dayjs().add(30, 'days')
@@ -103,6 +112,11 @@ const WarehousePage: React.FC = () => {
   // Query for warehouse equipment
   const { data: equipmentData, loading: equipmentLoading, error: equipmentError, refetch } = useQuery(GET_WAREHOUSE_EQUIPMENT);
   const equipment: Equipment[] = equipmentData?.warehouseEquipment || [];
+
+  // Stale equipment (unused 14+ days)
+  const { data: staleData } = useQuery(GET_STALE_EQUIPMENT, { variables: { daysUnused: 14 } });
+  const staleEquipment: Equipment[] = staleData?.staleEquipment || [];
+  const staleCount = staleEquipment.length;
 
   // Query for broadcast events with equipment (skip if tab inactive or range cleared — avoids huge unbounded fetches and stale-cache confusion)
   const { data: eventsData, loading: eventsLoading, error: eventsError } = useQuery(GET_BROADCAST_EVENTS, {
@@ -115,6 +129,11 @@ const WarehousePage: React.FC = () => {
 
   // Get unique categories for filter
   const categories = Array.from(new Set(equipment.map(e => e.category))).filter(Boolean);
+
+  // Reset to first page whenever filters/search change
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchText, selectedCategory, selectedStatus]);
 
   // Filter equipment based on search and filters
   const filteredEquipment = equipment.filter(item => {
@@ -131,7 +150,9 @@ const WarehousePage: React.FC = () => {
     
     const matchesCategory = selectedCategory === 'all' || item.category === selectedCategory;
     const matchesStatus = selectedStatus === 'all' || 
-      (selectedStatus === 'disabled' ? item.isDisabled : item.status === selectedStatus);
+      (selectedStatus === 'disabled' ? item.isDisabled :
+       selectedStatus === 'under_maintenance' ? item.suspensionStatus === 'under_maintenance' :
+       item.status === selectedStatus);
     
     return matchesSearch && matchesCategory && matchesStatus;
   });
@@ -396,6 +417,17 @@ const WarehousePage: React.FC = () => {
         className="mb-6"
       />
 
+      {staleCount > 0 && (
+        <Alert
+          message={`${staleCount} פריטי ציוד לא בשימוש מעל שבועיים`}
+          description="ציוד שלא היה בשימוש במשך 14 יום ומעלה. לחץ כאן לצפייה ברשימה."
+          type="warning"
+          showIcon
+          className="mb-6 cursor-pointer"
+          onClick={() => setIsStaleModalVisible(true)}
+        />
+      )}
+
       {/* Filters and Search */}
       <Card className="mb-6">
         <Row gutter={16} align="middle">
@@ -434,6 +466,7 @@ const WarehousePage: React.FC = () => {
               <Select.Option value="available">זמין</Select.Option>
               <Select.Option value="assigned">מוקצה</Select.Option>
               <Select.Option value="maintenance">בתחזוקה</Select.Option>
+              <Select.Option value="under_maintenance">בתחזוקה (השעיה)</Select.Option>
               <Select.Option value="disabled">מושבת</Select.Option>
             </Select>
           </Col>
@@ -470,11 +503,27 @@ const WarehousePage: React.FC = () => {
         ) : (
           <List
             dataSource={filteredEquipment}
+            pagination={{
+              current: currentPage,
+              pageSize: pageSize,
+              total: filteredEquipment.length,
+              showSizeChanger: true,
+              pageSizeOptions: ['20', '50', '100'],
+              showTotal: (total, range) => `${range[0]}-${range[1]} מתוך ${total} פריטים`,
+              onChange: (page, size) => {
+                setCurrentPage(page);
+                if (size !== pageSize) {
+                  setPageSize(size);
+                  setCurrentPage(1);
+                }
+              },
+              position: 'both',
+            }}
             renderItem={(item) => (
               <List.Item
                 className="hover:bg-gray-50 transition-colors"
                 actions={[
-                  <Button
+                  ...(item.isQuantityBased ? [<Button
                     key="adjust"
                     size="small"
                     icon={<PlusOutlined />}
@@ -485,7 +534,7 @@ const WarehousePage: React.FC = () => {
                     }}
                   >
                     התאם כמות
-                  </Button>,
+                  </Button>] : []),
                   <Button
                     key="disable"
                     size="small"
@@ -521,6 +570,14 @@ const WarehousePage: React.FC = () => {
                       </Tag>
                       {item.isDisabled && (
                         <Tag color="red">מושבת</Tag>
+                      )}
+                      {item.suspensionStatus && (
+                        <Tag color="volcano">
+                          {item.suspensionStatus === 'under_maintenance' ? 'בתחזוקה' :
+                           item.suspensionStatus === 'broken' ? 'תקול' :
+                           item.suspensionStatus === 'lost' ? 'אבד' :
+                           item.suspensionStatus === 'reserved' ? 'משוריין' : 'אחר'}
+                        </Tag>
                       )}
                       {item.condition && item.condition !== 'תקין' && (
                         <Tag color="warning">{item.condition}</Tag>
@@ -940,6 +997,16 @@ const WarehousePage: React.FC = () => {
               children: <UpcomingEvents />,
             },
             {
+              key: 'equipment-sets',
+              label: (
+                <span>
+                  <InboxOutlined />
+                  סטים / פריסטים
+                </span>
+              ),
+              children: <EquipmentSetsManager />,
+            },
+            {
               key: 'external-requests',
               label: (
                 <span>
@@ -948,6 +1015,16 @@ const WarehousePage: React.FC = () => {
                 </span>
               ),
               children: <ExternalBroadcastRequests message={message} />,
+            },
+            {
+              key: 'tracking',
+              label: (
+                <span>
+                  <EnvironmentOutlined />
+                  מעקב חי
+                </span>
+              ),
+              children: <EquipmentLiveTracking />,
             },
           ]}
         />
@@ -1015,6 +1092,82 @@ const WarehousePage: React.FC = () => {
             message.success('רשימת הציוד לאירוע נשמרה בהצלחה');
           }}
         />
+
+        {/* Stale Equipment Modal (unused 14+ days) */}
+        <Modal
+          title={
+            <span>
+              <ExclamationCircleOutlined style={{ color: '#faad14', marginInlineEnd: 8 }} />
+              ציוד לא בשימוש מעל שבועיים ({staleCount})
+            </span>
+          }
+          open={isStaleModalVisible}
+          onCancel={() => setIsStaleModalVisible(false)}
+          footer={[
+            <Button key="close" onClick={() => setIsStaleModalVisible(false)}>
+              סגור
+            </Button>,
+          ]}
+          width={800}
+        >
+          {staleEquipment.length === 0 ? (
+            <Empty description="אין פריטי ציוד שאינם בשימוש" />
+          ) : (
+            <List
+              dataSource={staleEquipment}
+              renderItem={(item) => {
+                const lastUsed = item.lastUsedAt && dayjs(item.lastUsedAt).isValid()
+                  ? dayjs(item.lastUsedAt)
+                  : null;
+                const daysUnused = lastUsed ? dayjs().diff(lastUsed, 'day') : null;
+                return (
+                  <List.Item
+                    className="hover:bg-gray-50 transition-colors cursor-pointer"
+                    onClick={() => {
+                      setIsStaleModalVisible(false);
+                      handleEquipmentClick(item);
+                    }}
+                    actions={[
+                      <Button
+                        key="details"
+                        size="small"
+                        type="link"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsStaleModalVisible(false);
+                          handleEquipmentClick(item);
+                        }}
+                      >
+                        פרטים
+                      </Button>,
+                    ]}
+                  >
+                    <div className="w-full">
+                      <div className="flex justify-between items-center mb-1">
+                        <Space>
+                          <strong>{item.name}</strong>
+                          {item.category && <Tag color="blue">{item.category}</Tag>}
+                          <Tag color={getStatusColor(item.status)}>
+                            {getStatusText(item.status)}
+                          </Tag>
+                          {item.isDisabled && <Tag color="red">מושבת</Tag>}
+                        </Space>
+                        {item.barcode && (
+                          <code className="text-sm bg-gray-100 px-2 py-1 rounded">{item.barcode}</code>
+                        )}
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        {lastUsed
+                          ? `שימוש אחרון: ${lastUsed.format('DD/MM/YYYY')}${daysUnused !== null ? ` (לפני ${daysUnused} ימים)` : ''}`
+                          : 'לא נרשם שימוש'}
+                      </div>
+                    </div>
+                  </List.Item>
+                );
+              }}
+            />
+          )}
+        </Modal>
       </div>
     </div>
   );

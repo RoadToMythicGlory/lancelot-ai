@@ -1,8 +1,16 @@
 import React from 'react';
-import { Modal, Form, Input, Space, Button, Alert, App } from 'antd';
+import { Modal, Form, Input, Select, Space, Button, Alert, App } from 'antd';
 import { ExclamationCircleOutlined } from '@ant-design/icons';
 import { useMutation } from '@apollo/client';
 import { DISABLE_EQUIPMENT, ENABLE_EQUIPMENT } from '../../graphql/mutations';
+
+const SUSPENSION_STATUS_OPTIONS = [
+  { value: 'under_maintenance', label: 'בתחזוקה' },
+  { value: 'broken', label: 'תקול' },
+  { value: 'lost', label: 'אבד' },
+  { value: 'reserved', label: 'משוריין' },
+  { value: 'other', label: 'אחר' },
+];
 
 interface EquipmentDisableModalProps {
   visible: boolean;
@@ -53,7 +61,8 @@ const EquipmentDisableModal: React.FC<EquipmentDisableModalProps> = ({
     await disableEquipment({
       variables: {
         id: equipment?.id,
-        reason: values.reason
+        reason: values.reason,
+        suspensionStatus: values.suspensionStatus || 'under_maintenance'
       }
     });
   };
@@ -120,7 +129,15 @@ const EquipmentDisableModal: React.FC<EquipmentDisableModalProps> = ({
           </Space>
         </div>
       ) : (
-        <Form form={form} layout="vertical" onFinish={handleDisable}>
+        <Form form={form} layout="vertical" onFinish={handleDisable} initialValues={{ suspensionStatus: 'under_maintenance' }}>
+          <Form.Item
+            name="suspensionStatus"
+            label="סטטוס השעיה"
+            rules={[{ required: true, message: 'נא לבחור סטטוס' }]}
+          >
+            <Select options={SUSPENSION_STATUS_OPTIONS} />
+          </Form.Item>
+
           <Form.Item
             name="reason"
             label="סיבת ההשבתה"

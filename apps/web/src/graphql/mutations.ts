@@ -294,15 +294,30 @@ export const ADJUST_EQUIPMENT_QUANTITY = gql`
   }
 `;
 
+export const FORCE_RELEASE_EQUIPMENT = gql`
+  mutation ForceReleaseEquipment($id: ID!, $reason: String!) {
+    forceReleaseEquipment(id: $id, reason: $reason) {
+      id
+      name
+      status
+      quantityTotal
+      quantityAvailable
+      quantityAssigned
+      isDisabled
+    }
+  }
+`;
+
 export const DISABLE_EQUIPMENT = gql`
-  mutation DisableEquipment($id: ID!, $reason: String!) {
-    disableEquipment(id: $id, reason: $reason) {
+  mutation DisableEquipment($id: ID!, $reason: String!, $suspensionStatus: String) {
+    disableEquipment(id: $id, reason: $reason, suspensionStatus: $suspensionStatus) {
       id
       name
       status
       isDisabled
       disabledAt
       disabledReason
+      suspensionStatus
     }
   }
 `;
@@ -360,6 +375,7 @@ export const CREATE_EQUIPMENT = gql`
         shelf
         cell
       }
+      isQuantityBased
       createdAt
       updatedAt
     }
@@ -392,6 +408,8 @@ export const UPDATE_EQUIPMENT = gql`
         shelf
         cell
       }
+      isQuantityBased
+      suspensionStatus
       updatedAt
     }
   }
@@ -667,5 +685,189 @@ export const UPDATE_EXTERNAL_BROADCAST_PRESET = gql`
 export const DELETE_EXTERNAL_BROADCAST_PRESET = gql`
   mutation DeleteExternalBroadcastPreset($id: ID!) {
     deleteExternalBroadcastPreset(id: $id)
+  }
+`;
+
+// Equipment Set Mutations
+export const CREATE_EQUIPMENT_SET = gql`
+  mutation CreateEquipmentSet($input: CreateEquipmentSetInput!) {
+    createEquipmentSet(input: $input) {
+      id
+      name
+      barcode
+      description
+      items {
+        equipmentId
+        equipment {
+          id
+          name
+          barcode
+          category
+        }
+        quantity
+        required
+      }
+      notes
+      isActive
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const UPDATE_EQUIPMENT_SET = gql`
+  mutation UpdateEquipmentSet($id: ID!, $input: UpdateEquipmentSetInput!) {
+    updateEquipmentSet(id: $id, input: $input) {
+      id
+      name
+      barcode
+      description
+      items {
+        equipmentId
+        equipment {
+          id
+          name
+          barcode
+          category
+        }
+        quantity
+        required
+      }
+      notes
+      isActive
+      updatedAt
+    }
+  }
+`;
+
+export const DELETE_EQUIPMENT_SET = gql`
+  mutation DeleteEquipmentSet($id: ID!) {
+    deleteEquipmentSet(id: $id)
+  }
+`;
+
+export const ASSIGN_EQUIPMENT_SET_TO_EVENT = gql`
+  mutation AssignEquipmentSetToEvent($eventId: ID!, $setId: ID!) {
+    assignEquipmentSetToEvent(eventId: $eventId, setId: $setId) {
+      success
+      message
+      updatedEquipment {
+        id
+        status
+        quantityAvailable
+        quantityAssigned
+      }
+    }
+  }
+`;
+
+export const RETURN_EQUIPMENT_SET = gql`
+  mutation ReturnEquipmentSet($eventId: ID!, $setId: ID!, $scannedBarcodes: [String!]!, $missingEquipmentIds: [ID!], $replacements: [EquipmentReplacementInput!]) {
+    returnEquipmentSet(eventId: $eventId, setId: $setId, scannedBarcodes: $scannedBarcodes, missingEquipmentIds: $missingEquipmentIds, replacements: $replacements) {
+      success
+      message
+      returnedCount
+      missingCount
+      replacedCount
+    }
+  }
+`;
+
+// ==================== BLE Tracking Mutations ====================
+
+export const REGISTER_TRACKER_TAG = gql`
+  mutation RegisterTrackerTag($equipmentId: ID, $bleAddress: String!, $label: String!) {
+    registerTrackerTag(equipmentId: $equipmentId, bleAddress: $bleAddress, label: $label) {
+      id
+      bleAddress
+      equipmentId
+      label
+      status
+    }
+  }
+`;
+
+export const UNREGISTER_TRACKER_TAG = gql`
+  mutation UnregisterTrackerTag($tagId: ID!) {
+    unregisterTrackerTag(tagId: $tagId)
+  }
+`;
+
+export const BIND_TRACKER_TAG = gql`
+  mutation BindTrackerTagToEquipment($tagId: ID!, $equipmentId: ID!) {
+    bindTrackerTagToEquipment(tagId: $tagId, equipmentId: $equipmentId) {
+      id
+      bleAddress
+      equipmentId
+      label
+      status
+    }
+  }
+`;
+
+export const UNBIND_TRACKER_TAG = gql`
+  mutation UnbindTrackerTagFromEquipment($tagId: ID!) {
+    unbindTrackerTagFromEquipment(tagId: $tagId) {
+      id
+      bleAddress
+      equipmentId
+      label
+    }
+  }
+`;
+
+export const CREATE_TRACKER_SITE = gql`
+  mutation CreateTrackerSite($input: CreateTrackerSiteInput!) {
+    createTrackerSite(input: $input) {
+      id
+      name
+      floorPlanImageUrl
+      widthMeters
+      heightMeters
+      isActive
+    }
+  }
+`;
+
+export const UPDATE_TRACKER_SITE = gql`
+  mutation UpdateTrackerSite($id: ID!, $input: UpdateTrackerSiteInput!) {
+    updateTrackerSite(id: $id, input: $input) {
+      id
+      name
+      floorPlanImageUrl
+      widthMeters
+      heightMeters
+      isActive
+    }
+  }
+`;
+
+export const CREATE_TRACKER_GATEWAY = gql`
+  mutation CreateTrackerGateway($input: CreateTrackerGatewayInput!) {
+    createTrackerGateway(input: $input) {
+      id
+      gatewayKey
+      name
+      kind
+      siteId
+      position {
+        x
+        y
+      }
+      zoneName
+      online
+    }
+  }
+`;
+
+export const UPDATE_TRACKER_GATEWAY_POSITION = gql`
+  mutation UpdateTrackerGatewayPosition($id: ID!, $x: Float!, $y: Float!) {
+    updateTrackerGatewayPosition(id: $id, x: $x, y: $y) {
+      id
+      position {
+        x
+        y
+      }
+    }
   }
 `;

@@ -1,6 +1,6 @@
 import { connectMongoose } from '../config/mongodb';
 import { BroadcastEvent, RoutingConfig } from '../models/broadcast.models';
-import { Equipment, generateBarcode, EquipmentAssignment, EquipmentHistory } from '../models/equipment.models';
+import { Equipment, generateBarcode, EquipmentAssignment, EquipmentHistory, QUANTITY_BASED_DEFAULT_CATEGORIES } from '../models/equipment.models';
 import { ExternalBroadcastPreset } from '../models/externalBroadcastPreset.models';
 import mongoose from 'mongoose';
 import { authenticateUser } from '../middleware/auth';
@@ -150,9 +150,12 @@ export const broadcastResolvers = {
           manualLink: item.manualLink || null,
           imageUrl: item.imageUrl || null,
           storage: item.storage || null,
+          isQuantityBased: item.isQuantityBased || false,
           isDisabled: item.isDisabled || false,
           disabledAt: item.disabledAt?.toISOString() || null,
           disabledReason: item.disabledReason || null,
+          suspensionStatus: item.suspensionStatus || null,
+          lastUsedAt: item.lastUsedAt?.toISOString() || null,
           createdAt: item.createdAt.toISOString(),
           updatedAt: item.updatedAt.toISOString()
         }));
@@ -474,6 +477,110 @@ export const broadcastResolvers = {
         }));
       } catch (error) {
         console.error('Error fetching equipment assignments:', error);
+        return [];
+      }
+    },
+
+    // Returns every BroadcastEvent that currently has at least one piece of
+    // equipment "out". Combines two sources of truth so we never lose an event:
+    //   1. The `equipment_assignments` collection (records created when the
+    //      warehouse modal scans equipment to an event).
+    //   2. The event's embedded metadata (warehouse.assignedItems, the legacy
+    //      warehouseData path, and equipment_list).
+    // External Broadcasts' equipmentList is intentionally excluded — those are
+    // department REQUESTS, not warehouse assignments, and surfacing them here
+    // would let the return modal claim un-scanned gear is checked out.
+    // No date filter — if the assignment is still active, the event appears
+    // even if it ran months ago.
+    eventsWithAssignedEquipment: async () => {
+      try {
+        await ensureMongoConnection();
+
+        const eventIdSet = new Set<string>();
+
+        // 1) Source-of-truth: active EquipmentAssignment records.
+        const activeAssignments = await EquipmentAssignment.find({ status: 'active' })
+          .select('eventId')
+          .lean()
+          .exec();
+        for (const a of activeAssignments) {
+          if (a.eventId) eventIdSet.add(a.eventId.toString());
+        }
+
+        // 2) Metadata fallback: scan all events for any embedded assignment
+        // records (covers PDF imports and legacy data that didn't create
+        // EquipmentAssignment rows).
+        // NOTE: externalBroadcasts.equipmentList holds REQUESTED items from the
+        // External Broadcasts department, not actual assignments. Including it
+        // here would surface events with only open requests (nothing checked
+        // out of the warehouse) in the equipment-return flow.
+        const metadataMatches = await BroadcastEvent.find({
+          $or: [
+            { 'metadata.departments.warehouse.assignedItems.0': { $exists: true } },
+            { 'metadata.departments.warehouse.customData.assignedItems.0': { $exists: true } },
+            { 'metadata.warehouseData.assignedItems.0': { $exists: true } },
+            { 'metadata.warehouseData.customData.assignedItems.0': { $exists: true } },
+            { 'equipment_list.0': { $exists: true } }
+          ]
+        })
+          .select('_id')
+          .lean()
+          .exec();
+        for (const e of metadataMatches) {
+          eventIdSet.add(e._id.toString());
+        }
+
+        if (eventIdSet.size === 0) return [];
+
+        // Fetch full event documents (sorted newest first).
+        const objectIds = Array.from(eventIdSet)
+          .filter((id) => mongoose.Types.ObjectId.isValid(id))
+          .map((id) => new mongoose.Types.ObjectId(id));
+
+        const events = await BroadcastEvent.find({ _id: { $in: objectIds } })
+          .sort({ startTime: -1 })
+          .exec();
+
+        const now = new Date();
+        return events.map((eventDoc: any) => {
+          const event: any = eventDoc.toObject ? eventDoc.toObject() : eventDoc;
+          // `id` virtual is stripped by toObject() unless schema opts in, so
+          // fall back to the raw _id; same pattern protects required date fields.
+          const id = (event.id && String(event.id)) || eventDoc._id?.toString() || event._id?.toString();
+          const startTime = event.startTime || now;
+          const endTime = event.endTime || event.startTime || now;
+          return {
+            id,
+            eventNumber: event.eventNumber,
+            title: event.title || '',
+            hebrewTitle: event.hebrewTitle,
+            description: event.description,
+            eventType: event.eventType || 'live_show',
+            type: event.type || 'live',
+            status: mapStatusToEnum(event.status),
+            startTime: new Date(startTime).toISOString(),
+            endTime: new Date(endTime).toISOString(),
+            koTime: event.koTime?.toISOString(),
+            arrivalTime: event.arrivalTime?.toISOString(),
+            actualStartTime: event.actualStartTime?.toISOString(),
+            actualEndTime: event.actualEndTime?.toISOString(),
+            location: event.location,
+            venue: event.venue,
+            liveLocation: event.liveLocation,
+            channel: event.channel || '',
+            production_crew: event.production_crew || [],
+            equipment_list: event.equipment_list || [],
+            metadata: event.metadata,
+            createdAt: (event.createdAt || now).toISOString
+              ? (event.createdAt || now).toISOString()
+              : new Date(event.createdAt || now).toISOString(),
+            updatedAt: (event.updatedAt || now).toISOString
+              ? (event.updatedAt || now).toISOString()
+              : new Date(event.updatedAt || now).toISOString()
+          };
+        }).filter((e: any) => e.id);
+      } catch (error) {
+        console.error('❌ Error fetching events with assigned equipment:', error);
         return [];
       }
     },
@@ -891,7 +998,9 @@ export const broadcastResolvers = {
           manualLink: input.manualLink,
           imageUrl: input.imageUrl,
           storage: input.storage,
-          currentLocation: input.storage ? `Row ${input.storage.row}, Shelf ${input.storage.shelf}, Cell ${input.storage.cell}` : null
+          currentLocation: input.storage ? `Row ${input.storage.row}, Shelf ${input.storage.shelf}, Cell ${input.storage.cell}` : null,
+          isQuantityBased: input.isQuantityBased ?? QUANTITY_BASED_DEFAULT_CATEGORIES.has(input.category),
+          lastUsedAt: new Date()
         });
         
         const savedEquipment = await equipment.save();
@@ -919,9 +1028,12 @@ export const broadcastResolvers = {
           manualLink: savedEquipment.manualLink || null,
           imageUrl: savedEquipment.imageUrl || null,
           storage: savedEquipment.storage || null,
+          isQuantityBased: savedEquipment.isQuantityBased || false,
           isDisabled: savedEquipment.isDisabled || false,
           disabledAt: savedEquipment.disabledAt?.toISOString() || null,
           disabledReason: savedEquipment.disabledReason || null,
+          suspensionStatus: savedEquipment.suspensionStatus || null,
+          lastUsedAt: savedEquipment.lastUsedAt?.toISOString() || null,
           createdAt: savedEquipment.createdAt.toISOString(),
           updatedAt: savedEquipment.updatedAt.toISOString()
         };
@@ -960,6 +1072,8 @@ export const broadcastResolvers = {
         }
         if (input.isDisabled !== undefined) updateData.isDisabled = input.isDisabled;
         if (input.disabledReason !== undefined) updateData.disabledReason = input.disabledReason;
+        if (input.suspensionStatus !== undefined) updateData.suspensionStatus = input.suspensionStatus;
+        if (input.isQuantityBased !== undefined) updateData.isQuantityBased = input.isQuantityBased;
         
         // Update equipment
         const updatedEquipment = await Equipment.findByIdAndUpdate(
@@ -996,9 +1110,12 @@ export const broadcastResolvers = {
           manualLink: updatedEquipment.manualLink || null,
           imageUrl: updatedEquipment.imageUrl || null,
           storage: updatedEquipment.storage || null,
+          isQuantityBased: updatedEquipment.isQuantityBased || false,
           isDisabled: updatedEquipment.isDisabled || false,
           disabledAt: updatedEquipment.disabledAt?.toISOString() || null,
           disabledReason: updatedEquipment.disabledReason || null,
+          suspensionStatus: updatedEquipment.suspensionStatus || null,
+          lastUsedAt: updatedEquipment.lastUsedAt?.toISOString() || null,
           createdAt: updatedEquipment.createdAt.toISOString(),
           updatedAt: updatedEquipment.updatedAt.toISOString()
         };
@@ -1268,6 +1385,8 @@ export const broadcastResolvers = {
             if (equipment.quantityAssigned === 0) {
               equipment.status = 'available';
             }
+
+            equipment.lastUsedAt = new Date();
             
             await equipment.save();
             
@@ -1508,6 +1627,10 @@ export const broadcastResolvers = {
               await newAssignment.save();
             }
             
+            // Stamp lastUsedAt
+            equipment.lastUsedAt = new Date();
+            await equipment.save();
+
             // Create history record for transfer
             const historyRecord = new EquipmentHistory({
               equipmentId: equipment._id,
@@ -1586,6 +1709,9 @@ export const broadcastResolvers = {
         });
         
         const saved = await assignment.save();
+
+        // Stamp lastUsedAt on the equipment
+        await Equipment.findByIdAndUpdate(input.equipmentId, { $set: { lastUsedAt: new Date() } }).exec();
         
         return {
           id: saved._id.toString(),
@@ -1635,6 +1761,9 @@ export const broadcastResolvers = {
         if (input.assignedToName !== undefined) assignment.assignedByName = input.assignedToName;
         
         const saved = await assignment.save();
+
+        // Stamp lastUsedAt on the equipment
+        await Equipment.findByIdAndUpdate(saved.equipmentId, { $set: { lastUsedAt: new Date() } }).exec();
         
         return {
           id: saved._id.toString(),
@@ -1727,11 +1856,25 @@ export const broadcastResolvers = {
 
         // Store previous values for history
         const previousTotal = equipment.quantityTotal;
-        
-        // Update total quantity
-        equipment.quantityTotal = Math.max(0, equipment.quantityTotal + adjustment);
+
+        // Reject deductions that would orphan currently-assigned units
+        // (i.e. would push quantityAvailable below zero). Forcing the user
+        // to either return the units first, or use forceReleaseEquipment,
+        // prevents the negative-stock corruption that produced the
+        // "ghost-assigned" Canon C300 Mark III incident.
+        const proposedTotal = equipment.quantityTotal + adjustment;
+        if (proposedTotal < equipment.quantityAssigned) {
+          throw new Error(
+            `Cannot reduce total quantity to ${Math.max(0, proposedTotal)} ` +
+            `while ${equipment.quantityAssigned} unit(s) are still marked as assigned. ` +
+            `Return the assigned units first, or use Force Release to clear stuck assignments.`
+          );
+        }
+
+        equipment.quantityTotal = Math.max(0, proposedTotal);
         equipment.quantityAvailable = equipment.quantityTotal - equipment.quantityAssigned;
-        
+        equipment.lastUsedAt = new Date();
+
         await equipment.save();
 
         // Create history entry
@@ -1767,11 +1910,95 @@ export const broadcastResolvers = {
         };
       } catch (error) {
         console.error('Error adjusting equipment quantity:', error);
+        if (error instanceof Error) throw error;
         throw new Error('Failed to adjust equipment quantity');
       }
     },
 
-    disableEquipment: async (_: any, { id, reason }: { id: string, reason: string }, context: any) => {
+    // Admin escape hatch for stuck "ghost-assigned" units. Resets
+    // quantityAssigned to 0, restores quantityAvailable, cancels every
+    // active EquipmentAssignment row for this equipment, and writes a
+    // history entry. Used when an event was deleted or its metadata was
+    // overwritten while units were still checked out.
+    forceReleaseEquipment: async (
+      _: any,
+      { id, reason }: { id: string; reason: string },
+      context: any,
+    ) => {
+      try {
+        await ensureMongoConnection();
+        const user = authenticateUser(context);
+
+        const equipment = await Equipment.findById(id).exec();
+        if (!equipment) {
+          throw new Error('Equipment not found');
+        }
+
+        const previousAssigned = equipment.quantityAssigned;
+        const previousAvailable = equipment.quantityAvailable;
+        const previousStatus = equipment.status;
+
+        // Cancel any active assignment rows for this equipment so the
+        // Return modal stops surfacing the stuck event.
+        const activeRows = await EquipmentAssignment.find({
+          equipmentId: equipment._id,
+          status: 'active',
+        }).exec();
+        const cancelledEventIds: string[] = [];
+        for (const row of activeRows) {
+          row.status = 'cancelled';
+          row.returnedAt = new Date();
+          row.returnedBy = user.id;
+          row.returnedByName = `${user.firstName} ${user.lastName}`;
+          row.notes = `${row.notes ? row.notes + ' | ' : ''}Force-released: ${reason}`;
+          await row.save();
+          cancelledEventIds.push(row.eventId.toString());
+        }
+
+        equipment.quantityAssigned = 0;
+        equipment.quantityAvailable = equipment.quantityTotal;
+        if (!equipment.isDisabled) {
+          equipment.status = equipment.quantityTotal > 0 ? 'available' : equipment.status;
+        }
+        await equipment.save();
+
+        await new EquipmentHistory({
+          equipmentId: equipment._id,
+          action: 'returned',
+          quantity: previousAssigned,
+          performedBy: user.id,
+          performedByName: `${user.firstName} ${user.lastName}`,
+          notes: `Force release. Reason: ${reason}. Cancelled ${activeRows.length} active assignment row(s)` +
+            (cancelledEventIds.length ? ` (events: ${cancelledEventIds.join(', ')})` : ''),
+          previousValue: `assigned=${previousAssigned}, available=${previousAvailable}, status=${previousStatus}`,
+          newValue: `assigned=${equipment.quantityAssigned}, available=${equipment.quantityAvailable}, status=${equipment.status}`,
+          date: new Date(),
+        }).save();
+
+        return {
+          id: equipment._id.toString(),
+          name: equipment.name,
+          category: equipment.category,
+          brand: equipment.company || null,
+          barcode: equipment.barcode,
+          status: equipment.status,
+          condition: equipment.condition || null,
+          quantityTotal: equipment.quantityTotal,
+          quantityAvailable: equipment.quantityAvailable,
+          quantityAssigned: equipment.quantityAssigned,
+          currentLocation: equipment.currentLocation || null,
+          isDisabled: equipment.isDisabled || false,
+          createdAt: equipment.createdAt.toISOString(),
+          updatedAt: equipment.updatedAt.toISOString(),
+        };
+      } catch (error) {
+        console.error('❌ Error force-releasing equipment:', error);
+        if (error instanceof Error) throw error;
+        throw new Error('Failed to force-release equipment');
+      }
+    },
+
+    disableEquipment: async (_: any, { id, reason, suspensionStatus }: { id: string, reason: string, suspensionStatus?: string }, context: any) => {
       try {
         await ensureMongoConnection();
         const user = authenticateUser(context);
@@ -1790,7 +2017,8 @@ export const broadcastResolvers = {
         equipment.disabledAt = new Date();
         equipment.disabledBy = user.id;
         equipment.disabledReason = reason;
-        equipment.status = 'maintenance'; // Set status to maintenance when disabled
+        equipment.suspensionStatus = (suspensionStatus as any) || 'under_maintenance';
+        equipment.status = 'maintenance';
         
         await equipment.save();
 
@@ -1818,10 +2046,13 @@ export const broadcastResolvers = {
           quantityAvailable: equipment.quantityAvailable,
           quantityAssigned: equipment.quantityAssigned,
           currentLocation: equipment.currentLocation || null,
+          isQuantityBased: equipment.isQuantityBased || false,
           isDisabled: equipment.isDisabled,
           disabledAt: equipment.disabledAt?.toISOString() || null,
           disabledBy: equipment.disabledBy ? { id: equipment.disabledBy } : null,
           disabledReason: equipment.disabledReason || null,
+          suspensionStatus: equipment.suspensionStatus || null,
+          lastUsedAt: equipment.lastUsedAt?.toISOString() || null,
           createdAt: equipment.createdAt.toISOString(),
           updatedAt: equipment.updatedAt.toISOString()
         };
@@ -1850,6 +2081,7 @@ export const broadcastResolvers = {
         equipment.disabledAt = undefined;
         equipment.disabledBy = undefined;
         equipment.disabledReason = undefined;
+        equipment.suspensionStatus = undefined;
         equipment.status = equipment.quantityAvailable > 0 ? 'available' : 'assigned';
         
         await equipment.save();

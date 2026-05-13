@@ -144,11 +144,18 @@ type WarehouseEquipment {
   # Storage location
   storage: StorageLocation
   
+  # Quantity-based items use pool tracking instead of per-unit barcodes
+  isQuantityBased: Boolean!
+  
   # Equipment state
   isDisabled: Boolean!
   disabledAt: DateTime
   disabledBy: User
   disabledReason: String
+  suspensionStatus: String
+  
+  # Activity tracking
+  lastUsedAt: DateTime
   
   createdAt: DateTime!
   updatedAt: DateTime!
@@ -181,6 +188,7 @@ input CreateEquipmentInput {
   imageUrl: String
   storage: StorageLocationInput
   quantityTotal: Int!
+  isQuantityBased: Boolean
 }
 
 input UpdateEquipmentInput {
@@ -201,6 +209,8 @@ input UpdateEquipmentInput {
   currentLocation: String
   isDisabled: Boolean
   disabledReason: String
+  suspensionStatus: String
+  isQuantityBased: Boolean
 }
 
 input StorageLocationInput {
@@ -262,6 +272,63 @@ type EquipmentTransferDetails {
   targetEventName: String!
   transferredQuantity: Int!
   canUndo: Boolean!
+}
+
+# Equipment Set types
+type EquipmentSet {
+  id: ID!
+  name: String!
+  barcode: String!
+  description: String
+  items: [EquipmentSetItem!]!
+  notes: String
+  isActive: Boolean!
+  createdBy: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type EquipmentSetItem {
+  equipmentId: ID!
+  equipment: WarehouseEquipment
+  quantity: Int!
+  required: Boolean!
+}
+
+input CreateEquipmentSetInput {
+  name: String!
+  barcode: String!
+  description: String
+  items: [EquipmentSetItemInput!]!
+  notes: String
+}
+
+input UpdateEquipmentSetInput {
+  name: String
+  barcode: String
+  description: String
+  items: [EquipmentSetItemInput!]
+  notes: String
+  isActive: Boolean
+}
+
+input EquipmentSetItemInput {
+  equipmentId: ID!
+  quantity: Int!
+  required: Boolean
+}
+
+input EquipmentReplacementInput {
+  originalEquipmentId: ID!
+  replacementEquipmentId: ID!
+}
+
+type EquipmentSetReturnResponse {
+  success: Boolean!
+  message: String!
+  returnedCount: Int!
+  missingCount: Int!
+  replacedCount: Int!
 }
 
 input CreateEquipmentAssignmentInput {
@@ -797,6 +864,19 @@ type Query {
   equipmentAssignmentsByEvent(broadcastEventId: ID!): [EquipmentAssignment!]!
   equipmentAssignments(equipmentId: ID!): [EquipmentAssignment!]!
   equipmentHistory(equipmentId: ID!): [EquipmentHistory!]!
+
+  # All broadcast events that currently have equipment "out" of the warehouse
+  # (active EquipmentAssignment records OR equipment embedded in event metadata).
+  # Not date-filtered — used by the equipment return UI.
+  eventsWithAssignedEquipment: [BroadcastEvent!]!
+
+  # Equipment Sets
+  equipmentSets: [EquipmentSet!]!
+  equipmentSet(id: ID!): EquipmentSet
+  equipmentSetByBarcode(barcode: String!): EquipmentSet
+
+  # Stale equipment (unused for N days)
+  staleEquipment(daysUnused: Int = 14): [WarehouseEquipment!]!
   
   # Vendors
   vendors(filter: VendorFilter): [Vendor!]!
@@ -900,13 +980,27 @@ type Mutation {
   
   # Equipment quantity adjustment
   adjustEquipmentQuantity(id: ID!, adjustment: Int!, reason: String!): WarehouseEquipment!
-  
+
+  # Force-release stuck "ghost-assigned" units. Resets quantityAssigned to 0,
+  # cancels every active EquipmentAssignment row for this equipment, and
+  # writes a history entry. Use when an event was deleted while units
+  # were still checked out, leaving the equipment unrecoverable through
+  # the normal Return modal.
+  forceReleaseEquipment(id: ID!, reason: String!): WarehouseEquipment!
+
   # Equipment state management
-  disableEquipment(id: ID!, reason: String!): WarehouseEquipment!
+  disableEquipment(id: ID!, reason: String!, suspensionStatus: String): WarehouseEquipment!
   enableEquipment(id: ID!): WarehouseEquipment!
   
   # Undo equipment transfer
   undoEquipmentTransfer(transferId: ID!): TransferEquipmentResponse!
+
+  # Equipment Set mutations
+  createEquipmentSet(input: CreateEquipmentSetInput!): EquipmentSet!
+  updateEquipmentSet(id: ID!, input: UpdateEquipmentSetInput!): EquipmentSet!
+  deleteEquipmentSet(id: ID!): Boolean!
+  assignEquipmentSetToEvent(eventId: ID!, setId: ID!): EquipmentReturnResponse!
+  returnEquipmentSet(eventId: ID!, setId: ID!, scannedBarcodes: [String!]!, missingEquipmentIds: [ID!], replacements: [EquipmentReplacementInput!]): EquipmentSetReturnResponse!
   
   # Vendor mutations
   createVendor(input: CreateVendorInput!): Vendor!
@@ -3695,4 +3789,158 @@ extend type Mutation {
 
   # OAuth registration (streamer self-serve)
   registerStreamer(email: String!, password: String!, displayName: String!): AuthPayload!
+}
+
+# ==================== BLE EQUIPMENT TRACKING ====================
+
+type TrackerTag {
+  id: ID!
+  bleAddress: String!
+  equipmentId: ID
+  equipmentName: String
+  label: String!
+  status: String!
+  lastBattery: Float
+  lastTemperature: Float
+  lastSeenAt: DateTime
+  latestPosition: TrackerPosition
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type TrackerSite {
+  id: ID!
+  name: String!
+  floorPlanImageUrl: String
+  widthMeters: Float!
+  heightMeters: Float!
+  geoAnchor: TrackerGeoAnchor
+  isActive: Boolean!
+  gateways: [TrackerGatewayItem!]!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type TrackerGeoAnchor {
+  lat: Float!
+  lng: Float!
+  rotationDeg: Float!
+}
+
+type TrackerGatewayItem {
+  id: ID!
+  gatewayKey: String!
+  name: String!
+  kind: String!
+  siteId: ID
+  position: TrackerXY
+  zoneName: String
+  vehicleLabel: String
+  lastHeartbeatAt: DateTime
+  isActive: Boolean!
+  online: Boolean!
+}
+
+type TrackerXY {
+  x: Float!
+  y: Float!
+}
+
+type TrackerPosition {
+  tagId: ID!
+  bleAddress: String
+  equipmentId: ID
+  label: String
+  battery: Float
+  kind: String!
+  siteId: ID
+  gatewayId: ID!
+  gatewayName: String
+  zoneName: String
+  x: Float
+  y: Float
+  lat: Float
+  lng: Float
+  rssi: Float!
+  confidence: Float!
+  computedAt: DateTime!
+}
+
+type TrackerHistoryPoint {
+  id: ID!
+  gatewayId: ID!
+  gatewayName: String
+  rssi: Float!
+  battery: Float
+  temperature: Float
+  lat: Float
+  lng: Float
+  ts: DateTime!
+}
+
+# Tracking inputs
+
+input CreateTrackerSiteInput {
+  name: String!
+  floorPlanImageUrl: String
+  widthMeters: Float
+  heightMeters: Float
+  geoAnchorLat: Float
+  geoAnchorLng: Float
+  geoAnchorRotationDeg: Float
+}
+
+input UpdateTrackerSiteInput {
+  name: String
+  floorPlanImageUrl: String
+  widthMeters: Float
+  heightMeters: Float
+  geoAnchorLat: Float
+  geoAnchorLng: Float
+  geoAnchorRotationDeg: Float
+  isActive: Boolean
+}
+
+input CreateTrackerGatewayInput {
+  gatewayKey: String!
+  name: String!
+  kind: String!
+  siteId: ID
+  positionX: Float
+  positionY: Float
+  zoneName: String
+  vehicleLabel: String
+}
+
+# Tracking queries
+
+extend type Query {
+  trackerSites: [TrackerSite!]!
+  trackerSite(id: ID!): TrackerSite
+  trackerTags(siteId: ID): [TrackerTag!]!
+  trackerTag(id: ID!): TrackerTag
+  trackerLatestPositions(siteId: ID): [TrackerPosition!]!
+  trackerTagHistory(tagId: ID!, since: DateTime, until: DateTime, limit: Int): [TrackerHistoryPoint!]!
+  trackerGateways(siteId: ID): [TrackerGatewayItem!]!
+}
+
+# Tracking mutations
+
+extend type Mutation {
+  registerTrackerTag(equipmentId: ID, bleAddress: String!, label: String!): TrackerTag!
+  unregisterTrackerTag(tagId: ID!): Boolean!
+  bindTrackerTagToEquipment(tagId: ID!, equipmentId: ID!): TrackerTag!
+  unbindTrackerTagFromEquipment(tagId: ID!): TrackerTag!
+  createTrackerSite(input: CreateTrackerSiteInput!): TrackerSite!
+  updateTrackerSite(id: ID!, input: UpdateTrackerSiteInput!): TrackerSite!
+  deleteTrackerSite(id: ID!): Boolean!
+  createTrackerGateway(input: CreateTrackerGatewayInput!): TrackerGatewayItem!
+  updateTrackerGatewayPosition(id: ID!, x: Float!, y: Float!): TrackerGatewayItem!
+  deleteTrackerGateway(id: ID!): Boolean!
+}
+
+# Tracking subscriptions
+
+extend type Subscription {
+  trackerPositionUpdated(siteId: ID): TrackerPosition!
 }

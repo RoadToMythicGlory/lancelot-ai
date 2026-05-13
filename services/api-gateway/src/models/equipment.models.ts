@@ -1,11 +1,20 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+// Suspension status types — surfaced separately from `isDisabled` so we can
+// represent why a unit is out of rotation (maintenance, repair, lost, etc.).
+export type EquipmentSuspensionStatus =
+  | 'under_maintenance'
+  | 'broken'
+  | 'lost'
+  | 'reserved'
+  | 'other';
+
 // Interface for TypeScript
 export interface IEquipment extends Document {
   _id: mongoose.Types.ObjectId;
   barcode: string;
   name: string;
-  category: 'cameras' | 'batteries' | 'liveu_kits' | 'unity_kits' | 'monitors' | 'headphones' | 'stabilizers' | 'cards' | 'adapters' | 'matrix_components' | 'other';
+  category: EquipmentCategory;
   
   // Additional details
   price?: number;
@@ -32,11 +41,28 @@ export interface IEquipment extends Document {
   quantityAssigned: number;
   currentLocation?: string;
   
+  // Quantity-based items (consumables, cables, etc.) are NOT scanned per-unit.
+  // Only items where this is true expose the "Adjust Quantity" UI affordance.
+  isQuantityBased: boolean;
+  
   // Equipment state
   isDisabled: boolean;
   disabledAt?: Date;
   disabledBy?: string;
   disabledReason?: string;
+  // Distinct suspension reason — populated whenever a unit is taken out
+  // of service (maintenance, broken, lost, ...). Keeps the meaning of
+  // `disabledReason` (free-text) separate from a structured status code.
+  suspensionStatus?: EquipmentSuspensionStatus;
+  
+  // BLE tracker binding (Minew E8 or compatible)
+  trackerTagId?: mongoose.Types.ObjectId;
+  
+  // Activity tracking — used by the "items unused over 2 weeks" notification
+  // job. We refresh this whenever an equipment is assigned, returned, or
+  // adjusted so we don't have to scan EquipmentHistory on every scheduler tick.
+  lastUsedAt?: Date;
+  unusedNotificationSentAt?: Date;
   
   // System fields
   createdBy?: string;
@@ -44,8 +70,22 @@ export interface IEquipment extends Document {
   updatedAt: Date;
 }
 
-// Category translations for UI
+// Category translations for UI.
+//
+// Keys are the canonical machine slugs stored on `IEquipment.category`.
+// The first 11 entries are the original Lancelot categories — they remain
+// intact so existing UI dropdowns / Hebrew labels keep working.
+//
+// The remaining entries were added when we mirrored the legacy
+// shidureyhuts.co.il warehouse (~4,000 items) into Lancelot. The legacy
+// system used freeform uppercase labels like `CAMERA` / `SOUND` / `GRIP`;
+// we slugify them and translate the labels for the Hebrew UI here.
+//
+// Adding a new category? Pick a stable lowercase_with_underscores key and
+// append it below — the schema's `enum` validator is derived from the
+// keys of this object, so the change is picked up automatically.
 export const EQUIPMENT_CATEGORIES = {
+  // ---- Original Lancelot categories ----
   cameras: 'מצלמות',
   batteries: 'סוללות',
   liveu_kits: 'ערכות LIVEU',
@@ -56,7 +96,66 @@ export const EQUIPMENT_CATEGORIES = {
   cards: 'כרטיסים',
   adapters: 'מתאמים',
   matrix_components: 'רכיבי מטריצה',
-  other: 'אחר'
+  other: 'אחר',
+
+  // ---- Imported from legacy shidureyhuts warehouse ----
+  battery_charger: 'מטענים',
+  braids_and_reels: 'כבלים וגלילים',
+  broadcast_kit: 'ערכות שידור',
+  cables: 'כבלים',
+  computers: 'מחשבים',
+  converter: 'ממירים',
+  datapower_supply: 'ספקי כוח לנתונים',
+  digital_telephone_hybrid: 'היברידי טלפון דיגיטלי',
+  distribution_amplifier: 'מגברי הפצה',
+  electricity: 'חשמל',
+  fiber: 'סיב אופטי',
+  fiber_optic_transmission: 'מערכת שידור סיב אופטי',
+  focus: 'פוקוס',
+  grip: 'אביזרי תפיסה',
+  handle: 'ידיות',
+  hollyland_antenna: 'אנטנת HOLLYLAND',
+  hollyland_stand: 'מעמד HOLLYLAND',
+  hybrid: 'היברידי',
+  intercom: 'אינטרקום',
+  lens: 'עדשות',
+  lighting: 'תאורה',
+  microphones: 'מיקרופונים',
+  multi: 'רב-תכליתי',
+  network: 'תקשורת',
+  optical: 'אופטי',
+  panasonic: 'PANASONIC',
+  power_supply: 'ספקי כוח',
+  sets: 'ערכות',
+  sound: 'סאונד',
+  tripod: 'חצובות',
+  trismo: 'TRISMO',
+  universal: 'אוניברסלי',
+  video: 'וידאו',
+  zoom_handle: 'ידית זום',
+} as const;
+
+export type EquipmentCategory = keyof typeof EQUIPMENT_CATEGORIES;
+
+// Categories that default to quantity-based tracking (no per-unit barcodes).
+// New equipment in these categories gets `isQuantityBased: true` automatically;
+// the user can still flip the flag manually for individual items.
+export const QUANTITY_BASED_DEFAULT_CATEGORIES = new Set<EquipmentCategory>([
+  'batteries',
+  'cards',
+  'adapters',
+  'cables',
+  'battery_charger',
+  'braids_and_reels',
+]);
+
+// Suspension status translations for UI
+export const EQUIPMENT_SUSPENSION_STATUSES = {
+  under_maintenance: 'בתחזוקה',
+  broken: 'תקול',
+  lost: 'אבד',
+  reserved: 'משוריין',
+  other: 'אחר',
 } as const;
 
 // MongoDB Schema
@@ -122,6 +221,14 @@ const equipmentSchema = new Schema<IEquipment>({
   },
   currentLocation: String,
   
+  // Quantity-based items (cables, batteries, consumables, ...) are NOT
+  // tracked per-unit by barcode. They live as a pool with adjustable totals.
+  isQuantityBased: {
+    type: Boolean,
+    default: false,
+    required: true
+  },
+  
   // Equipment state
   isDisabled: { 
     type: Boolean, 
@@ -131,6 +238,19 @@ const equipmentSchema = new Schema<IEquipment>({
   disabledAt: Date,
   disabledBy: String,
   disabledReason: String,
+  suspensionStatus: {
+    type: String,
+    enum: Object.keys(EQUIPMENT_SUSPENSION_STATUSES),
+  },
+  
+  // BLE tracker binding
+  trackerTagId: { type: Schema.Types.ObjectId, ref: 'TrackerTag', default: null },
+  
+  // Activity tracking — see IEquipment for usage. We default lastUsedAt to
+  // the document's creation time so brand-new equipment isn't immediately
+  // flagged as "stale" by the unused-equipment notification job.
+  lastUsedAt: { type: Date, default: Date.now },
+  unusedNotificationSentAt: Date,
   
   // System fields
   createdBy: String
@@ -221,7 +341,7 @@ export interface IEquipmentHistory extends Document {
   eventId?: mongoose.Types.ObjectId;
   eventName?: string;
   date: Date;
-  action: 'assigned' | 'returned' | 'transferred' | 'maintenance' | 'status_change' | 'quantity_adjusted' | 'disabled' | 'enabled';
+  action: 'assigned' | 'returned' | 'transferred' | 'maintenance' | 'status_change' | 'quantity_adjusted' | 'disabled' | 'enabled' | 'set_assigned' | 'set_returned' | 'item_replaced' | 'item_missing';
   quantity?: number;
   performedBy?: string;
   performedByName?: string;
@@ -315,7 +435,7 @@ const equipmentHistorySchema = new Schema<IEquipmentHistory>({
   },
   action: { 
     type: String, 
-    enum: ['assigned', 'returned', 'transferred', 'maintenance', 'status_change', 'quantity_adjusted', 'disabled', 'enabled'],
+    enum: ['assigned', 'returned', 'transferred', 'maintenance', 'status_change', 'quantity_adjusted', 'disabled', 'enabled', 'set_assigned', 'set_returned', 'item_replaced', 'item_missing'],
     required: true 
   },
   quantity: Number,

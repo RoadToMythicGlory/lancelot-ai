@@ -35,6 +35,10 @@ import { startScheduler, stopScheduler } from './services/jobScheduler';
 import { metrics } from './services/metrics';
 import { oauthRouter } from './services/oauthService';
 import { warehouseRoutes } from './routes/warehouseRoutes';
+import { trackingRoutes } from './routes/trackingRoutes';
+import { equipmentSetsResolvers } from './resolvers/equipmentSets';
+import { trackingResolvers } from './resolvers/tracking';
+import { startTrackerIngest, stopTrackerIngest } from './services/trackerIngestService';
 
 // Load GraphQL schema
 const typeDefs = readFileSync(join(__dirname, 'schema/schema.graphql'), 'utf8');
@@ -50,8 +54,14 @@ const resolvers = {
     equipmentAssignmentsByEvent: broadcastResolvers.Query.equipmentAssignmentsByEvent,
     equipmentAssignments: broadcastResolvers.Query.equipmentAssignments,
     equipmentHistory: broadcastResolvers.Query.equipmentHistory,
+    eventsWithAssignedEquipment: broadcastResolvers.Query.eventsWithAssignedEquipment,
     externalBroadcastPresets: broadcastResolvers.Query.externalBroadcastPresets,
     externalBroadcastPreset: broadcastResolvers.Query.externalBroadcastPreset,
+    // Equipment Sets
+    equipmentSets: equipmentSetsResolvers.Query.equipmentSets,
+    equipmentSet: equipmentSetsResolvers.Query.equipmentSet,
+    equipmentSetByBarcode: equipmentSetsResolvers.Query.equipmentSetByBarcode,
+    staleEquipment: equipmentSetsResolvers.Query.staleEquipment,
     // Add shifts queries
     ...shiftsResolvers.Query,
     // Add user queries (overriding users from shifts)
@@ -72,6 +82,8 @@ const resolvers = {
     ...saasResolvers.Query,
     // Add Streamer + Podcast queries
     ...streamerResolvers.Query,
+    // BLE Tracking queries
+    ...trackingResolvers.Query,
     health: () => ({
       status: 'OK',
       timestamp: new Date().toISOString(),
@@ -99,6 +111,12 @@ const resolvers = {
     createExternalBroadcastPreset: broadcastResolvers.Mutation.createExternalBroadcastPreset,
     updateExternalBroadcastPreset: broadcastResolvers.Mutation.updateExternalBroadcastPreset,
     deleteExternalBroadcastPreset: broadcastResolvers.Mutation.deleteExternalBroadcastPreset,
+    // Equipment Sets
+    createEquipmentSet: equipmentSetsResolvers.Mutation.createEquipmentSet,
+    updateEquipmentSet: equipmentSetsResolvers.Mutation.updateEquipmentSet,
+    deleteEquipmentSet: equipmentSetsResolvers.Mutation.deleteEquipmentSet,
+    assignEquipmentSetToEvent: equipmentSetsResolvers.Mutation.assignEquipmentSetToEvent,
+    returnEquipmentSet: equipmentSetsResolvers.Mutation.returnEquipmentSet,
     // Add shifts mutations
     ...shiftsResolvers.Mutation,
     // Add user mutations
@@ -120,7 +138,9 @@ const resolvers = {
     // SaaS Platform mutations
     ...saasResolvers.Mutation,
     // Streamer + Podcast mutations
-    ...streamerResolvers.Mutation
+    ...streamerResolvers.Mutation,
+    // BLE Tracking mutations
+    ...trackingResolvers.Mutation,
   },
   Subscription: {
     ...enhancedBroadcastResolvers.Subscription,
@@ -130,6 +150,8 @@ const resolvers = {
     ...(mcrResolvers.Subscription || {}),
     // Add SaaS subscriptions
     ...(saasResolvers.Subscription || {}),
+    // BLE Tracking subscriptions
+    ...(trackingResolvers.Subscription || {}),
   },
   // Type resolvers - removed as they're not needed for the simplified schema
   // Scalar resolvers
@@ -152,6 +174,8 @@ const resolvers = {
   EmployeeSettings: shiftsResolvers.EmployeeSettings,
   // Add user field resolver
   User: userResolvers.User,
+  // Equipment set field resolver
+  EquipmentSetItem: equipmentSetsResolvers.EquipmentSetItem,
   // Add MCR field resolvers
   MCREvent: mcrResolvers.MCREvent,
   MCRBulletinPost: mcrResolvers.MCRBulletinPost,
@@ -264,6 +288,9 @@ async function startServer() {
 
     // Warehouse PDF import routes (must be after CORS middleware)
     app.use('/api/warehouse', warehouseRoutes);
+
+    // BLE tracking ingest routes
+    app.use('/api/tracking', trackingRoutes);
   
     // Create HTTP server
     const httpServer = createServer(app);
@@ -346,6 +373,10 @@ async function startServer() {
         startScheduler();
         console.log(`⏰ Background job scheduler started`);
         
+        // Start BLE tracker MQTT ingest
+        startTrackerIngest();
+        console.log(`📡 BLE tracker ingest service started`);
+        
         resolve();
       });
     });
@@ -353,6 +384,7 @@ async function startServer() {
     // Graceful shutdown
     process.on('SIGTERM', async () => {
       console.log('SIGTERM signal received: closing HTTP server');
+      stopTrackerIngest();
       stopScheduler();
       await server.stop();
       await closeMongoDB();

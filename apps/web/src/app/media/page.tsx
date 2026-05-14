@@ -14,6 +14,8 @@ import {
   CloudArrowUpIcon,
 } from '@heroicons/react/24/outline'
 import { useAuth } from '@/contexts/AuthContext'
+import ProtectedRoute from '@/components/auth/ProtectedRoute'
+import { Permission } from '@/rbac'
 import { GET_MEDIA_ASSETS, GET_MEDIA_FOLDERS } from '@/graphql/saasQueries'
 import { CREATE_MEDIA_ASSET, DELETE_MEDIA_ASSET, CREATE_MEDIA_FOLDER } from '@/graphql/saasMutations'
 
@@ -162,6 +164,7 @@ export default function MediaPage() {
   ]
 
   return (
+    <ProtectedRoute requires={Permission.MEDIA_VIEW}>
     <div className="max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -272,5 +275,6 @@ export default function MediaPage() {
         </Form>
       </Modal>
     </div>
+    </ProtectedRoute>
   )
 }

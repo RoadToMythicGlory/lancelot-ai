@@ -10,6 +10,8 @@ import {
   PlusIcon,
 } from '@heroicons/react/24/outline'
 import { useAuth } from '@/contexts/AuthContext'
+import ProtectedRoute from '@/components/auth/ProtectedRoute'
+import { Permission } from '@/rbac'
 import { GET_BROADCAST_RIGHTS, GET_EXPIRING_RIGHTS } from '@/graphql/saasQueries'
 import { CREATE_BROADCAST_RIGHT, UPDATE_BROADCAST_RIGHT, DELETE_BROADCAST_RIGHT } from '@/graphql/saasMutations'
 
@@ -164,6 +166,7 @@ export default function RightsPage() {
   ]
 
   return (
+    <ProtectedRoute requires={Permission.RIGHTS_VIEW}>
     <div className="max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -309,5 +312,6 @@ export default function RightsPage() {
         </Form>
       </Modal>
     </div>
+    </ProtectedRoute>
   )
 }

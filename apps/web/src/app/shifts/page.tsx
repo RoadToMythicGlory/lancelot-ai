@@ -14,15 +14,16 @@ import WeekShiftsView from '@/components/shifts/WeekShiftsView';
 import dynamic from 'next/dynamic';
 const AdminDashboardLazy = dynamic(() => import('@/components/shifts/admin/ShiftsAdminDashboard'), { ssr: false });
 import { useAuth } from '@/contexts/AuthContext';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import { Permission } from '@/rbac';
 
 const { Title } = Typography;
 
 export default function ShiftsPage() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const [activeSection, setActiveSection] = React.useState<string | null>(null);
 
-  // Check if user is admin (you may need to adjust this based on your permission system)
-  const isAdmin = user?.systemRole === 'DEPARTMENT_ADMIN' || user?.systemRole === 'SYSTEM_ADMIN' || user?.systemRole === 'IT_ADMIN' || user?.permissions?.includes('shift_admin');
+  const isAdmin = hasPermission(Permission.SHIFTS_MANAGE);
 
   const sections = [
     {
@@ -90,6 +91,7 @@ export default function ShiftsPage() {
   // If no section is active, show the home page
   if (!activeSection) {
     return (
+      <ProtectedRoute requires={Permission.SHIFTS_VIEW_OWN}>
       <div className="p-6 max-w-7xl mx-auto">
         <div className="mb-8 text-center">
           <Title level={2}>ניהול משמרות</Title>
@@ -117,6 +119,7 @@ export default function ShiftsPage() {
           ))}
         </div>
       </div>
+      </ProtectedRoute>
     );
   }
 
@@ -126,6 +129,7 @@ export default function ShiftsPage() {
     : sections.find(s => s.key === activeSection)?.component;
 
   return (
+    <ProtectedRoute requires={Permission.SHIFTS_VIEW_OWN}>
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-4">
         <Button
@@ -139,5 +143,6 @@ export default function ShiftsPage() {
       
       {activeComponent}
     </div>
+    </ProtectedRoute>
   );
 } 

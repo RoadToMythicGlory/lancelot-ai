@@ -5,7 +5,8 @@ import ActivityRow, { IActivityRow } from '../models/activityRow';
 import { BroadcastEvent } from '../models/broadcast.models';
 import { EquipmentAssignment } from '../models/equipment.models';
 import { pubsub } from '../utils/pubsub';
-import { withAuth } from '../utils/auth';
+import { requireAuth, requirePermission, withAuth } from '../middleware/auth';
+import { Permission } from '../rbac';
 
 // Subscription topics
 const MCR_EVENT_CREATED = 'MCR_EVENT_CREATED';
@@ -232,8 +233,7 @@ const resolvers = {
         throw new UserInputError('MCR Event not found');
       }
       
-      // Check permissions - only creator or admin can update
-      if (mcrEvent.createdBy.toString() !== context.user.userId && context.user.systemRole !== 'SYSTEM_ADMIN') {
+      if (mcrEvent.createdBy.toString() !== context.user!.userId && !context.user!.has(Permission.MCR_ADMIN)) {
         throw new AuthenticationError('Not authorized to update this event');
       }
       
@@ -252,8 +252,7 @@ const resolvers = {
         throw new UserInputError('MCR Event not found');
       }
       
-      // Check permissions - only creator or admin can delete
-      if (mcrEvent.createdBy.toString() !== context.user.userId && context.user.systemRole !== 'SYSTEM_ADMIN') {
+      if (mcrEvent.createdBy.toString() !== context.user!.userId && !context.user!.has(Permission.MCR_ADMIN)) {
         throw new AuthenticationError('Not authorized to delete this event');
       }
       
@@ -299,8 +298,7 @@ const resolvers = {
         throw new UserInputError('Bulletin Post not found');
       }
       
-      // Check permissions - only creator or admin can update
-      if (bulletinPost.createdBy.toString() !== context.user.userId && context.user.systemRole !== 'SYSTEM_ADMIN') {
+      if (bulletinPost.createdBy.toString() !== context.user!.userId && !context.user!.has(Permission.MCR_ADMIN)) {
         throw new AuthenticationError('Not authorized to update this post');
       }
       
@@ -319,12 +317,7 @@ const resolvers = {
         throw new UserInputError('Bulletin Post not found');
       }
       
-      // Check permissions - only creator or MCR admin can delete
-      const isMCRAdmin = context.user.departments?.some((dept: any) => 
-        dept.name === 'MCR' && dept.role === 'admin'
-      ) || context.user.systemRole === 'SYSTEM_ADMIN';
-      
-      if (bulletinPost.createdBy.toString() !== context.user.userId && !isMCRAdmin) {
+      if (bulletinPost.createdBy.toString() !== context.user!.userId && !context.user!.has(Permission.MCR_ADMIN)) {
         throw new AuthenticationError('Not authorized to delete this post');
       }
       

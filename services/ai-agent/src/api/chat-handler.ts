@@ -117,6 +117,16 @@ export async function handleChatMessage(req: AuthenticatedRequest, res: Response
       message: payload.text,
       conversationHistory: body.context?.history,
       additionalContext: body.context?.metadata,
+      user: req.user
+        ? {
+            userId: req.user.userId,
+            email: req.user.email,
+            displayName: req.user.displayName,
+            permissions: req.user.permissions,
+            departmentId: req.user.departmentId,
+            systemRole: req.user.systemRole,
+          }
+        : undefined,
     });
     
     logger.info('Chat message processed', {

@@ -10,13 +10,20 @@ import { createLogger } from '../utils/logger';
 const logger = createLogger('api-middleware');
 
 /**
- * Extended request with user info
+ * Extended request with user info.
+ *
+ * `permissions` and `departmentId` are forwarded from the api-gateway via
+ * the `x-user-permissions` / `x-user-department` / `x-user-system-role`
+ * headers so the AI agent can enforce RBAC on every data-reading tool.
  */
 export interface AuthenticatedRequest extends Request {
   user?: {
     userId: string;
     email: string;
     displayName?: string;
+    permissions?: string[];
+    departmentId?: string;
+    systemRole?: string;
   };
   traceId?: string;
 }
@@ -56,23 +63,54 @@ export function requestLogger(req: AuthenticatedRequest, res: Response, next: Ne
 }
 
 /**
- * Extract user from JWT token (passthrough from api-gateway)
- * In production, this would validate the token. For now, we trust the headers.
+ * Extract user from JWT token (passthrough from api-gateway).
+ *
+ * In production this would validate the token. For now we trust the headers
+ * forwarded by the api-gateway (which already authenticated the JWT).
+ *
+ * Headers consumed:
+ *   x-user-id            — Mongo user ID (required)
+ *   x-user-email         — user email (required)
+ *   x-user-displayname   — display name (optional)
+ *   x-user-permissions   — JSON-encoded permission array (optional)
+ *   x-user-department    — primary department ID (optional)
+ *   x-user-system-role   — system role string (optional)
  */
 export function authPassthrough(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
-  // Check for user info in headers (passed from api-gateway)
   const userId = req.headers['x-user-id'] as string;
   const userEmail = req.headers['x-user-email'] as string;
   const userDisplayName = req.headers['x-user-displayname'] as string;
-  
+  const userDepartment = req.headers['x-user-department'] as string | undefined;
+  const userSystemRole = req.headers['x-user-system-role'] as string | undefined;
+
+  let permissions: string[] | undefined;
+  const rawPermissions = req.headers['x-user-permissions'];
+  if (typeof rawPermissions === 'string' && rawPermissions.length > 0) {
+    try {
+      const parsed = JSON.parse(rawPermissions);
+      if (Array.isArray(parsed)) {
+        permissions = parsed.filter((p): p is string => typeof p === 'string');
+      }
+    } catch {
+      // Header was a comma-separated list rather than JSON — accept it.
+      permissions = rawPermissions
+        .split(',')
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0);
+    }
+  }
+
   if (userId && userEmail) {
     req.user = {
       userId,
       email: userEmail,
       displayName: userDisplayName,
+      permissions,
+      departmentId: userDepartment,
+      systemRole: userSystemRole,
     };
   }
-  
+
   next();
 }
 

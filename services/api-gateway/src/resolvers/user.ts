@@ -1,9 +1,12 @@
 import { ObjectId } from 'mongodb';
 import bcrypt from 'bcrypt';
 import { connectMongoDB } from '../config/mongodb';
-import { jwtService } from '../services/jwtService';
 import { config } from '../config';
 import { expandMCRDepartments } from '../utils/departments';
+import { requireAuth, requirePermission } from '../middleware/auth';
+import { Permission, canManageUser } from '../rbac';
+import { RoleTemplate } from '../models/roleTemplate';
+import type { Context } from '../types';
 
 async function computePublicKeyFingerprint(publicKey: string): Promise<string> {
   const crypto = await import('crypto');
@@ -11,49 +14,27 @@ async function computePublicKeyFingerprint(publicKey: string): Promise<string> {
   return crypto.createHash('sha256').update(keyBytes).digest('base64');
 }
 
-// Helper function to get current user from context
-async function getCurrentUser(context: any) {
-  if (!context.user || !context.user.userId) {
-    throw new Error('Not authenticated');
-  }
-  const db = await connectMongoDB();
-  const user = await db.collection('users').findOne({ _id: new ObjectId(context.user.userId) });
-  if (!user) {
-    throw new Error('User not found');
-  }
-  return user;
-}
-
 export const userResolvers = {
   Query: {
-    // Get all users with optional filtering
-    users: async (_: any, { filter }: { filter?: any }, context: any) => {
-      const currentUser = await getCurrentUser(context);
-      
-      // Check if user has permission to view all users
-      if (!['SYSTEM_ADMIN', 'IT_ADMIN'].includes(currentUser.systemRole)) {
-        // Department admins can only see users in their departments
-        if (currentUser.systemRole === 'DEPARTMENT_ADMIN') {
-          const userDepartments = currentUser.departments.map((d: any) => d.departmentId);
-          const expandedDepartments = expandMCRDepartments(userDepartments, { includeBaseMCR: false });
-          filter = { ...filter, departmentId: { $in: expandedDepartments } };
-          console.log('Expanded departments for DEPARTMENT_ADMIN:', expandedDepartments);
-        } else {
-          throw new Error('Unauthorized to view users');
-        }
-      }
-      
-      console.log('Filter before query building:', JSON.stringify(filter, null, 2));
-      
+    users: async (_: any, { filter }: { filter?: any }, context: Context) => {
+      const actor = requirePermission(context, Permission.USERS_VIEW);
+
       const db = await connectMongoDB();
       const query: any = {};
-      
+
+      // Department-scoped filtering for non-global admins
+      if (!actor.has(Permission.USERS_MANAGE_ALL)) {
+        if (actor.has(Permission.USERS_MANAGE_DEPT)) {
+          const actorDepts = actor.departments.map((d) => d.departmentId);
+          const expandedDepts = expandMCRDepartments(actorDepts, { includeBaseMCR: false });
+          filter = { ...filter, departmentId: { $in: expandedDepts } };
+        }
+      }
+
       if (filter) {
         if (filter.isActive !== undefined) query.isActive = filter.isActive;
         if (filter.systemRole) query.systemRole = filter.systemRole;
         if (filter.departmentId) {
-          // Handle both old and new department structures
-          // Check if departmentId is already a MongoDB query object
           let deptIds: string[] = [];
           if (filter.departmentId.$in) {
             deptIds = filter.departmentId.$in;
@@ -62,434 +43,422 @@ export const userResolvers = {
           } else {
             deptIds = [filter.departmentId];
           }
-          
-          console.log('Department IDs to query:', deptIds);
-          
-          // Create query that handles both old and new structures
+
           query.$or = [
             { 'departments.departmentId': { $in: deptIds } },
             { 'departments.departmentName': { $in: deptIds } },
-            { department: { $in: deptIds } }
+            { department: { $in: deptIds } },
           ];
         }
         if (filter.searchTerm) {
+          const searchOr = [
+            { firstName: { $regex: filter.searchTerm, $options: 'i' } },
+            { lastName: { $regex: filter.searchTerm, $options: 'i' } },
+            { email: { $regex: filter.searchTerm, $options: 'i' } },
+          ];
           if (query.$or) {
-            // Combine with existing $or using $and
-            query.$and = [
-              { $or: query.$or },
-              {
-                $or: [
-                  { firstName: { $regex: filter.searchTerm, $options: 'i' } },
-                  { lastName: { $regex: filter.searchTerm, $options: 'i' } },
-                  { email: { $regex: filter.searchTerm, $options: 'i' } }
-                ]
-              }
-            ];
+            query.$and = [{ $or: query.$or }, { $or: searchOr }];
             delete query.$or;
           } else {
-            query.$or = [
-              { firstName: { $regex: filter.searchTerm, $options: 'i' } },
-              { lastName: { $regex: filter.searchTerm, $options: 'i' } },
-              { email: { $regex: filter.searchTerm, $options: 'i' } }
-            ];
+            query.$or = searchOr;
           }
         }
       }
-      
-      console.log('Users query:', JSON.stringify(query, null, 2));
-      console.log('Current user systemRole:', currentUser.systemRole);
+
       const users = await db.collection('users').find(query).toArray();
-      console.log(`Found ${users.length} users in users query`);
-      return users.map(user => ({
+      return users.map((user) => ({
         ...user,
         id: user._id.toString(),
-        displayName: `${user.firstName} ${user.lastName}`
+        displayName: `${user.firstName} ${user.lastName}`,
       }));
     },
-    
-    // Get single user by ID
-    user: async (_: any, { id }: { id: string }, context: any) => {
-      await getCurrentUser(context);
-      
+
+    user: async (_: any, { id }: { id: string }, context: Context) => {
+      requirePermission(context, Permission.USERS_VIEW);
+
       const db = await connectMongoDB();
       const user = await db.collection('users').findOne({ _id: new ObjectId(id) });
-      
-      if (!user) {
-        throw new Error('User not found');
-      }
-      
+      if (!user) throw new Error('User not found');
+
       return {
         ...user,
         id: user._id.toString(),
-        displayName: `${user.firstName} ${user.lastName}`
+        displayName: `${user.firstName} ${user.lastName}`,
       };
     },
-    
-    // Get current user
-    me: async (_: any, __: any, context: any) => {
-      const currentUser = await getCurrentUser(context);
+
+    me: async (_: any, __: any, context: Context) => {
+      const actor = requireAuth(context);
+      const db = await connectMongoDB();
+      const user = await db.collection('users').findOne({ _id: new ObjectId(actor.userId) });
+      if (!user) throw new Error('User not found');
       return {
-        ...currentUser,
-        id: currentUser._id.toString(),
-        displayName: `${currentUser.firstName} ${currentUser.lastName}`
+        ...user,
+        id: user._id.toString(),
+        displayName: `${user.firstName} ${user.lastName}`,
       };
     },
-    
-    // Get users by department
-    usersByDepartment: async (_: any, { departmentId }: { departmentId: string }, context: any) => {
-      await getCurrentUser(context);
-      
+
+    usersByDepartment: async (_: any, { departmentId }: { departmentId: string }, context: Context) => {
+      requirePermission(context, Permission.USERS_VIEW);
+
       const db = await connectMongoDB();
       const users = await db.collection('users').find({
         'departments.departmentId': departmentId,
-        isActive: true
+        isActive: true,
       }).toArray();
-      
-      return users.map(user => ({
+
+      return users.map((user) => ({
         ...user,
         id: user._id.toString(),
-        displayName: `${user.firstName} ${user.lastName}`
+        displayName: `${user.firstName} ${user.lastName}`,
       }));
     },
-    
-    // Get users by system role
-    usersBySystemRole: async (_: any, { systemRole }: { systemRole: string }, context: any) => {
-      const currentUser = await getCurrentUser(context);
-      
-      // Only admins can query by system role
-      if (!['SYSTEM_ADMIN', 'IT_ADMIN'].includes(currentUser.systemRole)) {
-        throw new Error('Unauthorized');
-      }
-      
+
+    usersBySystemRole: async (_: any, { systemRole }: { systemRole: string }, context: Context) => {
+      requirePermission(context, Permission.USERS_MANAGE_ALL);
+
       const db = await connectMongoDB();
       const users = await db.collection('users').find({
         systemRole,
-        isActive: true
+        isActive: true,
       }).toArray();
-      
-      return users.map(user => ({
+
+      return users.map((user) => ({
         ...user,
         id: user._id.toString(),
-        displayName: `${user.firstName} ${user.lastName}`
+        displayName: `${user.firstName} ${user.lastName}`,
       }));
-    }
+    },
   },
-  
+
   Mutation: {
-    // Create new user
-    createUser: async (_: any, { input }: { input: any }, context: any) => {
-      const currentUser = await getCurrentUser(context);
-      
-      // Check permissions
-      if (!['SYSTEM_ADMIN', 'IT_ADMIN', 'DEPARTMENT_ADMIN'].includes(currentUser.systemRole)) {
-        throw new Error('Unauthorized to create users');
+    createUser: async (_: any, { input }: { input: any }, context: Context) => {
+      const actor = requireAuth(context);
+
+      // Resolve role template if provided
+      let templatePerms: string[] = [];
+      let resolvedTemplateId: string | null = null;
+      if (input.roleTemplateId) {
+        const template = await RoleTemplate.findById(input.roleTemplateId).lean();
+        if (!template || !template.isActive) {
+          throw new Error('Role template not found or inactive');
+        }
+
+        if (actor.systemRole === 'DEPARTMENT_ADMIN') {
+          if (!template.allowedForDeptAdmins) {
+            throw new Error('This template is not available for Department Admins');
+          }
+          const actorDeptIds = actor.departments.map((d: any) => d.departmentId);
+          if (template.departmentScope && !actorDeptIds.includes(template.departmentScope)) {
+            throw new Error('This template is scoped to a department you do not manage');
+          }
+        }
+
+        input.systemRole = template.baseSystemRole;
+        templatePerms = template.permissions;
+        resolvedTemplateId = template._id.toString();
       }
-      
-      // Validate hierarchical permissions
-      if (currentUser.systemRole === 'IT_ADMIN' && input.systemRole === 'SYSTEM_ADMIN') {
+
+      // Only SYSTEM_ADMIN / IT_ADMIN can pass customPermissions
+      if (input.customPermissions && input.customPermissions.length > 0) {
+        if (actor.systemRole === 'DEPARTMENT_ADMIN') {
+          throw new Error('Department Admins cannot set custom permissions');
+        }
+        if (!actor.has(Permission.USERS_MANAGE_ALL)) {
+          throw new Error('Only users with USERS_MANAGE_ALL can set custom permissions');
+        }
+      }
+
+      // DEPARTMENT_ADMIN must use a template
+      if (actor.systemRole === 'DEPARTMENT_ADMIN' && !input.roleTemplateId) {
+        throw new Error('Department Admins must select a role template when creating users');
+      }
+
+      // Check whether actor can manage the target
+      if (!canManageUser(
+        { systemRole: actor.systemRole, departments: actor.departments, permissions: actor.permissions },
+        { systemRole: input.systemRole, departments: input.departments },
+        actor.computed,
+      )) {
+        throw new Error('Unauthorized to create this user');
+      }
+
+      // Tier-escalation guardrails
+      if (actor.systemRole === 'IT_ADMIN' && input.systemRole === 'SYSTEM_ADMIN') {
         throw new Error('IT Admin cannot create System Admin users');
       }
-      
-      if (currentUser.systemRole === 'DEPARTMENT_ADMIN') {
-        // Department admins can only create department users in their departments
-        if (input.systemRole !== 'DEPARTMENT_USER') {
+      if (actor.systemRole === 'DEPARTMENT_ADMIN') {
+        if (input.systemRole !== 'DEPARTMENT_USER' && input.systemRole !== 'DEPARTMENT_ADMIN') {
           throw new Error('Department Admin can only create Department Users');
         }
-        
-        const userDepartments = currentUser.departments.map((d: any) => d.departmentId);
-        
-        const expandedDepartments = expandMCRDepartments(userDepartments, { includeBaseMCR: false });
-        
-        const newUserDepartments = input.departments.map((d: any) => d.departmentId);
-        
-        if (!newUserDepartments.every((deptId: string) => expandedDepartments.includes(deptId))) {
+        const actorDepts = actor.departments.map((d: any) => d.departmentId);
+        const expanded = expandMCRDepartments(actorDepts, { includeBaseMCR: false });
+        const newDepts = input.departments.map((d: any) => d.departmentId);
+        if (!newDepts.every((id: string) => expanded.includes(id))) {
           throw new Error('Cannot create users for departments you do not manage');
         }
       }
-      
+
       const db = await connectMongoDB();
-      
-      // Check if email already exists
-      const existingUser = await db.collection('users').findOne({ email: input.email });
-      if (existingUser) {
-        throw new Error('Email already exists');
-      }
-      
-      // Hash password
+      const existing = await db.collection('users').findOne({ email: input.email });
+      if (existing) throw new Error('Email already exists');
+
       const hashedPassword = await bcrypt.hash(input.password, config.BCRYPT_ROUNDS);
-      
-      // Create user
+
+      // Merge template permissions with custom overrides
+      const finalPermissions = [
+        ...new Set([...templatePerms, ...(input.customPermissions || [])]),
+      ];
+
+      const { roleTemplateId: _rtId, customPermissions: _cp, ...rest } = input;
+
       const newUser = {
-        ...input,
+        ...rest,
         password: hashedPassword,
+        permissions: finalPermissions,
+        roleTemplateId: resolvedTemplateId,
         isActive: input.isActive !== false,
         createdAt: new Date(),
         updatedAt: new Date(),
-        createdBy: currentUser._id.toString(),
-        updatedBy: currentUser._id.toString()
+        createdBy: actor.userId,
+        updatedBy: actor.userId,
       };
-      
+
       const result = await db.collection('users').insertOne(newUser);
-      
       return {
         ...newUser,
         id: result.insertedId.toString(),
-        displayName: `${newUser.firstName} ${newUser.lastName}`
+        displayName: `${newUser.firstName} ${newUser.lastName}`,
       };
     },
-    
-    // Update user
-    updateUser: async (_: any, { id, input }: { id: string, input: any }, context: any) => {
-      const currentUser = await getCurrentUser(context);
-      
-      // Check permissions
-      if (!['SYSTEM_ADMIN', 'IT_ADMIN', 'DEPARTMENT_ADMIN'].includes(currentUser.systemRole)) {
-        throw new Error('Unauthorized to update users');
-      }
-      
+
+    updateUser: async (_: any, { id, input }: { id: string; input: any }, context: Context) => {
+      const actor = requireAuth(context);
+
       const db = await connectMongoDB();
       const targetUser = await db.collection('users').findOne({ _id: new ObjectId(id) });
-      
-      if (!targetUser) {
-        throw new Error('User not found');
+      if (!targetUser) throw new Error('User not found');
+
+      if (!canManageUser(
+        { systemRole: actor.systemRole, departments: actor.departments, permissions: actor.permissions },
+        { systemRole: targetUser.systemRole, departments: targetUser.departments },
+        actor.computed,
+      )) {
+        throw new Error('Unauthorized to update this user');
       }
-      
-      // Validate hierarchical permissions
-      if (currentUser.systemRole === 'DEPARTMENT_ADMIN') {
-        // Department admins can only update users in their departments
-        const userDepartments = currentUser.departments.map((d: any) => d.departmentId);
-        
-        const expandedDepartments = expandMCRDepartments(userDepartments, { includeBaseMCR: false });
-        
-        console.log('🔐 Department Admin Update Check:');
-        console.log('  Admin departments:', userDepartments);
-        console.log('  Expanded departments:', expandedDepartments);
-        console.log('  Target user:', targetUser.email);
-        console.log('  Target current departments:', targetUser.departments);
-        
-        // Get target user's current and new departments
-        const targetCurrentDepartments = targetUser.departments.map((d: any) => d.departmentId);
-        const targetNewDepartments = input.departments ? input.departments.map((d: any) => d.departmentId) : targetCurrentDepartments;
-        
-        console.log('  Target current department IDs:', targetCurrentDepartments);
-        console.log('  Target new department IDs:', targetNewDepartments);
-        console.log('  Input:', JSON.stringify(input, null, 2));
-        
-        // Check if user has permission for both current and new departments
-        const hasPermissionForCurrent = targetCurrentDepartments.some((deptId: string) => expandedDepartments.includes(deptId));
-        const hasPermissionForNew = targetNewDepartments.every((deptId: string) => expandedDepartments.includes(deptId));
-        
-        console.log('  Has permission for current:', hasPermissionForCurrent);
-        console.log('  Has permission for new:', hasPermissionForNew);
-        
-        if (!hasPermissionForCurrent) {
+
+      // Resolve role template if provided
+      let templatePerms: string[] | null = null;
+      let resolvedTemplateId: string | null | undefined = undefined;
+      if (input.roleTemplateId) {
+        const template = await RoleTemplate.findById(input.roleTemplateId).lean();
+        if (!template || !template.isActive) {
+          throw new Error('Role template not found or inactive');
+        }
+
+        if (actor.systemRole === 'DEPARTMENT_ADMIN') {
+          if (!template.allowedForDeptAdmins) {
+            throw new Error('This template is not available for Department Admins');
+          }
+          const actorDeptIds = actor.departments.map((d: any) => d.departmentId);
+          if (template.departmentScope && !actorDeptIds.includes(template.departmentScope)) {
+            throw new Error('This template is scoped to a department you do not manage');
+          }
+        }
+
+        input.systemRole = template.baseSystemRole;
+        templatePerms = template.permissions;
+        resolvedTemplateId = template._id.toString();
+      } else if (input.roleTemplateId === null) {
+        resolvedTemplateId = null;
+      }
+
+      // Only SYSTEM_ADMIN / IT_ADMIN can pass customPermissions
+      if (input.customPermissions && input.customPermissions.length > 0) {
+        if (actor.systemRole === 'DEPARTMENT_ADMIN') {
+          throw new Error('Department Admins cannot set custom permissions');
+        }
+        if (!actor.has(Permission.USERS_MANAGE_ALL)) {
+          throw new Error('Only users with USERS_MANAGE_ALL can set custom permissions');
+        }
+      }
+
+      // DEPARTMENT_ADMIN guardrails
+      if (actor.systemRole === 'DEPARTMENT_ADMIN') {
+        const actorDepts = actor.departments.map((d: any) => d.departmentId);
+        const expanded = expandMCRDepartments(actorDepts, { includeBaseMCR: false });
+
+        const targetCurrentDepts = (targetUser.departments || []).map((d: any) => d.departmentId);
+        const targetNewDepts = input.departments
+          ? input.departments.map((d: any) => d.departmentId)
+          : targetCurrentDepts;
+
+        if (!targetCurrentDepts.some((id: string) => expanded.includes(id))) {
           throw new Error('Cannot update users outside your departments');
         }
-        
-        if (!hasPermissionForNew) {
+        if (!targetNewDepts.every((id: string) => expanded.includes(id))) {
           throw new Error('Cannot assign users to departments you do not manage');
         }
-        
-        // Cannot change system roles (except for role assignments within allowed roles)
         if (input.systemRole && input.systemRole !== targetUser.systemRole && input.systemRole !== 'DEPARTMENT_USER') {
           throw new Error('Department Admin cannot change system roles to admin levels');
         }
       }
-      
-      // Prepare update
+
+      // Build update data
+      const { roleTemplateId: _rtId, customPermissions: _cp, ...rest } = input;
+
       const updateData: any = {
-        ...input,
+        ...rest,
         updatedAt: new Date(),
-        updatedBy: currentUser._id.toString()
+        updatedBy: actor.userId,
       };
-      
-      // Hash password if provided
+
+      // Merge template + custom permissions
+      if (templatePerms !== null || input.customPermissions) {
+        const base = templatePerms ?? (targetUser.permissions || []);
+        const custom = input.customPermissions || [];
+        updateData.permissions = [...new Set([...base, ...custom])];
+      }
+
+      if (resolvedTemplateId !== undefined) {
+        updateData.roleTemplateId = resolvedTemplateId;
+      }
+
       if (input.password) {
         updateData.password = await bcrypt.hash(input.password, config.BCRYPT_ROUNDS);
       }
-      
       delete updateData.id;
-      
+
       await db.collection('users').updateOne(
         { _id: new ObjectId(id) },
-        { $set: updateData }
+        { $set: updateData },
       );
-      
+
       const updatedUser = await db.collection('users').findOne({ _id: new ObjectId(id) });
-      
-      if (!updatedUser) {
-        throw new Error('User not found after update');
-      }
-      
+      if (!updatedUser) throw new Error('User not found after update');
+
       return {
         ...updatedUser,
         id: updatedUser._id.toString(),
-        displayName: `${updatedUser.firstName} ${updatedUser.lastName}`
+        displayName: `${updatedUser.firstName} ${updatedUser.lastName}`,
       };
     },
-    
-    // Delete user
-    deleteUser: async (_: any, { id }: { id: string }, context: any) => {
-      const currentUser = await getCurrentUser(context);
-      
-      // Only system and IT admins can delete users
-      if (!['SYSTEM_ADMIN', 'IT_ADMIN'].includes(currentUser.systemRole)) {
-        throw new Error('Unauthorized to delete users');
-      }
-      
+
+    deleteUser: async (_: any, { id }: { id: string }, context: Context) => {
+      requirePermission(context, Permission.USERS_DELETE);
+
       const db = await connectMongoDB();
-      
-      // Soft delete by setting isActive to false
       await db.collection('users').updateOne(
         { _id: new ObjectId(id) },
-        { 
-          $set: { 
+        {
+          $set: {
             isActive: false,
             updatedAt: new Date(),
-            updatedBy: currentUser._id.toString()
-          }
-        }
+            updatedBy: context.user!.userId,
+          },
+        },
       );
-      
       return true;
     },
-    
-    // Update own profile
-    updateMyProfile: async (_: any, { input }: { input: any }, context: any) => {
-      const currentUser = await getCurrentUser(context);
-      
+
+    updateMyProfile: async (_: any, { input }: { input: any }, context: Context) => {
+      const actor = requireAuth(context);
       const db = await connectMongoDB();
-      
-      // Users can only update certain fields of their own profile
+
       const allowedFields = ['firstName', 'lastName', 'phone', 'mobile'];
       const updateData: any = {};
-      
       for (const field of allowedFields) {
-        if (input[field] !== undefined) {
-          updateData[field] = input[field];
-        }
+        if (input[field] !== undefined) updateData[field] = input[field];
       }
-      
       updateData.updatedAt = new Date();
-      updateData.updatedBy = currentUser._id.toString();
-      
+      updateData.updatedBy = actor.userId;
+
       await db.collection('users').updateOne(
-        { _id: new ObjectId(currentUser._id) },
-        { $set: updateData }
+        { _id: new ObjectId(actor.userId) },
+        { $set: updateData },
       );
-      
-      const updatedUser = await db.collection('users').findOne({ _id: new ObjectId(currentUser._id) });
-      
-      if (!updatedUser) {
-        throw new Error('User not found after update');
-      }
-      
+
+      const updatedUser = await db.collection('users').findOne({ _id: new ObjectId(actor.userId) });
+      if (!updatedUser) throw new Error('User not found after update');
+
       return {
         ...updatedUser,
         id: updatedUser._id.toString(),
-        displayName: `${updatedUser.firstName} ${updatedUser.lastName}`
+        displayName: `${updatedUser.firstName} ${updatedUser.lastName}`,
       };
     },
-    
-    // Change password
-    changePassword: async (_: any, { oldPassword, newPassword }: { oldPassword: string, newPassword: string }, context: any) => {
-      const currentUser = await getCurrentUser(context);
-      
-      // Verify old password
-      const isValidPassword = await bcrypt.compare(oldPassword, currentUser.password);
-      if (!isValidPassword) {
-        throw new Error('Invalid current password');
-      }
-      
+
+    changePassword: async (_: any, { oldPassword, newPassword }: { oldPassword: string; newPassword: string }, context: Context) => {
+      const actor = requireAuth(context);
       const db = await connectMongoDB();
-      
-      // Hash new password
+      const currentUser = await db.collection('users').findOne({ _id: new ObjectId(actor.userId) });
+      if (!currentUser) throw new Error('User not found');
+
+      const isValid = await bcrypt.compare(oldPassword, currentUser.password);
+      if (!isValid) throw new Error('Invalid current password');
+
       const hashedPassword = await bcrypt.hash(newPassword, config.BCRYPT_ROUNDS);
-      
       await db.collection('users').updateOne(
-        { _id: new ObjectId(currentUser._id) },
-        { 
-          $set: { 
-            password: hashedPassword,
-            updatedAt: new Date(),
-            updatedBy: currentUser._id.toString()
-          }
-        }
+        { _id: new ObjectId(actor.userId) },
+        { $set: { password: hashedPassword, updatedAt: new Date(), updatedBy: actor.userId } },
       );
-      
       return true;
     },
-    registerPublicKey: async (_: any, { publicKey }: { publicKey: string }, context: any) => {
-      const currentUser = await getCurrentUser(context);
+
+    registerPublicKey: async (_: any, { publicKey }: { publicKey: string }, context: Context) => {
+      const actor = requireAuth(context);
       const db = await connectMongoDB();
       const fingerprint = await computePublicKeyFingerprint(publicKey);
 
       await db.collection('users').updateOne(
-        { _id: new ObjectId(currentUser._id) },
+        { _id: new ObjectId(actor.userId) },
         {
           $set: {
             publicKey,
             publicKeyFingerprint: fingerprint,
             publicKeyUpdatedAt: new Date(),
             updatedAt: new Date(),
-            updatedBy: currentUser._id.toString(),
-          }
-        }
+            updatedBy: actor.userId,
+          },
+        },
       );
-
       return true;
-    }
+    },
   },
-  
-  // Field resolvers
+
   User: {
     id: (parent: any) => {
-      if (parent._id) {
-        return parent._id.toString ? parent._id.toString() : parent._id;
-      }
+      if (parent._id) return parent._id.toString ? parent._id.toString() : parent._id;
       return parent.id;
     },
-    
     displayName: (parent: any) => {
       return parent.displayName || `${parent.firstName || ''} ${parent.lastName || ''}`.trim() || parent.email || 'Unknown User';
     },
-    
     department: (parent: any) => {
-      // Map departments array to single department for backward compatibility
       if (parent.departments && Array.isArray(parent.departments) && parent.departments.length > 0) {
         return parent.departments[0].departmentName || parent.departments[0].departmentId;
       }
       return parent.department || null;
     },
-    
+    roleTemplateName: async (parent: any) => {
+      if (!parent.roleTemplateId) return null;
+      const template = await RoleTemplate.findById(parent.roleTemplateId).lean();
+      return template?.name ?? null;
+    },
     createdBy: async (parent: any) => {
       if (!parent.createdBy) return null;
-      
       const db = await connectMongoDB();
       const user = await db.collection('users').findOne({ _id: new ObjectId(parent.createdBy) });
-      
       if (!user) return null;
-      
-      return {
-        ...user,
-        id: user._id.toString(),
-        displayName: `${user.firstName} ${user.lastName}`
-      };
+      return { ...user, id: user._id.toString(), displayName: `${user.firstName} ${user.lastName}` };
     },
-    
     updatedBy: async (parent: any) => {
       if (!parent.updatedBy) return null;
-      
       const db = await connectMongoDB();
       const user = await db.collection('users').findOne({ _id: new ObjectId(parent.updatedBy) });
-      
       if (!user) return null;
-      
-      return {
-        ...user,
-        id: user._id.toString(),
-        displayName: `${user.firstName} ${user.lastName}`
-      };
-    }
-  }
-}; 
+      return { ...user, id: user._id.toString(), displayName: `${user.firstName} ${user.lastName}` };
+    },
+  },
+};

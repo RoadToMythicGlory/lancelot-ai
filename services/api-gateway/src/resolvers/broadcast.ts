@@ -3,7 +3,8 @@ import { BroadcastEvent, RoutingConfig } from '../models/broadcast.models';
 import { Equipment, generateBarcode, EquipmentAssignment, EquipmentHistory, QUANTITY_BASED_DEFAULT_CATEGORIES } from '../models/equipment.models';
 import { ExternalBroadcastPreset } from '../models/externalBroadcastPreset.models';
 import mongoose from 'mongoose';
-import { authenticateUser } from '../middleware/auth';
+import { requireAuth, requirePermission } from '../middleware/auth';
+import { Permission } from '../rbac';
 
 let mongooseConnected = false;
 
@@ -62,8 +63,7 @@ export const broadcastResolvers = {
   Query: {
     departments: async (_: any, __: any, context: any) => {
       try {
-        // Require authenticated user (departments are used for staff assignment dropdowns)
-        authenticateUser(context);
+        requireAuth(context);
         await ensureMongoConnection();
 
         // Departments are stored in MongoDB "departments" collection (seed scripts populate it)
@@ -1847,7 +1847,7 @@ export const broadcastResolvers = {
     adjustEquipmentQuantity: async (_: any, { id, adjustment, reason }: { id: string, adjustment: number, reason: string }, context: any) => {
       try {
         await ensureMongoConnection();
-        const user = authenticateUser(context);
+        const user = requirePermission(context, Permission.WAREHOUSE_MANAGE);
         
         const equipment = await Equipment.findById(id).exec();
         if (!equipment) {
@@ -1882,7 +1882,7 @@ export const broadcastResolvers = {
           equipmentId: equipment._id,
           action: 'quantity_adjusted',
           quantity: adjustment,
-          performedBy: user.id,
+          performedBy: user.userId,
           performedByName: `${user.firstName} ${user.lastName}`,
           notes: reason,
           previousValue: previousTotal.toString(),
@@ -1927,7 +1927,7 @@ export const broadcastResolvers = {
     ) => {
       try {
         await ensureMongoConnection();
-        const user = authenticateUser(context);
+        const user = requirePermission(context, Permission.WAREHOUSE_FORCE_RELEASE);
 
         const equipment = await Equipment.findById(id).exec();
         if (!equipment) {
@@ -1948,7 +1948,7 @@ export const broadcastResolvers = {
         for (const row of activeRows) {
           row.status = 'cancelled';
           row.returnedAt = new Date();
-          row.returnedBy = user.id;
+          row.returnedBy = user.userId;
           row.returnedByName = `${user.firstName} ${user.lastName}`;
           row.notes = `${row.notes ? row.notes + ' | ' : ''}Force-released: ${reason}`;
           await row.save();
@@ -1966,7 +1966,7 @@ export const broadcastResolvers = {
           equipmentId: equipment._id,
           action: 'returned',
           quantity: previousAssigned,
-          performedBy: user.id,
+          performedBy: user.userId,
           performedByName: `${user.firstName} ${user.lastName}`,
           notes: `Force release. Reason: ${reason}. Cancelled ${activeRows.length} active assignment row(s)` +
             (cancelledEventIds.length ? ` (events: ${cancelledEventIds.join(', ')})` : ''),
@@ -2001,7 +2001,7 @@ export const broadcastResolvers = {
     disableEquipment: async (_: any, { id, reason, suspensionStatus }: { id: string, reason: string, suspensionStatus?: string }, context: any) => {
       try {
         await ensureMongoConnection();
-        const user = authenticateUser(context);
+        const user = requirePermission(context, Permission.WAREHOUSE_DISABLE_EQUIPMENT);
         
         const equipment = await Equipment.findById(id).exec();
         if (!equipment) {
@@ -2015,7 +2015,7 @@ export const broadcastResolvers = {
         // Update equipment
         equipment.isDisabled = true;
         equipment.disabledAt = new Date();
-        equipment.disabledBy = user.id;
+        equipment.disabledBy = user.userId;
         equipment.disabledReason = reason;
         equipment.suspensionStatus = (suspensionStatus as any) || 'under_maintenance';
         equipment.status = 'maintenance';
@@ -2026,7 +2026,7 @@ export const broadcastResolvers = {
         const history = new EquipmentHistory({
           equipmentId: equipment._id,
           action: 'disabled',
-          performedBy: user.id,
+          performedBy: user.userId,
           performedByName: `${user.firstName} ${user.lastName}`,
           notes: reason,
           date: new Date()
@@ -2065,7 +2065,7 @@ export const broadcastResolvers = {
     enableEquipment: async (_: any, { id, notes }: { id: string; notes?: string }, context: any) => {
       try {
         await ensureMongoConnection();
-        const user = authenticateUser(context);
+        const user = requirePermission(context, Permission.WAREHOUSE_MANAGE);
         
         const equipment = await Equipment.findById(id).exec();
         if (!equipment) {
@@ -2094,7 +2094,7 @@ export const broadcastResolvers = {
         const history = new EquipmentHistory({
           equipmentId: equipment._id,
           action: 'enabled',
-          performedBy: user.id,
+          performedBy: user.userId,
           performedByName: `${user.firstName} ${user.lastName}`,
           notes: enableNote,
           date: new Date()
@@ -2127,7 +2127,7 @@ export const broadcastResolvers = {
     undoEquipmentTransfer: async (_: any, { transferId }: { transferId: string }, context: any) => {
       try {
         await ensureMongoConnection();
-        const user = authenticateUser(context);
+        const user = requirePermission(context, Permission.WAREHOUSE_MANAGE);
         
         // Find the transfer history entry
         const transferHistory = await EquipmentHistory.findById(transferId).exec();
@@ -2205,7 +2205,7 @@ export const broadcastResolvers = {
           equipmentId: equipment._id,
           action: 'transferred',
           quantity: transferredQuantity,
-          performedBy: user.id,
+          performedBy: user.userId,
           performedByName: `${user.firstName} ${user.lastName}`,
           notes: `Undo transfer: ${targetEvent.title} → ${sourceEvent.title}`,
           transferDetails: {

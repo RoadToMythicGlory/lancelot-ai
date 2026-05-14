@@ -12,6 +12,8 @@ import {
   KeyIcon,
 } from '@heroicons/react/24/outline'
 import { useAuth } from '@/contexts/AuthContext'
+import ProtectedRoute from '@/components/auth/ProtectedRoute'
+import { Permission } from '@/rbac'
 import { GET_MY_ORGANIZATION, GET_NOTIFICATION_PREFERENCES } from '@/graphql/saasQueries'
 import {
   UPDATE_ORGANIZATION,
@@ -33,8 +35,10 @@ export default function SettingsPage() {
   const [updateSecurity] = useMutation(UPDATE_SECURITY_SETTINGS)
   const [updateNotifPrefs] = useMutation(UPDATE_NOTIFICATION_PREFERENCES)
 
+  const { hasPermission } = useAuth()
   const org = orgData?.myOrganization
-  const isAdmin = user?.permissions?.includes('admin') || user?.systemRole === 'SYSTEM_ADMIN'
+  const isAdmin = hasPermission(Permission.SETTINGS_MANAGE)
+  const canWrite = isAdmin
 
   const handleSaveOrg = async (values: any) => {
     try {
@@ -123,7 +127,7 @@ export default function SettingsPage() {
                 <Input />
               </Form.Item>
             </div>
-            <Button type="primary" htmlType="submit">שמור שינויים</Button>
+            <Button type="primary" htmlType="submit" disabled={!canWrite}>שמור שינויים</Button>
           </Form>
 
           <Divider />
@@ -165,7 +169,7 @@ export default function SettingsPage() {
                 <Input type="color" style={{ width: 80, height: 40 }} />
               </Form.Item>
             </div>
-            <Button type="primary" htmlType="submit">שמור הגדרות</Button>
+            <Button type="primary" htmlType="submit" disabled={!canWrite}>שמור הגדרות</Button>
           </Form>
         </Card>
       ),
@@ -209,7 +213,7 @@ export default function SettingsPage() {
               ))}
             </div>
             <div className="mt-4">
-              <Button type="primary" htmlType="submit">שמור תכונות</Button>
+              <Button type="primary" htmlType="submit" disabled={!canWrite}>שמור תכונות</Button>
             </div>
           </Form>
         </Card>
@@ -260,7 +264,7 @@ export default function SettingsPage() {
                 </Form.Item>
               </div>
             </div>
-            <Button type="primary" htmlType="submit" className="mt-4">שמור הגדרות אבטחה</Button>
+            <Button type="primary" htmlType="submit" className="mt-4" disabled={!canWrite}>שמור הגדרות אבטחה</Button>
           </Form>
         </Card>
       ),
@@ -304,6 +308,7 @@ export default function SettingsPage() {
   ]
 
   return (
+    <ProtectedRoute requires={Permission.SETTINGS_VIEW}>
     <div className="max-w-6xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">הגדרות</h1>
@@ -328,5 +333,6 @@ export default function SettingsPage() {
         className="settings-tabs"
       />
     </div>
+    </ProtectedRoute>
   )
 }

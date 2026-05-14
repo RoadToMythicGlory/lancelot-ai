@@ -45,6 +45,22 @@ export interface AIConfig {
     enableE2eeChat: boolean;
     e2eeFallbackWarning: boolean;
   };
+
+  // Embeddings + RAG knowledge base (help articles, presets)
+  knowledge: {
+    /** Ollama model used for text embeddings. */
+    embeddingModel: string;
+    /** Re-index interval in milliseconds (default 10 min). */
+    indexRefreshMs: number;
+    /** Mongo collection name for help articles. */
+    helpCollectionName: string;
+    /** Optional folder of curated .md files to index alongside DB articles. */
+    knowledgeDir?: string;
+    /** Whether to persist embeddings in Mongo (so we don't re-embed on restart). */
+    persistEmbeddings: boolean;
+    /** Mongo collection name for the persistent vector index. */
+    vectorIndexCollection: string;
+  };
 }
 
 function buildMongoUrl(): string {
@@ -104,6 +120,15 @@ export const config: AIConfig = {
   features: {
     enableE2eeChat: process.env.ENABLE_E2EE_CHAT === 'true',
     e2eeFallbackWarning: process.env.E2EE_FALLBACK_WARNING === 'true',
+  },
+
+  knowledge: {
+    embeddingModel: process.env.EMBEDDING_MODEL || 'nomic-embed-text',
+    indexRefreshMs: parseInt(process.env.AI_INDEX_REFRESH_MS || '600000', 10),
+    helpCollectionName: process.env.AI_HELP_COLLECTION_NAME || 'helparticles',
+    knowledgeDir: process.env.AI_KNOWLEDGE_DIR || undefined,
+    persistEmbeddings: process.env.AI_PERSIST_EMBEDDINGS !== 'false',
+    vectorIndexCollection: process.env.AI_VECTOR_INDEX_COLLECTION || 'aiVectorIndex',
   },
 };
 

@@ -317,6 +317,22 @@ export const RATE_HELP_ARTICLE = gql`
   }
 `;
 
+// ==================== AI KNOWLEDGE BASE ====================
+
+/**
+ * Re-index the AI assistant's knowledge base (help articles + presets).
+ * Admin-only — gated server-side on Permission.SETTINGS_MANAGE.
+ */
+export const REINDEX_AI_KNOWLEDGE = gql`
+  mutation ReindexAIKnowledge {
+    reindexAIKnowledge {
+      success
+      documentsIndexed
+      message
+    }
+  }
+`;
+
 // ==================== API KEYS & WEBHOOKS ====================
 
 export const CREATE_API_KEY = gql`

@@ -1,11 +1,21 @@
 /**
  * Vector Store
- * 
- * Simple in-memory vector store for RAG.
- * For production, consider using pgvector or Qdrant.
+ *
+ * Simple in-memory vector store for RAG, backed by:
+ *  - Real semantic embeddings via Ollama (`llm/embeddings.ts`) when available.
+ *  - Deterministic trigram-hash fallback for fully-offline operation.
+ *
+ * The store auto-adjusts to the embedding dimension on first add, so
+ * switching embedding models (e.g. nomic-embed-text → bge-m3) is
+ * transparent on a fresh boot.
+ *
+ * For production-scale corpora (>50k chunks) replace with pgvector or
+ * Qdrant — the public API here is intentionally narrow so that's a
+ * drop-in change.
  */
 
 import { createLogger } from '../utils/logger';
+import { embed as embedWithProvider } from '../llm/embeddings';
 
 const logger = createLogger('vector-store');
 
@@ -127,19 +137,58 @@ class InMemoryVectorStore {
     this.documents.clear();
     logger.info('Vector store cleared');
   }
-  
+
+  /**
+   * Remove all documents whose metadata.source equals the given value.
+   * Used by the indexer to atomically replace e.g. all "help" docs.
+   */
+  clearBySource(source: string): number {
+    let removed = 0;
+    for (const [id, doc] of this.documents.entries()) {
+      if (doc.metadata?.source === source) {
+        this.documents.delete(id);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
   /**
    * Get a document by ID
    */
   get(id: string): VectorDocument | undefined {
     return this.documents.get(id);
   }
-  
+
   /**
    * Check if document exists
    */
   has(id: string): boolean {
     return this.documents.has(id);
+  }
+
+  /**
+   * Search for similar documents, optionally filtered by metadata.source.
+   */
+  searchBySource(
+    queryEmbedding: number[],
+    source: string,
+    topK: number = 5,
+  ): SearchResult[] {
+    const results: SearchResult[] = [];
+    for (const doc of this.documents.values()) {
+      if (doc.metadata?.source !== source) continue;
+      results.push({ document: doc, score: this.cosineSimilarity(queryEmbedding, doc.embedding) });
+    }
+    return results.sort((a, b) => b.score - a.score).slice(0, topK);
+  }
+
+  /**
+   * Reset the dimension. Needed if the operator switches embedding
+   * models — the indexer calls this before a full re-index.
+   */
+  resetDimension(): void {
+    this.embeddingDimension = 384;
   }
 }
 
@@ -187,7 +236,11 @@ export function simpleTextEmbedding(text: string, dimension: number = 384): numb
 }
 
 /**
- * Add text to vector store with auto-embedding
+ * Add text to vector store with auto-embedding (sync, trigram fallback only).
+ *
+ * Kept for backwards compatibility with the legacy news/RSS pipeline.
+ * For new code prefer `addTextToStoreAsync` which uses real semantic
+ * embeddings from Ollama when available.
  */
 export function addTextToStore(
   id: string,
@@ -199,7 +252,28 @@ export function addTextToStore(
 }
 
 /**
- * Search vector store by text query
+ * Async variant — embeds via Ollama (`nomic-embed-text` by default) and
+ * falls back to the trigram hash if the embedding service is down.
+ */
+export async function addTextToStoreAsync(
+  id: string,
+  content: string,
+  metadata: Record<string, unknown> = {},
+): Promise<void> {
+  const result = await embedWithProvider(content);
+  if (!result.embedding || result.embedding.length === 0) {
+    logger.warn('Skipping vector add — empty embedding', { id });
+    return;
+  }
+  getVectorStore().add(id, content, result.embedding, {
+    ...metadata,
+    embeddingModel: result.model,
+    embeddingSource: result.source,
+  });
+}
+
+/**
+ * Search vector store by text query (sync, trigram fallback only).
  */
 export function searchByText(
   query: string,
@@ -209,9 +283,24 @@ export function searchByText(
   return getVectorStore().search(queryEmbedding, topK);
 }
 
+/**
+ * Async variant — embeds the query with the same provider used during
+ * indexing so cosine similarity is meaningful.
+ */
+export async function searchByTextAsync(
+  query: string,
+  topK: number = 5,
+): Promise<SearchResult[]> {
+  const result = await embedWithProvider(query);
+  if (!result.embedding || result.embedding.length === 0) return [];
+  return getVectorStore().search(result.embedding, topK);
+}
+
 export default {
   getVectorStore,
   simpleTextEmbedding,
   addTextToStore,
+  addTextToStoreAsync,
   searchByText,
+  searchByTextAsync,
 };

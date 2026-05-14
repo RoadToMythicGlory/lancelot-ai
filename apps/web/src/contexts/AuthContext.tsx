@@ -1,17 +1,35 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useMemo } from 'react';
 import { useMutation } from '@apollo/client';
 import { LOGIN, REGISTER_PUBLIC_KEY } from '../graphql/mutations';
 import { getOrCreateKeyPair } from '../utils/crypto/e2ee';
+import {
+  Permission,
+  type SystemRole,
+  type ComputedPermissions,
+  computePermissions,
+  hasPermission as _hasPermission,
+  hasPermissionForDept as _hasPermissionForDept,
+} from '@/rbac';
 
-interface User {
+interface UserDepartment {
+  departmentId: string;
+  departmentName: string;
+  roles: string[];
+}
+
+export interface User {
   id: string;
   displayName: string;
   email: string;
   department?: string;
-  permissions?: string[];
-  systemRole?: string;
+  systemRole: SystemRole;
+  departments: UserDepartment[];
+  /** Raw permission strings from the JWT (kept for backward compat). */
+  permissions: string[];
+  /** Computed permission set — use hasPermission() helper instead of reading directly. */
+  computed: ComputedPermissions;
 }
 
 interface AuthContextType {
@@ -19,6 +37,10 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  /** Check a global (non-scoped) permission. */
+  hasPermission: (perm: Permission) => boolean;
+  /** Check a permission scoped to a specific department. */
+  hasPermissionForDept: (perm: Permission, deptId: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -35,290 +57,132 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
+function decodeJwtPayload(token: string): Record<string, any> | null {
+  try {
+    return JSON.parse(atob(token.split('.')[1]));
+  } catch {
+    return null;
+  }
+}
+
+function buildUser(payload: Record<string, any>): User {
+  const systemRole: SystemRole = payload.systemRole || 'DEPARTMENT_USER';
+  const departments: UserDepartment[] = payload.departments || [];
+  const rawPermissions: string[] = payload.permissions || [];
+
+  const computed = computePermissions({ systemRole, departments, permissions: rawPermissions });
+
+  return {
+    id: payload.userId,
+    displayName:
+      payload.displayName ||
+      `${payload.firstName || 'User'} ${payload.lastName || ''}`.trim() ||
+      payload.email,
+    email: payload.email,
+    department:
+      departments.length > 0
+        ? departments[0].departmentName || departments[0].departmentId
+        : '',
+    systemRole,
+    departments,
+    permissions: rawPermissions,
+    computed,
+  };
+}
+
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [loginMutation] = useMutation(LOGIN);
   const [registerPublicKeyMutation] = useMutation(REGISTER_PUBLIC_KEY);
 
-  console.log('🔑 AuthProvider mounted, initial state:', { user, loading });
-
-  // Log to sessionStorage for persistence
-  if (typeof window !== 'undefined') {
-    const authLog = {
-      timestamp: new Date().toISOString(),
-      event: 'AUTH_PROVIDER_MOUNTED',
-      user: user ? { id: user.id, email: user.email } : null,
-      loading
-    };
-    const logs = JSON.parse(sessionStorage.getItem('authDebugLogs') || '[]');
-    logs.push(authLog);
-    if (logs.length > 30) logs.shift();
-    sessionStorage.setItem('authDebugLogs', JSON.stringify(logs));
-  }
-
+  // Restore user from stored JWT on mount
   useEffect(() => {
-    // Check for stored auth token and validate
-    const checkAuth = async () => {
-      console.log('🔑 checkAuth started');
-      
-      // Log checkAuth start
-      if (typeof window !== 'undefined') {
-        const logs = JSON.parse(sessionStorage.getItem('authDebugLogs') || '[]');
-        logs.push({
-          timestamp: new Date().toISOString(),
-          event: 'CHECK_AUTH_START',
-          pathname: window.location.pathname
-        });
-        sessionStorage.setItem('authDebugLogs', JSON.stringify(logs));
-      }
-      
-      try {
-        const token = localStorage.getItem('auth-token');
-        console.log('🔑 Token from localStorage:', token ? token.substring(0, 50) + '...' : 'null');
-        
-        // Log token status
-        if (typeof window !== 'undefined') {
-          const logs = JSON.parse(sessionStorage.getItem('authDebugLogs') || '[]');
-          logs.push({
-            timestamp: new Date().toISOString(),
-            event: 'TOKEN_CHECK',
-            hasToken: !!token,
-            tokenPreview: token ? token.substring(0, 50) + '...' : null
-          });
-          sessionStorage.setItem('authDebugLogs', JSON.stringify(logs));
-        }
-        
-        if (token && token !== 'mock-jwt-token') {
-          // In a real app, validate token with the server
-          // For now, decode the JWT payload to get user info
-          const payload = JSON.parse(atob(token.split('.')[1]));
-          console.log('JWT Payload decoded:', payload);
-          
-          // Build permissions array based on role and systemRole
-          const permissions = [payload.role || 'user'];
-          
-          // Add admin permission for system/IT admins
-          if (['SYSTEM_ADMIN', 'IT_ADMIN'].includes(payload.systemRole)) {
-            permissions.push('admin');
-            permissions.push('shift_admin');
-          } else if (payload.systemRole === 'DEPARTMENT_ADMIN') {
-            permissions.push('shift_admin');
-          }
-          
-          const userObject = {
-            id: payload.userId,
-            displayName: payload.displayName || `${payload.firstName || 'User'} ${payload.lastName || ''}`.trim() || payload.email,
-            email: payload.email,
-            department: payload.department || (payload.departments && payload.departments.length > 0 ? payload.departments[0].departmentName : ''),
-            permissions,
-            systemRole: payload.systemRole
-          };
-          console.log('Setting user object:', userObject);
-          setUser(userObject);
-          
-          // Log successful auth
-          if (typeof window !== 'undefined') {
-            const logs = JSON.parse(sessionStorage.getItem('authDebugLogs') || '[]');
-            logs.push({
-              timestamp: new Date().toISOString(),
-              event: 'USER_SET',
-              user: { id: userObject.id, email: userObject.email, displayName: userObject.displayName }
-            });
-            sessionStorage.setItem('authDebugLogs', JSON.stringify(logs));
-          }
-        } else {
-          console.log('🔑 No valid token found, user remains null');
-          
-          // Log no token found
-          if (typeof window !== 'undefined') {
-            const logs = JSON.parse(sessionStorage.getItem('authDebugLogs') || '[]');
-            logs.push({
-              timestamp: new Date().toISOString(),
-              event: 'NO_VALID_TOKEN',
-              token: token ? 'exists but invalid' : 'null'
-            });
-            sessionStorage.setItem('authDebugLogs', JSON.stringify(logs));
-          }
-        }
-      } catch (error) {
-        console.error('🔑 Auth check failed:', error);
-        
-        // Only remove token if it's actually invalid (jwt malformed, expired, etc)
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        if (errorMessage.includes('jwt malformed') || 
-            errorMessage.includes('jwt expired') || 
-            errorMessage.includes('invalid token')) {
-          console.error('🔑 Token is invalid, removing it');
-          localStorage.removeItem('auth-token');
-        } else {
-          console.warn('🔑 Auth check error but keeping token:', errorMessage);
-        }
-        
-        // Log error
-        if (typeof window !== 'undefined') {
-          const logs = JSON.parse(sessionStorage.getItem('authDebugLogs') || '[]');
-          logs.push({
-            timestamp: new Date().toISOString(),
-            event: 'AUTH_ERROR',
-            error: errorMessage,
-            tokenRemoved: errorMessage.includes('jwt malformed') || errorMessage.includes('jwt expired')
-          });
-          sessionStorage.setItem('authDebugLogs', JSON.stringify(logs));
-        }
-      } finally {
-        console.log('🔑 Setting loading to false');
-        setLoading(false);
-        
-        // Log loading complete
-        if (typeof window !== 'undefined') {
-          const logs = JSON.parse(sessionStorage.getItem('authDebugLogs') || '[]');
-          logs.push({
-            timestamp: new Date().toISOString(),
-            event: 'AUTH_CHECK_COMPLETE',
-            hasUser: !!user
-          });
-          sessionStorage.setItem('authDebugLogs', JSON.stringify(logs));
+    try {
+      const token = localStorage.getItem('auth-token');
+      if (token && token !== 'mock-jwt-token') {
+        const payload = decodeJwtPayload(token);
+        if (payload) {
+          setUser(buildUser(payload));
         }
       }
-    };
-
-    checkAuth();
+    } catch (error) {
+      console.error('Auth check failed:', error);
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes('jwt malformed') || msg.includes('jwt expired') || msg.includes('invalid token')) {
+        localStorage.removeItem('auth-token');
+      }
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
+  // E2EE key registration
   useEffect(() => {
-    if (!user?.id) {
-      return;
-    }
-
+    if (!user?.id) return;
     let cancelled = false;
-
     const ensureE2eeKeys = async () => {
       try {
         const keyPair = await getOrCreateKeyPair(user.id);
-        if (cancelled) {
-          return;
-        }
-        await registerPublicKeyMutation({
-          variables: { publicKey: keyPair.publicKey },
-        });
+        if (cancelled) return;
+        await registerPublicKeyMutation({ variables: { publicKey: keyPair.publicKey } });
       } catch (error) {
         console.error('[E2EE] Failed to initialize keys:', error);
       }
     };
-
     ensureE2eeKeys();
-
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [user?.id, registerPublicKeyMutation]);
 
-  const login = async (email: string, password: string) => {
-    console.log('🔑 Login attempt for:', email);
-    try {
-      const { data } = await loginMutation({
-        variables: { email, password }
-      });
+  const login = useCallback(async (email: string, password: string) => {
+    const { data } = await loginMutation({ variables: { email, password } });
 
-      console.log('🔑 Login response:', data);
-
-      if (data?.login) {
-        const { token, user: loginUser } = data.login;
-        
-        console.log('🔑 Login successful, token:', token?.substring(0, 50) + '...');
-        console.log('🔑 Login user data:', loginUser);
-        
-        // Store the real JWT token
-        localStorage.setItem('auth-token', token);
-        console.log('🔑 Token stored in localStorage');
-        
-        // Log to sessionStorage for debugging
-        if (typeof window !== 'undefined') {
-          const logs = JSON.parse(sessionStorage.getItem('authDebugLogs') || '[]');
-          logs.push({
-            timestamp: new Date().toISOString(),
-            event: 'LOGIN_SUCCESS',
-            user: loginUser,
-            tokenStored: true,
-            tokenPreview: token?.substring(0, 50) + '...'
-          });
-          sessionStorage.setItem('authDebugLogs', JSON.stringify(logs));
-        }
-        
-        // Force page reload to ensure Apollo picks up the new token
-        window.location.href = '/';
-        
-        // Decode JWT to get full user info
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        
-        // Build permissions array based on role and systemRole
-        const permissions = [payload.role || 'user'];
-        
-        // Add admin permission for system/IT admins
-        if (['SYSTEM_ADMIN', 'IT_ADMIN'].includes(payload.systemRole || loginUser.systemRole)) {
-          permissions.push('admin');
-          permissions.push('shift_admin');
-        } else if ((payload.systemRole || loginUser.systemRole) === 'DEPARTMENT_ADMIN') {
-          permissions.push('shift_admin');
-        }
-        
-        // Set user data
-        setUser({
-          id: loginUser.id,
-          displayName: `${loginUser.firstName} ${loginUser.lastName}`.trim(),
-          email: payload.email,
-          department: loginUser.departments && loginUser.departments.length > 0 ? loginUser.departments[0].departmentName : '',
-          permissions,
-          systemRole: payload.systemRole || loginUser.systemRole
-        });
-      } else {
-        console.error('🔑 Login failed: No data returned');
-        
-        // Log to sessionStorage
-        if (typeof window !== 'undefined') {
-          const logs = JSON.parse(sessionStorage.getItem('authDebugLogs') || '[]');
-          logs.push({
-            timestamp: new Date().toISOString(),
-            event: 'LOGIN_FAILED',
-            reason: 'No data returned',
-            email
-          });
-          sessionStorage.setItem('authDebugLogs', JSON.stringify(logs));
-        }
-        
-        // Throw error to ensure the login page catches it
-        throw new Error('שגיאה בהתחברות - לא התקבלו נתונים מהשרת');
-      }
-    } catch (error: any) {
-      console.error('🔑 Login failed:', error);
-      
-      // Log to sessionStorage
-      if (typeof window !== 'undefined') {
-        const logs = JSON.parse(sessionStorage.getItem('authDebugLogs') || '[]');
-        logs.push({
-          timestamp: new Date().toISOString(),
-          event: 'LOGIN_ERROR',
-          error: error.message,
-          email
-        });
-        sessionStorage.setItem('authDebugLogs', JSON.stringify(logs));
-      }
-      
-      throw error;
+    if (!data?.login) {
+      throw new Error('שגיאה בהתחברות - לא התקבלו נתונים מהשרת');
     }
-  };
 
-  const logout = () => {
+    const { token, user: loginUser } = data.login;
+    localStorage.setItem('auth-token', token);
+
+    // Decode the JWT to get full user info (including permissions[])
+    const payload = decodeJwtPayload(token);
+    if (payload) {
+      setUser(buildUser(payload));
+    }
+
+    // Force page reload so Apollo picks up the new token
+    window.location.href = '/';
+  }, [loginMutation]);
+
+  const logout = useCallback(() => {
     setUser(null);
     localStorage.removeItem('auth-token');
-  };
+  }, []);
 
-  console.log('🔑 AuthProvider rendering with:', { user: !!user, loading });
+  const hasPermission = useCallback(
+    (perm: Permission) => {
+      if (!user) return false;
+      return _hasPermission(user.computed, perm);
+    },
+    [user],
+  );
+
+  const hasPermissionForDept = useCallback(
+    (perm: Permission, deptId: string) => {
+      if (!user) return false;
+      return _hasPermissionForDept(user.computed, perm, deptId);
+    },
+    [user],
+  );
+
+  const value = useMemo(
+    () => ({ user, loading, login, logout, hasPermission, hasPermissionForDept }),
+    [user, loading, login, logout, hasPermission, hasPermissionForDept],
+  );
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );
-}; 
+};

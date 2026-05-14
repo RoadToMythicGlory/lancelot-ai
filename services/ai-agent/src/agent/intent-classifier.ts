@@ -22,6 +22,12 @@ const IntentResultSchema = z.object({
     'rights',
     'general',
     'clarification',
+    'help',
+    'preset',
+    'equipment_lookup',
+    'shift_lookup',
+    'broadcast_lookup',
+    'user_lookup',
   ]),
   confidence: z.number().min(0).max(1),
   entities: z.record(z.string()).optional(),
@@ -31,9 +37,82 @@ const IntentResultSchema = z.object({
 type IntentResult = z.infer<typeof IntentResultSchema>;
 
 /**
- * Keywords for quick classification (bypass LLM for obvious cases)
+ * Keywords for quick classification (bypass LLM for obvious cases).
+ *
+ * Iteration order matters: the first bucket whose keyword matches wins.
+ * The "lookup" intents are listed BEFORE the broad operational intents
+ * (shifts/lineup/...) so that read-only questions ("מתי המשמרת שלי")
+ * are not accidentally routed to the heavyweight solver.
  */
 const INTENT_KEYWORDS: Record<string, string[]> = {
+  // ── Read-only lookup / RAG intents (must be checked first) ─────
+  help: [
+    // Hebrew
+    'איך אני', 'איך אפשר', 'איך עושים', 'איך לעשות', 'איך מוסיפים',
+    'איך יוצרים', 'איך מגדירים', 'איך משנים', 'איך מבטלים',
+    'מדריך', 'הסבר על', 'הסבר לי', 'תיעוד', 'מה זה', 'מהו',
+    'איפה אני מוצא', 'איפה נמצא', 'מה התפקיד של', 'למה משמש',
+    // English
+    'how do i', 'how to', 'how can i', 'guide for', 'documentation',
+    'what is', "what's", 'where do i find', 'explain to me', 'tutorial',
+  ],
+  preset: [
+    // Hebrew
+    'preset', 'פריסט', 'פריסטים', 'פרסט', 'פרסטים',
+    'איזה ציוד לוקחים', 'איזה ציוד צריך', 'מה לוקחים',
+    'מה צריך לקחת', 'משחק מרכזי', 'משחק חוץ', 'משחק בית',
+    'תבנית שידור', 'תבנית לשידור', 'OB', 'אוב',
+    // English
+    'central game', 'broadcast preset', 'what equipment for',
+    'what to take', 'gear for', 'what gear',
+  ],
+  equipment_lookup: [
+    // Hebrew (status / availability questions)
+    'כמה מצלמות', 'כמה ערכות', 'כמה סוללות', 'כמה כבלים',
+    'פנוי', 'פנויים', 'פנויות', 'במלאי', 'זמין במחסן', 'זמינים',
+    'סטטוס ציוד', 'מצב ציוד', 'ציוד תקול', 'ציוד מושעה',
+    'מי לקח', 'איפה הציוד', 'איפה המצלמה', 'איפה הערכה',
+    'ברקוד', 'מספר ברקוד',
+    // English
+    'how many cameras', 'how many kits', 'how many batteries',
+    'available stock', 'in stock', 'equipment status', 'broken equipment',
+    'who took', 'who has', 'where is the camera',
+  ],
+  shift_lookup: [
+    // Hebrew (read-only — "what's my shift", "who is on")
+    'מתי המשמרת שלי', 'המשמרות שלי', 'המשמרת שלי', 'משמרת שלי',
+    'מי במשמרת', 'מי המשמרת', 'מי עובד היום', 'מי עובד מחר',
+    'מי במשמרת היום', 'מי במשמרת מחר', 'משמרת היום', 'משמרת מחר',
+    'מי כונן', 'מי בכוננות',
+    // English
+    'my shift', 'my shifts', 'who is on shift', "who's on shift",
+    'who is working', "who's working", "today's shift", 'shift today',
+    'shift tomorrow', 'on call',
+  ],
+  broadcast_lookup: [
+    // Hebrew
+    'שידורים היום', 'שידורים מחר', 'שידורים השבוע',
+    'מה משדרים היום', 'מה משדרים מחר', 'מה יש היום', 'מה יש מחר',
+    'אירועי שידור', 'לוח שידורים', 'לוח השידורים', 'יומן שידורים',
+    'מה האירוע הבא', 'איזה משחקים היום',
+    // English
+    "today's broadcast", "today's broadcasts", "tomorrow's broadcasts",
+    'broadcast schedule', 'broadcasts today', 'broadcasts this week',
+    "what's broadcasting", 'next event', "what's on today",
+  ],
+  user_lookup: [
+    // Hebrew (directory questions — phrasing usually starts with מי)
+    'מי המפיק של', 'מי הבמאי של', 'מי הצלם של', 'מי הסאונדמן',
+    'מי אחראי על', 'מי המנהל של', 'מי בצוות',
+    'איך ליצור קשר עם', 'מספר טלפון של', 'מייל של', 'אימייל של',
+    'הפרטים של', 'אנשי הקשר של',
+    // English
+    'who produces', 'who directs', 'who manages',
+    'who is responsible', 'contact for', 'email for', 'phone for',
+    'team for',
+  ],
+
+  // ── Existing operational intents (kept for backwards-compat) ───
   lineup: [
     'rundown', 'lineup', 'תכנית', 'סגמנט', 'segments', 'schedule', 'show',
     'broadcast', 'program', 'episode', 'רנדאון', 'ליינאפ',
@@ -42,9 +121,14 @@ const INTENT_KEYWORDS: Record<string, string[]> = {
     'cg', 'graphics', 'lower third', 'scorebug', 'ticker', 'slate',
     'גרפיקה', 'שם', 'תחתון', 'סקורבאג', 'טיקר',
   ],
+  // Solver intent — kept narrow so "המשמרת שלי" doesn't trigger it.
+  // Read-only shift questions are handled by `shift_lookup` (above).
   shifts: [
-    'shift', 'schedule', 'משמרת', 'משמרות', 'עבודה', 'availability', 'swap',
-    'vacation', 'חופש', 'זמינות', 'החלפה', 'שבץ', 'שיבוץ', 'שבוע',
+    'בנה משמרות', 'תבנה משמרות', 'שיבוץ', 'שבץ',
+    'לוח משמרות שבועי', 'לוח משמרות חדש', 'בנה לוח משמרות',
+    'build schedule', 'solve schedule', 'generate schedule',
+    'shift solver', 'staffing plan',
+    'החלפת משמרת', 'בקשת חופש',
   ],
   news: [
     'news', 'חדשות', 'breaking', 'עדכון', 'update', 'brief',
@@ -409,7 +493,7 @@ export function generateClarificationRequest(intent: Intent, originalMessage: st
     return 'איזה סוג גרפיקה אתה צריך? (שם תחתון, סקורבאג, טיקר, שלט פתיחה)';
   }
   if (intent.primary === 'shifts') {
-    return 'לאיזה שבוע ומחלקה אתה מתכוון?';
+    return 'לאיזה שבוע ומחלקה לבנות לוח משמרות?';
   }
   if (intent.primary === 'news') {
     return 'לאיזה נושא או קטגוריה אתה מחפש חדשות?';
@@ -417,7 +501,25 @@ export function generateClarificationRequest(intent: Intent, originalMessage: st
   if (intent.primary === 'rights') {
     return 'על איזו ליגה או תחרות תרצה מידע?';
   }
-  
+  if (intent.primary === 'help') {
+    return 'מה תרצה לדעת איך לעשות? תוכל לפרט את השאלה?';
+  }
+  if (intent.primary === 'preset') {
+    return 'לאיזה סוג שידור אתה מחפש פריסט? (משחק מרכזי, שידור חוץ סטנדרטי, וכו\')';
+  }
+  if (intent.primary === 'equipment_lookup') {
+    return 'איזה ציוד אתה מחפש? (קטגוריה / שם / ברקוד)';
+  }
+  if (intent.primary === 'shift_lookup') {
+    return 'לאיזה תאריך / מחלקה אתה מתייחס?';
+  }
+  if (intent.primary === 'broadcast_lookup') {
+    return 'לאיזה תאריך אתה מתייחס? (היום, מחר, השבוע)';
+  }
+  if (intent.primary === 'user_lookup') {
+    return 'את מי אתה מחפש? (שם / תפקיד / מחלקה)';
+  }
+
   return 'לא הבנתי בדיוק מה אתה מחפש. תוכל לפרט יותר?';
 }
 

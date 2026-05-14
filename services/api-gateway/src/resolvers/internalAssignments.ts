@@ -1,7 +1,8 @@
 import { connectMongoose, connectMongoDB } from '../config/mongodb';
 import { Equipment, EquipmentHistory } from '../models/equipment.models';
 import { InternalEquipmentAssignment, IInternalEquipmentAssignment } from '../models/internalEquipmentAssignment.models';
-import { authenticateUser } from '../middleware/auth';
+import { requireAuth, requirePermission } from '../middleware/auth';
+import { Permission } from '../rbac';
 import mongoose from 'mongoose';
 import { ObjectId } from 'mongodb';
 
@@ -94,7 +95,7 @@ export const internalAssignmentsResolvers = {
       { status }: { status?: string },
       context: any,
     ) => {
-      authenticateUser(context);
+      requirePermission(context, Permission.WAREHOUSE_VIEW);
       await ensureMongoConnection();
 
       const query: any = {};
@@ -116,7 +117,7 @@ export const internalAssignmentsResolvers = {
       { input }: { input: any },
       context: any,
     ) => {
-      const user = authenticateUser(context);
+      const user = requirePermission(context, Permission.WAREHOUSE_MANAGE);
       await ensureMongoConnection();
 
       const quantity = Math.max(1, Number(input.quantityAssigned) || 1);
@@ -204,7 +205,7 @@ export const internalAssignmentsResolvers = {
       { assignmentId, notes }: { assignmentId: string; notes?: string },
       context: any,
     ) => {
-      const user = authenticateUser(context);
+      const user = requirePermission(context, Permission.WAREHOUSE_MANAGE);
       await ensureMongoConnection();
 
       const assignment = await InternalEquipmentAssignment.findById(assignmentId).exec();
@@ -256,7 +257,7 @@ export const internalAssignmentsResolvers = {
       { input }: { input: any },
       context: any,
     ) => {
-      const user = authenticateUser(context);
+      const user = requirePermission(context, Permission.WAREHOUSE_MANAGE);
       await ensureMongoConnection();
 
       const source = await InternalEquipmentAssignment.findById(input.assignmentId).exec();

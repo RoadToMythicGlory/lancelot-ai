@@ -1,25 +1,23 @@
 import { Context } from '../types';
 import { GraphicsProject, GraphicsExport } from '../models/graphics.models';
 import { mxfExportService } from '../services/mxfExportService';
+import { requireAuth } from '../middleware/auth';
+import { Permission } from '../rbac';
 import fs from 'fs/promises';
 import path from 'path';
 
 export const graphicsResolvers = {
   Query: {
     graphicsProjects: async (_: any, __: any, context: Context) => {
-      if (!context.user) {
-        throw new Error('Authentication required');
-      }
+      requireAuth(context);
       
-      return GraphicsProject.find({ createdBy: context.user.id })
+      return GraphicsProject.find({ createdBy: context.user!.userId })
         .sort({ updatedAt: -1 })
         .populate('createdBy', 'displayName email');
     },
 
     graphicsProject: async (_: any, { id }: any, context: Context) => {
-      if (!context.user) {
-        throw new Error('Authentication required');
-      }
+      requireAuth(context);
       
       const project = await GraphicsProject.findById(id).populate('createdBy', 'displayName email');
       
@@ -28,8 +26,8 @@ export const graphicsResolvers = {
       }
       
       // Check if user owns the project or has admin access
-      if (project.createdBy.toString() !== context.user.id && 
-          !context.user.permissions?.includes('ADMIN')) {
+      if (project.createdBy.toString() !== context.user!.userId && 
+          !context.user!.has?.(Permission.MEDIA_MANAGE)) {
         throw new Error('Access denied');
       }
       
@@ -37,11 +35,9 @@ export const graphicsResolvers = {
     },
 
     graphicsExports: async (_: any, __: any, context: Context) => {
-      if (!context.user) {
-        throw new Error('Authentication required');
-      }
+      requireAuth(context);
       
-      return GraphicsExport.find({ createdBy: context.user.id })
+      return GraphicsExport.find({ createdBy: context.user!.userId })
         .sort({ createdAt: -1 })
         .populate('projectId', 'name')
         .populate('createdBy', 'displayName email');
@@ -91,14 +87,12 @@ export const graphicsResolvers = {
 
   Mutation: {
     createGraphicsProject: async (_: any, { input }: any, context: Context) => {
-      if (!context.user) {
-        throw new Error('Authentication required');
-      }
+      requireAuth(context);
 
       const project = new GraphicsProject({
         ...input,
-        createdBy: context.user.id,
-        updatedBy: context.user.id,
+        createdBy: context.user!.userId,
+        updatedBy: context.user!.userId,
         createdAt: new Date(),
         updatedAt: new Date()
       });
@@ -107,9 +101,7 @@ export const graphicsResolvers = {
     },
 
     updateGraphicsProject: async (_: any, { id, input }: any, context: Context) => {
-      if (!context.user) {
-        throw new Error('Authentication required');
-      }
+      requireAuth(context);
 
       const project = await GraphicsProject.findById(id);
       
@@ -117,8 +109,8 @@ export const graphicsResolvers = {
         throw new Error('Project not found');
       }
       
-      if (project.createdBy.toString() !== context.user.id && 
-          !context.user.permissions?.includes('ADMIN')) {
+      if (project.createdBy.toString() !== context.user!.userId && 
+          !context.user!.has?.(Permission.MEDIA_MANAGE)) {
         throw new Error('Access denied');
       }
 
@@ -126,7 +118,7 @@ export const graphicsResolvers = {
         id,
         { 
           ...input, 
-          updatedBy: context.user.id,
+          updatedBy: context.user!.userId,
           updatedAt: new Date() 
         },
         { new: true }
@@ -134,9 +126,7 @@ export const graphicsResolvers = {
     },
 
     deleteGraphicsProject: async (_: any, { id }: any, context: Context) => {
-      if (!context.user) {
-        throw new Error('Authentication required');
-      }
+      requireAuth(context);
 
       const project = await GraphicsProject.findById(id);
       
@@ -144,8 +134,8 @@ export const graphicsResolvers = {
         throw new Error('Project not found');
       }
       
-      if (project.createdBy.toString() !== context.user.id && 
-          !context.user.permissions?.includes('ADMIN')) {
+      if (project.createdBy.toString() !== context.user!.userId && 
+          !context.user!.has?.(Permission.MEDIA_MANAGE)) {
         throw new Error('Access denied');
       }
 
@@ -154,9 +144,7 @@ export const graphicsResolvers = {
     },
 
     exportGraphicsProject: async (_: any, { input }: any, context: Context) => {
-      if (!context.user) {
-        throw new Error('Authentication required');
-      }
+      requireAuth(context);
 
       try {
         const { projectId, options } = input;
@@ -166,15 +154,15 @@ export const graphicsResolvers = {
           throw new Error('Project not found');
         }
         
-        if (project.createdBy.toString() !== context.user.id && 
-            !context.user.permissions?.includes('ADMIN')) {
+        if (project.createdBy.toString() !== context.user!.userId && 
+            !context.user!.has?.(Permission.MEDIA_MANAGE)) {
           throw new Error('Access denied');
         }
 
         // Create export record
         const exportRecord = new GraphicsExport({
           projectId,
-          createdBy: context.user.id,
+          createdBy: context.user!.userId,
           status: 'PROCESSING',
           options,
           createdAt: new Date()
@@ -225,9 +213,7 @@ export const graphicsResolvers = {
     },
 
     generatePreview: async (_: any, { input }: any, context: Context) => {
-      if (!context.user) {
-        throw new Error('Authentication required');
-      }
+      requireAuth(context);
 
       try {
         const project = await GraphicsProject.findById(input.projectId);
@@ -258,9 +244,7 @@ export const graphicsResolvers = {
     },
 
     duplicateGraphicsProject: async (_: any, { id }: any, context: Context) => {
-      if (!context.user) {
-        throw new Error('Authentication required');
-      }
+      requireAuth(context);
 
       const originalProject = await GraphicsProject.findById(id);
       
@@ -268,8 +252,8 @@ export const graphicsResolvers = {
         throw new Error('Project not found');
       }
       
-      if (originalProject.createdBy.toString() !== context.user.id && 
-          !context.user.permissions?.includes('ADMIN')) {
+      if (originalProject.createdBy.toString() !== context.user!.userId && 
+          !context.user!.has?.(Permission.MEDIA_MANAGE)) {
         throw new Error('Access denied');
       }
 
@@ -277,8 +261,8 @@ export const graphicsResolvers = {
         ...originalProject.toObject(),
         _id: undefined,
         name: `${originalProject.name} (Copy)`,
-        createdBy: context.user.id,
-        updatedBy: context.user.id,
+        createdBy: context.user!.userId,
+        updatedBy: context.user!.userId,
         createdAt: new Date(),
         updatedAt: new Date()
       });

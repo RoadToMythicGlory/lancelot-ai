@@ -1,45 +1,90 @@
-import * as jwt from 'jsonwebtoken';
-import { config } from '../config';
+import { AuthenticationError } from 'apollo-server-express';
+import { Permission, hasPermission, hasPermissionForDept } from '../rbac';
+import type { Context, AuthUser } from '../types';
 
-export interface AuthContext {
-  user?: {
-    id: string;
-    email: string;
-    firstName: string;
-    lastName: string;
-    systemRole: string;
-    departments: any[];
-  };
-  token?: string;
-}
+// ---------------------------------------------------------------------------
+// Core auth guards
+// ---------------------------------------------------------------------------
 
-export function authenticateUser(context: any) {
+/** Throws if no authenticated user on the context. Returns the AuthUser. */
+export function requireAuth(context: Context): AuthUser {
   if (!context.user) {
-    throw new Error('Unauthorized: Please login to access this resource');
+    throw new AuthenticationError('You must be logged in to do this');
   }
   return context.user;
 }
 
-export function verifyToken(token: string) {
-  try {
-    const decoded = jwt.verify(token, config.JWT_SECRET) as any;
-    return decoded;
-  } catch (error) {
-    throw new Error('Invalid or expired token');
+/** Throws if the user lacks the given global permission. */
+export function requirePermission(context: Context, perm: Permission): AuthUser {
+  const user = requireAuth(context);
+  if (!user.has(perm)) {
+    throw new AuthenticationError(
+      `Missing permission: ${perm}`,
+    );
   }
+  return user;
 }
 
-export function generateToken(user: any) {
-  return jwt.sign(
-    {
-      id: user.id || user._id,
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      systemRole: user.systemRole,
-      departments: user.departments || []
-    },
-    config.JWT_SECRET,
-    { expiresIn: '24h' }
-  );
+/** Throws if the user lacks the permission both globally and for the given dept. */
+export function requirePermissionForDept(
+  context: Context,
+  perm: Permission,
+  deptId: string,
+): AuthUser {
+  const user = requireAuth(context);
+  if (!user.hasForDept(perm, deptId)) {
+    throw new AuthenticationError(
+      `Missing permission: ${perm} for department ${deptId}`,
+    );
+  }
+  return user;
 }
+
+/** Convenience: throws unless SYSTEM_ADMIN or IT_ADMIN. */
+export function requireSystemAdmin(context: Context): AuthUser {
+  const user = requireAuth(context);
+  if (user.systemRole !== 'SYSTEM_ADMIN' && user.systemRole !== 'IT_ADMIN') {
+    throw new AuthenticationError('System admin access required');
+  }
+  return user;
+}
+
+// ---------------------------------------------------------------------------
+// Legacy aliases — kept so existing imports compile. Migrate call-sites over
+// time then remove.
+// ---------------------------------------------------------------------------
+
+/** @deprecated Use requireAuth instead */
+export function authenticateUser(context: any): AuthUser {
+  return requireAuth(context as Context);
+}
+
+/** @deprecated Use requirePermission wrapper or requireAuth directly */
+export const withAuth = (resolver: any) => {
+  return async (parent: any, args: any, context: any, info: any) => {
+    requireAuth(context);
+    return resolver(parent, args, context, info);
+  };
+};
+
+/** @deprecated Use requirePermission instead */
+export const withRole = (role: string, resolver: any) => {
+  return async (parent: any, args: any, context: any, info: any) => {
+    const user = requireAuth(context);
+    if (
+      user.systemRole !== role &&
+      !user.permissions?.includes(role) &&
+      !user.has(role as Permission)
+    ) {
+      throw new AuthenticationError(`You must have ${role} permissions to do this`);
+    }
+    return resolver(parent, args, context, info);
+  };
+};
+
+/** @deprecated Use user.has(Permission.MCR_ADMIN) instead */
+export const isMCRDepartmentAdmin = async (context: any): Promise<boolean> => {
+  if (!context.user) return false;
+  if (context.user.systemRole === 'SYSTEM_ADMIN') return true;
+  return context.user.has?.(Permission.MCR_ADMIN) ?? false;
+};

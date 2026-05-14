@@ -12,13 +12,13 @@ import { BroadcastRightManaged } from '../models/rights.models';
 import { HelpArticle, SupportTicket, Changelog } from '../models/help.models';
 import { ApiKey, Webhook, WebhookDelivery } from '../models/apiKey.models';
 import { pubsub } from '../utils/pubsub';
+import { requireAuth as requireAuthMiddleware, requirePermission } from '../middleware/auth';
+import { Permission } from '../rbac';
 
 // ==================== HELPER FUNCTIONS ====================
 
 async function requireAuth(context: any) {
-  if (!context.user || !context.user.userId) {
-    throw new Error('Not authenticated');
-  }
+  requireAuthMiddleware(context);
   const db = await connectMongoDB();
   const user = await db.collection('users').findOne({ _id: new ObjectId(context.user.userId) });
   if (!user) throw new Error('User not found');

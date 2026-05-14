@@ -10,6 +10,8 @@ import { Table, DatePicker, Button, Select, Tag, Popconfirm, App, Empty, Skeleto
 import { PlusOutlined, ReloadOutlined, EyeInvisibleOutlined, EyeOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import { Permission } from '@/rbac';
 
 const broadcastTypes: BroadcastType[] = [
   'SRT_CALLER', 'SRT_LISTENER', 'DVBS2', 'DVBS2X', 'NS4', 'NS3',
@@ -319,6 +321,7 @@ export default function EditBoardPage() {
   ];
 
   return (
+    <ProtectedRoute requires={Permission.MCR_VIEW}>
     <div className="min-h-screen bg-gray-50 p-4" dir="rtl">
       <style jsx global>{`
         .mcr-edit-board-table-wrapper .ant-table {
@@ -409,5 +412,6 @@ export default function EditBoardPage() {
         )}
       </div>
     </div>
+    </ProtectedRoute>
   );
 }

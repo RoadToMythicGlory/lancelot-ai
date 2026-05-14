@@ -82,7 +82,11 @@ async function getAIAgentUserId(): Promise<string | null> {
 }
 
 /**
- * Send message to AI agent service
+ * Send message to AI agent service.
+ *
+ * Forwards the asking user's RBAC info via additional headers so the AI
+ * agent can scope DB-reading tools (warehouse, shifts, users, ...) to
+ * what the user is actually allowed to see.
  */
 async function sendToAIAgent(
   conversationId: string,
@@ -92,11 +96,27 @@ async function sendToAIAgent(
   messageType?: string,
   encryption?: any,
   messageId?: string,
-  traceId?: string
+  traceId?: string,
+  rbac?: {
+    permissions?: string[];
+    departmentId?: string;
+    systemRole?: string;
+  }
 ): Promise<{ text: string; data?: any; error?: string; encryption?: any; messageType?: string }> {
   try {
     logger.info('Sending message to AI agent service', { traceId });
-    
+
+    const rbacHeaders: Record<string, string> = {};
+    if (rbac?.permissions && rbac.permissions.length > 0) {
+      rbacHeaders['x-user-permissions'] = JSON.stringify(rbac.permissions);
+    }
+    if (rbac?.departmentId) {
+      rbacHeaders['x-user-department'] = rbac.departmentId;
+    }
+    if (rbac?.systemRole) {
+      rbacHeaders['x-user-system-role'] = rbac.systemRole;
+    }
+
     const response = await withTimeout(
       fetch(`${AI_AGENT_SERVICE_URL}/ai/chat`, {
         method: 'POST',
@@ -104,6 +124,7 @@ async function sendToAIAgent(
           'Content-Type': 'application/json',
           'x-user-id': userId,
           'x-user-email': userName,
+          ...rbacHeaders,
           ...(traceId ? { 'x-trace-id': traceId } : {}),
         },
         body: JSON.stringify({
@@ -155,6 +176,12 @@ interface SocketUser {
   userId: string;
   email: string;
   displayName: string;
+  /** Live permissions list — used to scope AI data tools. */
+  permissions?: string[];
+  /** Primary department ID — used as default scope when querying shifts/users. */
+  departmentId?: string;
+  /** System role — used by AI tools that may bypass dept scoping for admins. */
+  systemRole?: string;
 }
 
 export function setupChatSocket(httpServer: HttpServer) {
@@ -209,13 +236,49 @@ export function setupChatSocket(httpServer: HttpServer) {
         userId: payload.userId,
         email: payload.email,
       });
-      
+
+      // Pull live RBAC info from MongoDB so the AI agent receives current
+      // permissions (JWT may be stale if the user's role recently changed).
+      let permissions: string[] | undefined;
+      let departmentId: string | undefined;
+      let systemRole: string | undefined;
+      try {
+        const { ObjectId } = await import('mongodb');
+        const mongoDb = await connectMongoDB();
+        const userDoc = await mongoDb
+          .collection('users')
+          .findOne({ _id: new ObjectId(payload.userId) });
+        if (userDoc) {
+          if (Array.isArray(userDoc.permissions)) {
+            permissions = userDoc.permissions.filter(
+              (p: unknown): p is string => typeof p === 'string'
+            );
+          }
+          if (Array.isArray(userDoc.departments) && userDoc.departments.length > 0) {
+            departmentId = userDoc.departments[0]?.departmentId;
+          } else if (typeof userDoc.department === 'string') {
+            departmentId = userDoc.department;
+          }
+          if (typeof userDoc.systemRole === 'string') {
+            systemRole = userDoc.systemRole;
+          }
+        }
+      } catch (rbacErr) {
+        logger.warn('Failed to load RBAC info for socket user', {
+          userId: payload.userId,
+          error: (rbacErr as Error).message,
+        });
+      }
+
       (socket as any).user = {
         userId: payload.userId,
         email: payload.email,
-        displayName: payload.displayName || `${payload.firstName} ${payload.lastName}`.trim()
+        displayName: payload.displayName || `${payload.firstName} ${payload.lastName}`.trim(),
+        permissions,
+        departmentId,
+        systemRole,
       };
-      
+
       next();
     } catch (err: any) {
       logger.warn('Socket authentication failed', { error: err.message });
@@ -386,7 +449,12 @@ export function setupChatSocket(httpServer: HttpServer) {
             data.messageType,
             data.encryption,
             data.messageId,
-            traceId
+            traceId,
+            {
+              permissions: user.permissions,
+              departmentId: user.departmentId,
+              systemRole: user.systemRole,
+            }
           );
           
           // Stop typing indicator

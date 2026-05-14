@@ -1,5 +1,7 @@
 import { Context } from '../types';
 import { VizrtConfig, VizrtTemplate, VizrtMode } from '../models/vizrt.models';
+import { requirePermission } from '../middleware/auth';
+import { Permission } from '../rbac';
 
 // Vizrt API clients
 interface VizrtClient {
@@ -108,9 +110,7 @@ export const vizrtResolvers = {
 
   Mutation: {
     createVizrtConfig: async (_: any, { input }: any, context: Context) => {
-      if (!context.user?.permissions?.includes('VIZRT_ADMIN')) {
-        throw new Error('Insufficient permissions');
-      }
+      requirePermission(context, Permission.VIZRT_ADMIN);
 
       const config = new VizrtConfig({
         ...input,
@@ -123,9 +123,7 @@ export const vizrtResolvers = {
     },
 
     updateVizrtConfig: async (_: any, { id, input }: any, context: Context) => {
-      if (!context.user?.permissions?.includes('VIZRT_ADMIN')) {
-        throw new Error('Insufficient permissions');
-      }
+      requirePermission(context, Permission.VIZRT_ADMIN);
 
       return VizrtConfig.findByIdAndUpdate(
         id,
@@ -135,18 +133,14 @@ export const vizrtResolvers = {
     },
 
     deleteVizrtConfig: async (_: any, { id }: any, context: Context) => {
-      if (!context.user?.permissions?.includes('VIZRT_ADMIN')) {
-        throw new Error('Insufficient permissions');
-      }
+      requirePermission(context, Permission.VIZRT_ADMIN);
 
       await VizrtConfig.findByIdAndUpdate(id, { isActive: false });
       return true;
     },
 
     createVizrtTemplate: async (_: any, { input }: any, context: Context) => {
-      if (!context.user?.permissions?.includes('VIZRT_ADMIN')) {
-        throw new Error('Insufficient permissions');
-      }
+      requirePermission(context, Permission.VIZRT_ADMIN);
 
       const template = new VizrtTemplate({
         ...input,
@@ -158,9 +152,7 @@ export const vizrtResolvers = {
     },
 
     updateVizrtTemplate: async (_: any, { id, input }: any, context: Context) => {
-      if (!context.user?.permissions?.includes('VIZRT_ADMIN')) {
-        throw new Error('Insufficient permissions');
-      }
+      requirePermission(context, Permission.VIZRT_ADMIN);
 
       return VizrtTemplate.findByIdAndUpdate(
         id,
@@ -170,9 +162,7 @@ export const vizrtResolvers = {
     },
 
     deleteVizrtTemplate: async (_: any, { id }: any, context: Context) => {
-      if (!context.user?.permissions?.includes('VIZRT_ADMIN')) {
-        throw new Error('Insufficient permissions');
-      }
+      requirePermission(context, Permission.VIZRT_ADMIN);
 
       await VizrtTemplate.findByIdAndDelete(id);
       return true;

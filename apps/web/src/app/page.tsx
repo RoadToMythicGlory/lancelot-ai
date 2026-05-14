@@ -3,6 +3,8 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import { Permission } from '@/rbac';
 import { useQuery } from '@apollo/client';
 import { gql } from '@apollo/client';
 import { 
@@ -442,6 +444,7 @@ export default function Home() {
   };
 
     return (
+    <ProtectedRoute requires={Permission.DASHBOARD_VIEW}>
     <Content className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="p-6 max-w-7xl mx-auto">
         {/* Header Section */}
@@ -870,5 +873,6 @@ export default function Home() {
         </Modal>
       </div>
     </Content>
+    </ProtectedRoute>
   );
 } 

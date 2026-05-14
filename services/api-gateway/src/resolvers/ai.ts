@@ -6,47 +6,64 @@
 
 import { connectMongoDB } from '../config/mongodb';
 import { createLogger } from '../utils/logger';
+import { requireAuth, requirePermission } from '../middleware/auth';
+import { Permission } from '../rbac';
+import type { Context } from '../types';
 
 const logger = createLogger('ai-resolver');
 
 const AI_AGENT_EMAIL = 'lancelot-ai@internal.system';
 const AI_AGENT_SERVICE_URL = process.env.AI_AGENT_URL || 'http://localhost:4001';
 
-interface Context {
-  user?: {
-    userId: string;
-    email: string;
-    displayName?: string;
-  };
-  traceId?: string;
-}
-
 /**
- * Fetch from AI agent service
+ * Fetch from AI agent service.
+ *
+ * When the GraphQL Context is provided we forward the asking user's RBAC
+ * info (email, permissions, department, role) so the AI agent can scope
+ * data-reading tools to what the user is actually allowed to see.
  */
 async function fetchFromAIAgent(
   endpoint: string,
   method: string,
   body?: Record<string, unknown>,
   userId?: string,
-  traceId?: string
+  traceId?: string,
+  context?: Context,
 ): Promise<any> {
   try {
+    const rbacHeaders: Record<string, string> = {};
+    if (context?.user) {
+      if (context.user.email) {
+        rbacHeaders['x-user-email'] = context.user.email;
+      }
+      if (Array.isArray(context.user.permissions) && context.user.permissions.length > 0) {
+        rbacHeaders['x-user-permissions'] = JSON.stringify(context.user.permissions);
+      }
+      if (context.user.departments && context.user.departments.length > 0) {
+        const primaryDept = context.user.departments[0]?.departmentId;
+        if (primaryDept) rbacHeaders['x-user-department'] = primaryDept;
+      }
+      if (context.user.systemRole) {
+        rbacHeaders['x-user-system-role'] = context.user.systemRole;
+      }
+    }
+
     const response = await fetch(`${AI_AGENT_SERVICE_URL}${endpoint}`, {
       method,
       headers: {
         'Content-Type': 'application/json',
         ...(userId && { 'x-user-id': userId }),
+        ...rbacHeaders,
         ...(traceId && { 'x-trace-id': traceId }),
       },
       body: body ? JSON.stringify(body) : undefined,
     });
-    
+
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`AI service error: ${response.status} - ${errorText}`);
     }
-    
+
     return await response.json();
   } catch (error) {
     logger.error(`Error calling ${endpoint}`, { error: (error as Error).message }, traceId);
@@ -61,7 +78,7 @@ export const aiResolvers = {
      */
     aiAgentStatus: async (_: any, __: any, context: Context) => {
       try {
-        const status = await fetchFromAIAgent('/ai/status', 'GET', undefined, undefined, context.traceId);
+        const status = await fetchFromAIAgent('/ai/status', 'GET', undefined, undefined, context.traceId, context);
         
         return {
           isOnline: status.status === 'online',
@@ -88,9 +105,7 @@ export const aiResolvers = {
       args: { conversationId: string; limit?: number },
       context: Context
     ) => {
-      if (!context.user) {
-        throw new Error('Unauthorized');
-      }
+      requireAuth(context);
       
       try {
         const mongoDb = await connectMongoDB();
@@ -166,9 +181,7 @@ export const aiResolvers = {
       args: { input: { conversationId: string; message: string; context?: any } },
       context: Context
     ) => {
-      if (!context.user) {
-        throw new Error('Unauthorized');
-      }
+      requireAuth(context);
       
       try {
         const response = await fetchFromAIAgent(
@@ -179,8 +192,9 @@ export const aiResolvers = {
             message: args.input.message,
             context: args.input.context,
           },
-          context.user.userId,
-          context.traceId
+          context.user!.userId,
+          context.traceId,
+          context,
         );
         
         return response;
@@ -189,7 +203,7 @@ export const aiResolvers = {
         throw new Error('Failed to communicate with AI agent');
       }
     },
-    
+
     /**
      * Request lineup from AI
      */
@@ -198,12 +212,9 @@ export const aiResolvers = {
       args: { input: any },
       context: Context
     ) => {
-      if (!context.user) {
-        throw new Error('Unauthorized');
-      }
-      
+      requireAuth(context);
+
       try {
-        // For now, use the chat endpoint with a lineup-focused message
         const response = await fetchFromAIAgent(
           '/ai/chat',
           'POST',
@@ -212,17 +223,18 @@ export const aiResolvers = {
             message: `Build lineup: ${JSON.stringify(args.input)}`,
             context: { type: 'lineup_request', ...args.input },
           },
-          context.user.userId,
-          context.traceId
+          context.user!.userId,
+          context.traceId,
+          context,
         );
-        
+
         return response.response?.structuredData || response;
       } catch (error) {
         logger.error('Failed to request lineup', { error: (error as Error).message }, context.traceId);
         throw new Error('Failed to generate lineup');
       }
     },
-    
+
     /**
      * Request CG spec from AI
      */
@@ -231,10 +243,8 @@ export const aiResolvers = {
       args: { input: any },
       context: Context
     ) => {
-      if (!context.user) {
-        throw new Error('Unauthorized');
-      }
-      
+      requireAuth(context);
+
       try {
         const response = await fetchFromAIAgent(
           '/ai/chat',
@@ -244,17 +254,18 @@ export const aiResolvers = {
             message: `Create CG: ${args.input.context || JSON.stringify(args.input)}`,
             context: { type: 'cg_request', ...args.input },
           },
-          context.user.userId,
-          context.traceId
+          context.user!.userId,
+          context.traceId,
+          context,
         );
-        
+
         return response.response?.structuredData || response;
       } catch (error) {
         logger.error('Failed to request CG spec', { error: (error as Error).message }, context.traceId);
         throw new Error('Failed to generate CG spec');
       }
     },
-    
+
     /**
      * Trigger news fetch
      */
@@ -263,12 +274,9 @@ export const aiResolvers = {
       args: { sources?: string[] },
       context: Context
     ) => {
-      if (!context.user) {
-        throw new Error('Unauthorized');
-      }
-      
+      requireAuth(context);
+
       try {
-        // Trigger news fetch via chat
         const response = await fetchFromAIAgent(
           '/ai/chat',
           'POST',
@@ -277,10 +285,11 @@ export const aiResolvers = {
             message: 'Fetch latest news',
             context: { type: 'news_fetch', sources: args.sources },
           },
-          context.user.userId,
-          context.traceId
+          context.user!.userId,
+          context.traceId,
+          context,
         );
-        
+
         return {
           success: true,
           message: 'News fetch triggered',
@@ -289,6 +298,40 @@ export const aiResolvers = {
       } catch (error) {
         logger.error('Failed to trigger news fetch', { error: (error as Error).message }, context.traceId);
         throw new Error('Failed to fetch news');
+      }
+    },
+
+    /**
+     * Trigger an AI knowledge re-index (admin only).
+     *
+     * Calls the AI agent's `/ai/admin/reindex` endpoint, which re-embeds
+     * help articles + presets so the assistant's RAG store reflects the
+     * latest content. Requires SETTINGS_MANAGE permission.
+     */
+    reindexAIKnowledge: async (
+      _: any,
+      __: any,
+      context: Context
+    ) => {
+      requirePermission(context, Permission.SETTINGS_MANAGE);
+
+      try {
+        const response = await fetchFromAIAgent(
+          '/ai/admin/reindex',
+          'POST',
+          {},
+          context.user!.userId,
+          context.traceId,
+          context,
+        );
+        return {
+          success: true,
+          documentsIndexed: response?.documentsIndexed ?? 0,
+          message: response?.message ?? 'Reindex triggered',
+        };
+      } catch (error) {
+        logger.error('Failed to reindex AI knowledge', { error: (error as Error).message }, context.traceId);
+        throw new Error('Failed to reindex AI knowledge');
       }
     },
   },

@@ -121,14 +121,25 @@ async function bootstrap() {
 
     // ---------------------------------------------------------------
     // 1. Gather existing user ids
+    //
+    // We deliberately exclude the virtual Lancelot AI user
+    // (`lancelot-ai@internal.system`) — it backs the in-app chat AI and
+    // is *not* a human account. Wiping it would break ChatManager's
+    // `aiAgentUser` lookup and make the AI disappear from the contacts
+    // list. Its references in history collections also stay untouched.
     // ---------------------------------------------------------------
+    const AI_AGENT_EMAIL = 'lancelot-ai@internal.system';
+
     const existingUsers = await db
       .collection('users')
-      .find({}, { projection: { _id: 1, email: 1 } })
+      .find(
+        { email: { $ne: AI_AGENT_EMAIL }, isAIAgent: { $ne: true } },
+        { projection: { _id: 1, email: 1 } }
+      )
       .toArray();
 
     const oldUserIds = existingUsers.map((u) => u._id);
-    console.log(`Found ${existingUsers.length} existing user(s):`);
+    console.log(`Found ${existingUsers.length} existing human user(s) (AI agent preserved):`);
     for (const u of existingUsers) {
       console.log(`  - ${u.email || u._id}`);
     }
@@ -176,11 +187,14 @@ async function bootstrap() {
     }
 
     // ---------------------------------------------------------------
-    // 4. Delete all users
+    // 4. Delete all human users (AI agent preserved)
     // ---------------------------------------------------------------
-    console.log(`\nDeleting all ${existingUsers.length} user(s)...`);
+    console.log(`\nDeleting all ${existingUsers.length} human user(s) (AI agent preserved)...`);
     if (!DRY_RUN) {
-      await db.collection('users').deleteMany({});
+      await db.collection('users').deleteMany({
+        email: { $ne: AI_AGENT_EMAIL },
+        isAIAgent: { $ne: true },
+      });
     }
 
     // ---------------------------------------------------------------

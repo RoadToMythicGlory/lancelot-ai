@@ -18,10 +18,13 @@ import { useAuth } from '@/contexts/AuthContext'
 import { Permission } from '@/rbac'
 import {
   GET_HELP_ARTICLES,
+  GET_HELP_ARTICLE,
   GET_MY_SUPPORT_TICKETS,
   GET_CHANGELOG,
   GET_SUPPORT_TICKET,
 } from '@/graphql/saasQueries'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import {
   CREATE_SUPPORT_TICKET,
   ADD_TICKET_MESSAGE,
@@ -67,6 +70,7 @@ export default function HelpPage() {
   const [selectedCategory, setSelectedCategory] = useState<string | undefined>()
   const [createTicketModal, setCreateTicketModal] = useState(false)
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null)
+  const [selectedArticleSlug, setSelectedArticleSlug] = useState<string | null>(null)
   const canManageAIKnowledge = hasPermission(Permission.SETTINGS_MANAGE)
   const [reindexAIKnowledge, { loading: isReindexing }] = useMutation(REINDEX_AI_KNOWLEDGE, {
     onCompleted: (data) => {
@@ -93,6 +97,10 @@ export default function HelpPage() {
     variables: { id: selectedTicketId },
     skip: !selectedTicketId,
   })
+  const { data: articleDetailData, loading: articleLoading } = useQuery(GET_HELP_ARTICLE, {
+    variables: { slug: selectedArticleSlug },
+    skip: !selectedArticleSlug,
+  })
 
   const [createTicket] = useMutation(CREATE_SUPPORT_TICKET)
   const [addMessage] = useMutation(ADD_TICKET_MESSAGE)
@@ -102,6 +110,7 @@ export default function HelpPage() {
   const tickets = ticketsData?.mySaasTickets || []
   const changelog = changelogData?.changelog || []
   const ticketDetail = ticketDetailData?.saasTicket
+  const articleDetail = articleDetailData?.helpArticle
 
   const handleCreateTicket = async (values: any) => {
     try {
@@ -196,7 +205,8 @@ export default function HelpPage() {
                       <Card
                         key={article.id}
                         hoverable
-                        className="h-full"
+                        className="h-full cursor-pointer"
+                        onClick={() => setSelectedArticleSlug(article.slug)}
                       >
                         <Tag color="blue" className="mb-2">{categoryLabels[article.category] || article.category}</Tag>
                         <h3 className="font-semibold text-lg mb-2">{article.titleHe || article.title}</h3>
@@ -207,13 +217,13 @@ export default function HelpPage() {
                           <span>{article.viewCount} צפיות</span>
                           <div className="flex gap-2">
                             <button
-                              onClick={() => handleRate(article.id, true)}
+                              onClick={(e) => { e.stopPropagation(); handleRate(article.id, true) }}
                               className="flex items-center gap-1 hover:text-green-500"
                             >
                               <HandThumbUpIcon className="h-3 w-3" /> {article.helpfulCount || 0}
                             </button>
                             <button
-                              onClick={() => handleRate(article.id, false)}
+                              onClick={(e) => { e.stopPropagation(); handleRate(article.id, false) }}
                               className="flex items-center gap-1 hover:text-red-500"
                             >
                               <HandThumbDownIcon className="h-3 w-3" /> {article.notHelpfulCount || 0}
@@ -371,6 +381,59 @@ export default function HelpPage() {
           </Form.Item>
           <Button type="primary" htmlType="submit">שלח פנייה</Button>
         </Form>
+      </Modal>
+
+      {/* Article Detail Modal */}
+      <Modal
+        title={
+          articleDetail ? (
+            <div className="flex items-center gap-3">
+              <Tag color="blue">{categoryLabels[articleDetail.category] || articleDetail.category}</Tag>
+              <span>{articleDetail.titleHe || articleDetail.title}</span>
+            </div>
+          ) : 'מאמר עזרה'
+        }
+        open={!!selectedArticleSlug}
+        onCancel={() => setSelectedArticleSlug(null)}
+        footer={
+          articleDetail ? (
+            <div className="flex items-center justify-between">
+              <div className="flex gap-3 text-xs text-gray-400">
+                <span>{articleDetail.viewCount} צפיות</span>
+                <button
+                  onClick={() => handleRate(articleDetail.id, true)}
+                  className="flex items-center gap-1 hover:text-green-500"
+                >
+                  <HandThumbUpIcon className="h-3 w-3" /> {articleDetail.helpfulCount || 0}
+                </button>
+                <button
+                  onClick={() => handleRate(articleDetail.id, false)}
+                  className="flex items-center gap-1 hover:text-red-500"
+                >
+                  <HandThumbDownIcon className="h-3 w-3" /> {articleDetail.notHelpfulCount || 0}
+                </button>
+              </div>
+              <Button onClick={() => setSelectedArticleSlug(null)}>סגור</Button>
+            </div>
+          ) : null
+        }
+        width={900}
+        style={{ top: 20 }}
+      >
+        {articleLoading ? (
+          <div className="flex justify-center p-12"><Spin size="large" /></div>
+        ) : articleDetail ? (
+          <div
+            className="prose prose-sm max-w-none text-right"
+            style={{ direction: 'rtl', maxHeight: '70vh', overflowY: 'auto' }}
+          >
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {articleDetail.contentHe || articleDetail.content || ''}
+            </ReactMarkdown>
+          </div>
+        ) : (
+          <Empty description="לא נמצא מאמר" />
+        )}
       </Modal>
 
       {/* Ticket Detail Modal */}

@@ -83,6 +83,8 @@ import ClosedCaptionsModal from '../../components/broadcast/ClosedCaptionsModal'
 import PlayoutDepartmentModal from '../../components/broadcast/PlayoutDepartmentModal';
 import BatchEventCreator from '../../components/broadcast/BatchEventCreator';
 import BroadcastEventModal from '../../components/broadcast/BroadcastEventModal';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import { Permission } from '@/rbac';
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -673,7 +675,14 @@ const BroadcastPlanningPage: React.FC = () => {
   // Handle batch save from Excel-like UI
   const handleBatchSave = async (events: any[], forceCreate: boolean = false) => {
     try {
-      const results: any[] = [];
+      // Track events that were NOT created because of overlap (need user confirmation to force-create).
+      // The server-side mutation creates the event only when there is no overlap, or when forceCreate=true.
+      // When hasOverlaps && !forceCreate, the server returns success=false without persisting the event,
+      // so we must only retry those specific events — not the entire batch — to avoid duplicates.
+      const pendingOverlapEvents: any[] = [];
+      const overlapMessages: string[] = [];
+      let createdCount = 0;
+
       // Sequential processing with small delay to avoid API 429 (rate limit ~100/min)
       for (let i = 0; i < events.length; i++) {
         const event = events[i];
@@ -704,41 +713,46 @@ const BroadcastPlanningPage: React.FC = () => {
         };
         // Execute mutation
         // eslint-disable-next-line no-await-in-loop
-        const res = await createBroadcastEvent({ 
+        const res = await createBroadcastEvent({
           variables: { input, forceCreate },
           refetchQueries: [
             { query: GET_BROADCAST_EVENTS, variables: { startDate, endDate } }
           ],
           awaitRefetchQueries: true
         });
-        results.push(res);
+
+        const response = res.data?.createBroadcastEventWithOverlapCheck;
+        if (response?.success) {
+          createdCount++;
+        } else if (response?.overlapCheck?.hasOverlaps) {
+          pendingOverlapEvents.push(event);
+          if (response.overlapCheck.message) {
+            overlapMessages.push(response.overlapCheck.message);
+          }
+        }
+
         // Delay ~800ms between calls (~75/min) to stay under rate limits
         // eslint-disable-next-line no-await-in-loop
         await new Promise((r) => setTimeout(r, 800));
       }
-      
-      // Check if any events have overlaps
-      const hasAnyOverlaps = results.some(result => 
-        result.data?.createBroadcastEventWithOverlapCheck?.overlapCheck?.hasOverlaps
-      );
 
-      if (hasAnyOverlaps && !forceCreate) {
-        const overlapMessages = results
-          .filter(result => result.data?.createBroadcastEventWithOverlapCheck?.overlapCheck?.hasOverlaps)
-          .map(result => result.data.createBroadcastEventWithOverlapCheck.overlapCheck.message)
-          .join('\n');
-
+      if (pendingOverlapEvents.length > 0 && !forceCreate) {
         modal.confirm({
           title: 'זוהו חפיפות ערוצים',
-          content: overlapMessages,
+          content: overlapMessages.join('\n'),
           okText: 'צור בכל זאת',
           cancelText: 'ביטול',
-          onOk: () => handleBatchSave(events, true),
+          onOk: () => handleBatchSave(pendingOverlapEvents, true),
         });
+        // Notify the user that the non-overlapping events were already saved.
+        if (createdCount > 0) {
+          messageApi.success(`נוצרו ${createdCount} אירועים. ${pendingOverlapEvents.length} ממתינים לאישור חפיפה.`);
+          await refetch();
+        }
         return;
       }
 
-      messageApi.success(`נוצרו בהצלחה ${events.length} אירועים`);
+      messageApi.success(`נוצרו בהצלחה ${createdCount} אירועים`);
       await refetch();
       setBatchCreatorModal(false);
     } catch (error: any) {
@@ -2406,9 +2420,11 @@ const BroadcastPlanningPage: React.FC = () => {
 // Wrap with App component to provide message context  
 const BroadcastPlanningPageWithApp: React.FC = () => {
   return (
-    <App>
-      <BroadcastPlanningPage />
-    </App>
+    <ProtectedRoute requires={Permission.BROADCAST_VIEW}>
+      <App>
+        <BroadcastPlanningPage />
+      </App>
+    </ProtectedRoute>
   );
 };
 

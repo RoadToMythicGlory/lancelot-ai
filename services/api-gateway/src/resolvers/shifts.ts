@@ -1,6 +1,8 @@
 import { ObjectId } from 'mongodb';
 import { connectMongoDB } from '../config/mongodb';
 import { expandMCRDepartments } from '../utils/departments';
+import { requireAuth, requirePermission } from '../middleware/auth';
+import { Permission } from '../rbac';
 
 // Department roles configuration - defines number of roles per department
 const DEPARTMENT_ROLES: { [key: string]: number } = {
@@ -53,39 +55,12 @@ async function getDB() {
   }
 }
 
-// Helper function to check if user is admin
 function checkAdminPermission(context: any) {
-  if (!context.user) {
-    throw new Error('Not authenticated');
-  }
-  
-  // Check if user has admin permissions or is a department/system admin
-  const hasAdminPermission = 
-    context.user.permissions?.includes('admin') ||
-    context.user.permissions?.includes('shift_admin') ||
-    context.user.systemRole === 'SYSTEM_ADMIN' ||
-    context.user.systemRole === 'IT_ADMIN' ||
-    context.user.systemRole === 'DEPARTMENT_ADMIN';
-    
-  if (!hasAdminPermission) {
-    throw new Error('Admin permission required');
-  }
+  requirePermission(context, Permission.SHIFTS_MANAGE);
 }
 
-// Helper function to verify authenticated user from JWT
 function checkAuthentication(context: any) {
-  console.log('🔍 Shifts resolver - checking auth context:', {
-    hasUser: !!context.user,
-    userId: context.user?.userId,
-    email: context.user?.email,
-    role: context.user?.role,
-    systemRole: context.user?.systemRole
-  });
-  
-  if (!context.user || !context.user.userId || !context.user.email) {
-    console.error('❌ Authentication failed in shifts resolver');
-    throw new Error('Not authenticated - valid JWT token required');
-  }
+  requireAuth(context);
 }
 
 // Helper function to get the start of the week (Sunday)
@@ -1841,7 +1816,7 @@ export const shiftsResolvers = {
       const request = await db.collection('shift_swap_requests').findOne({ _id: new ObjectId(args.id) });
       
       if (!request) throw new Error('Request not found');
-      if (request.requestingUserId !== context.user.userId && !context.user.permissions?.includes('admin')) {
+      if (request.requestingUserId !== context.user.userId && !context.user.has?.(Permission.SHIFTS_MANAGE)) {
         throw new Error('You can only cancel your own requests');
       }
       if (request.status !== 'pending') {
@@ -2067,7 +2042,7 @@ export const shiftsResolvers = {
         throw new Error('Vacation request not found');
       }
       
-      if (existingRequest.userId !== context.user.userId && !context.user.permissions?.includes('admin')) {
+      if (existingRequest.userId !== context.user.userId && !context.user.has?.(Permission.SHIFTS_MANAGE)) {
         throw new Error('Not authorized to update this request');
       }
       
@@ -2105,17 +2080,11 @@ export const shiftsResolvers = {
         throw new Error('Vacation request not found');
       }
       
-      if (existingRequest.userId !== context.user.userId && !context.user.permissions?.includes('admin')) {
+      if (existingRequest.userId !== context.user.userId && !context.user.has?.(Permission.SHIFTS_MANAGE)) {
         throw new Error('Not authorized to delete this request');
       }
       
-      // Allow deletion of approved vacations for admins
-      const isAdmin = 
-        context.user.permissions?.includes('admin') ||
-        context.user.permissions?.includes('shift_admin') ||
-        context.user.systemRole === 'SYSTEM_ADMIN' ||
-        context.user.systemRole === 'IT_ADMIN' ||
-        context.user.systemRole === 'DEPARTMENT_ADMIN';
+      const isAdmin = context.user.has?.(Permission.SHIFTS_MANAGE);
 
       if (existingRequest.status === 'approved' && !isAdmin) {
         throw new Error('Cannot delete approved vacation request');
@@ -2132,7 +2101,7 @@ export const shiftsResolvers = {
       const request = await db.collection('vacation_requests').findOne({ _id: new ObjectId(args.id) });
       
       if (!request) throw new Error('Request not found');
-      if (request.userId !== context.user.userId && !context.user.permissions?.includes('admin')) {
+      if (request.userId !== context.user.userId && !context.user.has?.(Permission.SHIFTS_MANAGE)) {
         throw new Error('You can only cancel your own requests');
       }
       if (request.status !== 'pending') {

@@ -1,59 +1,135 @@
 'use client';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { PermissionCategory, PermissionType } from '@/components/auth/ProtectedRoute';
+import { Permission } from '@/rbac';
 
-export { PermissionCategory, PermissionType };
-
-interface UsePermissionsReturn {
-  hasPermission: (category: PermissionCategory, type?: PermissionType) => boolean;
-  canAccessDashboard: () => boolean;
-  canManageUsers: () => boolean;
-  canManageBroadcasts: () => boolean;
-  canManageShifts: () => boolean;
-  canManageWarehouse: () => boolean;
-  canManageTickets: () => boolean;
-  isAdmin: () => boolean;
+// Legacy category/type enums — kept for any code that references them.
+export enum PermissionCategory {
+  USERS = 'USERS',
+  BROADCAST = 'BROADCAST',
+  WAREHOUSE = 'WAREHOUSE',
+  SHIFTS = 'SHIFTS',
+  MCR = 'MCR',
+  SETTINGS = 'SETTINGS',
+  MEDIA = 'MEDIA',
+  RIGHTS = 'RIGHTS',
+  WORKFLOWS = 'WORKFLOWS',
+  DASHBOARD = 'DASHBOARD',
+  CHAT = 'CHAT',
+  INTEGRATIONS = 'INTEGRATIONS',
+  BILLING = 'BILLING',
+  AUDIT = 'AUDIT',
 }
 
-export const usePermissions = (): UsePermissionsReturn => {
-  const { user } = useAuth();
+export enum PermissionType {
+  VIEW = 'VIEW',
+  MANAGE = 'MANAGE',
+  CREATE = 'CREATE',
+  DELETE = 'DELETE',
+}
 
-  const hasPermission = (category: PermissionCategory, type: PermissionType = PermissionType.READ): boolean => {
+const CATEGORY_PERMISSION_MAP: Record<PermissionCategory, Record<string, Permission>> = {
+  [PermissionCategory.USERS]: {
+    VIEW: Permission.USERS_VIEW,
+    MANAGE: Permission.USERS_MANAGE_ALL,
+    CREATE: Permission.USERS_MANAGE_ALL,
+    DELETE: Permission.USERS_MANAGE_ALL,
+  },
+  [PermissionCategory.BROADCAST]: {
+    VIEW: Permission.BROADCAST_VIEW,
+    MANAGE: Permission.BROADCAST_MANAGE,
+    CREATE: Permission.BROADCAST_MANAGE,
+    DELETE: Permission.BROADCAST_DELETE,
+  },
+  [PermissionCategory.WAREHOUSE]: {
+    VIEW: Permission.WAREHOUSE_VIEW,
+    MANAGE: Permission.WAREHOUSE_MANAGE,
+    CREATE: Permission.WAREHOUSE_MANAGE,
+    DELETE: Permission.WAREHOUSE_MANAGE,
+  },
+  [PermissionCategory.SHIFTS]: {
+    VIEW: Permission.SHIFTS_VIEW_OWN,
+    MANAGE: Permission.SHIFTS_MANAGE,
+    CREATE: Permission.SHIFTS_MANAGE,
+    DELETE: Permission.SHIFTS_MANAGE,
+  },
+  [PermissionCategory.MCR]: {
+    VIEW: Permission.MCR_VIEW,
+    MANAGE: Permission.MCR_MANAGE,
+    CREATE: Permission.MCR_MANAGE,
+    DELETE: Permission.MCR_ADMIN,
+  },
+  [PermissionCategory.SETTINGS]: {
+    VIEW: Permission.SETTINGS_MANAGE,
+    MANAGE: Permission.SETTINGS_MANAGE,
+    CREATE: Permission.SETTINGS_MANAGE,
+    DELETE: Permission.SETTINGS_MANAGE,
+  },
+  [PermissionCategory.MEDIA]: {
+    VIEW: Permission.MEDIA_VIEW,
+    MANAGE: Permission.MEDIA_MANAGE,
+    CREATE: Permission.MEDIA_MANAGE,
+    DELETE: Permission.MEDIA_MANAGE,
+  },
+  [PermissionCategory.RIGHTS]: {
+    VIEW: Permission.RIGHTS_VIEW,
+    MANAGE: Permission.RIGHTS_MANAGE,
+    CREATE: Permission.RIGHTS_MANAGE,
+    DELETE: Permission.RIGHTS_MANAGE,
+  },
+  [PermissionCategory.WORKFLOWS]: {
+    VIEW: Permission.WORKFLOWS_VIEW,
+    MANAGE: Permission.WORKFLOWS_MANAGE,
+    CREATE: Permission.WORKFLOWS_MANAGE,
+    DELETE: Permission.WORKFLOWS_MANAGE,
+  },
+  [PermissionCategory.DASHBOARD]: {
+    VIEW: Permission.DASHBOARD_VIEW,
+    MANAGE: Permission.DASHBOARD_VIEW,
+    CREATE: Permission.DASHBOARD_VIEW,
+    DELETE: Permission.DASHBOARD_VIEW,
+  },
+  [PermissionCategory.CHAT]: {
+    VIEW: Permission.CHAT_USE,
+    MANAGE: Permission.CHAT_USE,
+    CREATE: Permission.CHAT_USE,
+    DELETE: Permission.CHAT_USE,
+  },
+  [PermissionCategory.INTEGRATIONS]: {
+    VIEW: Permission.INTEGRATIONS_MANAGE,
+    MANAGE: Permission.INTEGRATIONS_MANAGE,
+    CREATE: Permission.INTEGRATIONS_MANAGE,
+    DELETE: Permission.INTEGRATIONS_MANAGE,
+  },
+  [PermissionCategory.BILLING]: {
+    VIEW: Permission.BILLING_VIEW,
+    MANAGE: Permission.BILLING_MANAGE,
+    CREATE: Permission.BILLING_MANAGE,
+    DELETE: Permission.BILLING_MANAGE,
+  },
+  [PermissionCategory.AUDIT]: {
+    VIEW: Permission.AUDIT_VIEW,
+    MANAGE: Permission.AUDIT_VIEW,
+    CREATE: Permission.AUDIT_VIEW,
+    DELETE: Permission.AUDIT_VIEW,
+  },
+};
+
+export function usePermissions() {
+  const { user, hasPermission } = useAuth();
+
+  const checkPermission = (category: PermissionCategory, type: PermissionType): boolean => {
     if (!user) return false;
-    
-    // System admins and IT admins have all permissions
-    if (user.systemRole === 'SYSTEM_ADMIN' || user.systemRole === 'IT_ADMIN') {
-      return true;
-    }
-
-    // For now, allow all authenticated users basic read permissions
-    if (type === PermissionType.READ) {
-      return true;
-    }
-
-    // More restrictive permissions based on role
-    switch (category) {
-      case PermissionCategory.USERS:
-        return user.systemRole === 'DEPARTMENT_ADMIN' || user.canManageAllUsers;
-      case PermissionCategory.BROADCAST:
-        return ['broadcast_planner', 'broadcast_coordinator'].includes(user.role || '');
-      case PermissionCategory.ADMIN:
-        return user.systemRole === 'SYSTEM_ADMIN';
-      default:
-        return false;
-    }
+    const perm = CATEGORY_PERMISSION_MAP[category]?.[type];
+    if (!perm) return false;
+    return hasPermission(perm);
   };
 
   return {
+    checkPermission,
     hasPermission,
-    canAccessDashboard: () => hasPermission(PermissionCategory.DASHBOARD),
-    canManageUsers: () => hasPermission(PermissionCategory.USERS, PermissionType.WRITE),
-    canManageBroadcasts: () => hasPermission(PermissionCategory.BROADCAST, PermissionType.WRITE),
-    canManageShifts: () => hasPermission(PermissionCategory.SHIFTS, PermissionType.WRITE),
-    canManageWarehouse: () => hasPermission(PermissionCategory.WAREHOUSE, PermissionType.WRITE),
-    canManageTickets: () => hasPermission(PermissionCategory.TICKETS, PermissionType.WRITE),
-    isAdmin: () => user?.systemRole === 'SYSTEM_ADMIN' || user?.systemRole === 'IT_ADMIN'
+    isAuthenticated: !!user,
+    isAdmin: user?.systemRole === 'SYSTEM_ADMIN' || user?.systemRole === 'IT_ADMIN',
+    systemRole: user?.systemRole,
   };
-};
-
+}

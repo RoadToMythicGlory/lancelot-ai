@@ -16,6 +16,13 @@ export const IntentSchema = z.object({
     'rights',
     'general',
     'clarification',
+    // ── Read-only "AI lives in the system" intents ─────────────
+    'help',
+    'preset',
+    'equipment_lookup',
+    'shift_lookup',
+    'broadcast_lookup',
+    'user_lookup',
   ]),
   confidence: z.number().min(0).max(1),
   entities: z.record(z.string()).optional(),

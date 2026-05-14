@@ -20,6 +20,8 @@ import timezone from 'dayjs/plugin/timezone';
 import { useQuery, useMutation } from '@apollo/client';
 import { GET_BROADCAST_EVENTS, GET_EMPLOYEES_BY_DEPARTMENT, GET_DEPARTMENTS, GET_EXTERNAL_BROADCAST_PRESETS } from '@/graphql/queries';
 import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA, CREATE_EXTERNAL_BROADCAST_PRESET, UPDATE_EXTERNAL_BROADCAST_PRESET, DELETE_EXTERNAL_BROADCAST_PRESET } from '@/graphql/mutations';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import { Permission } from '@/rbac';
 
 dayjs.extend(isoWeek);
 dayjs.extend(utc);
@@ -1212,9 +1214,11 @@ const ExternalBroadcastsPage: React.FC = () => {
 };
 
 const ExternalBroadcastsPageWithApp: React.FC = () => (
-  <App>
-    <ExternalBroadcastsPage />
-  </App>
+  <ProtectedRoute requires={Permission.BROADCAST_VIEW}>
+    <App>
+      <ExternalBroadcastsPage />
+    </App>
+  </ProtectedRoute>
 );
 
 export default ExternalBroadcastsPageWithApp;

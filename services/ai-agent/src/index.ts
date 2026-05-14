@@ -19,6 +19,7 @@ import { getLLMProvider } from './llm';
 import { initializeTools } from './tools';
 import { initializeTrustedSources } from './data/trusted-sources-store';
 import { initializeNewsCache } from './data/news-cache';
+import { initializeKnowledgeIndexer, shutdownKnowledgeIndexer } from './data/indexer';
 import { 
   chatRateLimiter, 
   healthRateLimiter 
@@ -110,6 +111,14 @@ async function main(): Promise<void> {
       error: (error as Error).message,
     });
   }
+
+  // Initialize the knowledge indexer (help articles + presets → vector store).
+  // Don't await — initial reindex is async and shouldn't block service startup.
+  initializeKnowledgeIndexer().catch((err) => {
+    logger.warn('Failed to initialize knowledge indexer', {
+      error: (err as Error).message,
+    });
+  });
   
   // Check LLM availability
   try {
@@ -141,14 +150,16 @@ async function main(): Promise<void> {
   // Graceful shutdown
   process.on('SIGTERM', () => {
     logger.info('SIGTERM received, shutting down gracefully');
+    shutdownKnowledgeIndexer();
     server.close(() => {
       logger.info('Server closed');
       process.exit(0);
     });
   });
-  
+
   process.on('SIGINT', () => {
     logger.info('SIGINT received, shutting down gracefully');
+    shutdownKnowledgeIndexer();
     server.close(() => {
       logger.info('Server closed');
       process.exit(0);

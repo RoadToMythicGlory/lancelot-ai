@@ -2,6 +2,8 @@ import { Context } from '../types';
 import { ObjectId } from 'mongodb';
 import { connectMongoDB, connectMongoose } from '../config/mongodb';
 import { BroadcastEvent } from '../models/broadcast.models';
+import { requirePermission } from '../middleware/auth';
+import { Permission } from '../rbac';
 
 // Define resolver types
 type ResolverFn = (parent: any, args: any, context: Context, info?: any) => any;
@@ -58,9 +60,7 @@ export const dashboardResolvers = {
   Query: {
     // Today's broadcasts
     todaysBroadcasts: async (_parent: any, _args: any, context: Context) => {
-      if (!context.userId) {
-        throw new Error('Unauthorized');
-      }
+      requirePermission(context, Permission.DASHBOARD_VIEW);
 
       try {
         // Connect with Mongoose to use the same models as broadcast planning
@@ -103,9 +103,7 @@ export const dashboardResolvers = {
 
     // This week's shifts
     weeklyShifts: async (_parent: any, { userId }: any, context: Context) => {
-      if (!context.userId) {
-        throw new Error('Unauthorized');
-      }
+      requirePermission(context, Permission.DASHBOARD_VIEW);
 
       try {
         const mongoDb = await connectMongoDB();
@@ -190,9 +188,7 @@ export const dashboardResolvers = {
     },
     // Bulletin board queries
     bulletinPosts: async (_parent: any, { departmentId, limit = 10, onlyEmergency = false, onlyPinned = false }: any, context: Context) => {
-      if (!context.userId) {
-        throw new Error('Unauthorized');
-      }
+      requirePermission(context, Permission.DASHBOARD_VIEW);
 
       try {
         // In production, this would query MongoDB
@@ -231,18 +227,14 @@ export const dashboardResolvers = {
     },
 
     bulletinPost: async (_parent: any, { id }: any, context: Context) => {
-      if (!context.userId) {
-        throw new Error('Unauthorized');
-      }
+      requirePermission(context, Permission.DASHBOARD_VIEW);
 
       return mockBulletinPosts.find(post => post.id === id) || null;
     },
 
     // Dashboard statistics queries
     dashboardStats: async (_parent: any, _args: any, context: Context) => {
-      if (!context.userId) {
-        throw new Error('Unauthorized');
-      }
+      requirePermission(context, Permission.DASHBOARD_VIEW);
 
       try {
         // Connect with Mongoose for broadcasts
@@ -332,9 +324,7 @@ export const dashboardResolvers = {
     },
 
     departmentStats: async (_parent: any, { departmentId }: any, context: Context) => {
-      if (!context.userId) {
-        throw new Error('Unauthorized');
-      }
+      requirePermission(context, Permission.DASHBOARD_VIEW);
 
       try {
         // Mock department statistics
@@ -362,23 +352,22 @@ export const dashboardResolvers = {
     },
 
     myDepartmentStats: async (_parent: any, _args: any, context: Context) => {
-      if (!context.userId || !context.user?.department) {
-        throw new Error('Unauthorized or no department assigned');
+      requirePermission(context, Permission.DASHBOARD_VIEW);
+      const primaryDept = context.user!.departments?.[0]?.departmentId;
+      if (!primaryDept) {
+        throw new Error('No department assigned');
       }
 
-      // Delegate to departmentStats with user's department
       return (dashboardResolvers as any).Query.departmentStats(
         _parent,
-        { departmentId: context.user.department },
+        { departmentId: primaryDept },
         context
       );
     },
 
     // Support ticket queries
     supportTickets: async (_parent: any, { status, priority, assignedToMe, departmentId }: any, context: Context) => {
-      if (!context.userId) {
-        throw new Error('Unauthorized');
-      }
+      requirePermission(context, Permission.DASHBOARD_VIEW);
 
       try {
         // Mock support tickets
@@ -453,18 +442,14 @@ export const dashboardResolvers = {
     },
 
     supportTicket: async (_parent: any, { id }: any, context: Context) => {
-      if (!context.userId) {
-        throw new Error('Unauthorized');
-      }
+      requirePermission(context, Permission.DASHBOARD_VIEW);
 
       const tickets = await (dashboardResolvers as any).Query.supportTickets(_parent, {}, context);
       return tickets.find((t: any) => t.id === id) || null;
     },
 
     myTickets: async (_parent: any, _args: any, context: Context) => {
-      if (!context.userId) {
-        throw new Error('Unauthorized');
-      }
+      requirePermission(context, Permission.DASHBOARD_VIEW);
 
       const tickets = await (dashboardResolvers as any).Query.supportTickets(_parent, {}, context);
       return tickets.filter((t: any) => t.createdBy.id === context.userId);
@@ -474,9 +459,7 @@ export const dashboardResolvers = {
   Mutation: {
     // Bulletin board mutations
     createBulletinPost: async (_parent: any, args: any, context: Context) => {
-      if (!context.userId) {
-        throw new Error('Unauthorized');
-      }
+      requirePermission(context, Permission.DASHBOARD_MANAGE);
 
       try {
         const newPost = {
@@ -485,10 +468,10 @@ export const dashboardResolvers = {
           content: args.content,
           isEmergency: args.isEmergency || false,
           isPinned: args.isPinned || false,
-          departmentId: args.departmentId || context.user?.department,
-          departmentName: args.departmentId || context.user?.department || 'כללי',
+          departmentId: args.departmentId || context.user?.departments?.[0]?.departmentId,
+          departmentName: args.departmentId || context.user?.departments?.[0]?.departmentName || 'כללי',
           author: {
-            id: context.userId,
+            id: context.user!.userId,
             displayName: context.user?.displayName || 'Unknown User',
             email: context.user?.email || ''
           },
@@ -510,9 +493,7 @@ export const dashboardResolvers = {
     },
 
     updateBulletinPost: async (_parent: any, { id, ...updates }: any, context: Context) => {
-      if (!context.userId) {
-        throw new Error('Unauthorized');
-      }
+      requirePermission(context, Permission.DASHBOARD_MANAGE);
 
       const postIndex = mockBulletinPosts.findIndex(p => p.id === id);
       if (postIndex === -1) {
@@ -522,7 +503,7 @@ export const dashboardResolvers = {
       const post = mockBulletinPosts[postIndex];
       
       // Check if user is author or admin
-      if (post.author.id !== context.userId && context.user?.systemRole !== 'SYSTEM_ADMIN') {
+      if (post.author.id !== context.user!.userId && !context.user!.has(Permission.MCR_ADMIN)) {
         throw new Error('Not authorized to update this post');
       }
 
@@ -533,9 +514,7 @@ export const dashboardResolvers = {
     },
 
     deleteBulletinPost: async (_parent: any, { id }: any, context: Context) => {
-      if (!context.userId) {
-        throw new Error('Unauthorized');
-      }
+      requirePermission(context, Permission.DASHBOARD_MANAGE);
 
       const postIndex = mockBulletinPosts.findIndex(p => p.id === id);
       if (postIndex === -1) {
@@ -545,7 +524,7 @@ export const dashboardResolvers = {
       const post = mockBulletinPosts[postIndex];
       
       // Check if user is author or admin
-      if (post.author.id !== context.userId && context.user?.systemRole !== 'SYSTEM_ADMIN') {
+      if (post.author.id !== context.user!.userId && !context.user!.has(Permission.MCR_ADMIN)) {
         throw new Error('Not authorized to delete this post');
       }
 
@@ -554,9 +533,7 @@ export const dashboardResolvers = {
     },
 
     incrementBulletinViewCount: async (_parent: any, { id }: any, context: Context) => {
-      if (!context.userId) {
-        throw new Error('Unauthorized');
-      }
+      requirePermission(context, Permission.DASHBOARD_VIEW);
 
       const post = mockBulletinPosts.find(p => p.id === id);
       if (!post) {
@@ -569,9 +546,7 @@ export const dashboardResolvers = {
 
     // Support ticket mutations
     createSupportTicket: async (_parent: any, args: any, context: Context) => {
-      if (!context.userId) {
-        throw new Error('Unauthorized');
-      }
+      requirePermission(context, Permission.DASHBOARD_VIEW);
 
       try {
         const newTicket = {
@@ -581,11 +556,11 @@ export const dashboardResolvers = {
           status: 'open',
           priority: args.priority,
           category: args.category,
-          departmentId: args.departmentId || context.user?.department,
-          departmentName: args.departmentId || context.user?.department || 'כללי',
+          departmentId: args.departmentId || context.user?.departments?.[0]?.departmentId,
+          departmentName: args.departmentId || context.user?.departments?.[0]?.departmentName || 'כללי',
           assignedTo: null,
           createdBy: {
-            id: context.userId,
+            id: context.user!.userId,
             displayName: context.user?.displayName || 'Unknown User',
             email: context.user?.email || ''
           },
@@ -604,9 +579,7 @@ export const dashboardResolvers = {
     },
 
     updateSupportTicket: async (_parent: any, { id, ...updates }: any, context: Context) => {
-      if (!context.userId) {
-        throw new Error('Unauthorized');
-      }
+      requirePermission(context, Permission.DASHBOARD_VIEW);
 
       // In production, this would update in the database
       // For now, return a mock updated ticket
@@ -618,9 +591,7 @@ export const dashboardResolvers = {
     },
 
     addTicketComment: async (_parent: any, { ticketId, content, isInternal }: any, context: Context) => {
-      if (!context.userId) {
-        throw new Error('Unauthorized');
-      }
+      requirePermission(context, Permission.DASHBOARD_VIEW);
 
       const comment = {
         id: new ObjectId().toString(),
@@ -639,9 +610,7 @@ export const dashboardResolvers = {
     },
 
     resolveTicket: async (_parent: any, { id, resolution }: any, context: Context) => {
-      if (!context.userId) {
-        throw new Error('Unauthorized');
-      }
+      requirePermission(context, Permission.DASHBOARD_VIEW);
 
       // In production, update the ticket in the database
       return {
@@ -653,9 +622,7 @@ export const dashboardResolvers = {
     },
 
     closeTicket: async (_parent: any, { id }: any, context: Context) => {
-      if (!context.userId) {
-        throw new Error('Unauthorized');
-      }
+      requirePermission(context, Permission.DASHBOARD_VIEW);
 
       // In production, update the ticket in the database
       return {

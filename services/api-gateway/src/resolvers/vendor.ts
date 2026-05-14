@@ -1,6 +1,7 @@
 import { Vendor } from '../models/vendor.models';
 import { connectMongoose } from '../config/mongodb';
-import { authenticateUser } from '../middleware/auth';
+import { requireAuth, requirePermission } from '../middleware/auth';
+import { Permission } from '../rbac';
 
 let mongooseConnected = false;
 
@@ -17,7 +18,7 @@ export const vendorResolvers = {
     vendors: async (_: any, { filter }: { filter?: any }, context: any) => {
       try {
         await ensureMongoConnection();
-        authenticateUser(context);
+        requirePermission(context, Permission.WAREHOUSE_VIEW);
         
         // Build query filter
         const query: any = {};
@@ -68,7 +69,7 @@ export const vendorResolvers = {
     vendor: async (_: any, { id }: { id: string }, context: any) => {
       try {
         await ensureMongoConnection();
-        authenticateUser(context);
+        requirePermission(context, Permission.WAREHOUSE_VIEW);
         
         const vendor = await Vendor.findById(id).exec();
         
@@ -105,7 +106,7 @@ export const vendorResolvers = {
     createVendor: async (_: any, { input }: { input: any }, context: any) => {
       try {
         await ensureMongoConnection();
-        const user = authenticateUser(context);
+        const user = requirePermission(context, Permission.WAREHOUSE_MANAGE);
         
         // Check if user has permission (must be department admin)
         if (user.systemRole !== 'SYSTEM_ADMIN' && user.systemRole !== 'DEPARTMENT_ADMIN') {
@@ -114,7 +115,7 @@ export const vendorResolvers = {
         
         const vendor = new Vendor({
           ...input,
-          createdBy: user.id
+          createdBy: user.userId
         });
         
         const savedVendor = await vendor.save();
@@ -146,7 +147,7 @@ export const vendorResolvers = {
     updateVendor: async (_: any, { id, input }: { id: string; input: any }, context: any) => {
       try {
         await ensureMongoConnection();
-        const user = authenticateUser(context);
+        const user = requirePermission(context, Permission.WAREHOUSE_MANAGE);
         
         // Check if user has permission (must be department admin)
         if (user.systemRole !== 'SYSTEM_ADMIN' && user.systemRole !== 'DEPARTMENT_ADMIN') {
@@ -190,7 +191,7 @@ export const vendorResolvers = {
     deleteVendor: async (_: any, { id }: { id: string }, context: any) => {
       try {
         await ensureMongoConnection();
-        const user = authenticateUser(context);
+        const user = requirePermission(context, Permission.WAREHOUSE_MANAGE);
         
         // Check if user has permission (must be department admin)
         if (user.systemRole !== 'SYSTEM_ADMIN' && user.systemRole !== 'DEPARTMENT_ADMIN') {
@@ -213,7 +214,7 @@ export const vendorResolvers = {
     toggleVendorStatus: async (_: any, { id }: { id: string }, context: any) => {
       try {
         await ensureMongoConnection();
-        const user = authenticateUser(context);
+        const user = requirePermission(context, Permission.WAREHOUSE_MANAGE);
         
         // Check if user has permission (must be department admin)
         if (user.systemRole !== 'SYSTEM_ADMIN' && user.systemRole !== 'DEPARTMENT_ADMIN') {

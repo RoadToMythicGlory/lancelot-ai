@@ -64,6 +64,23 @@ export type AgentMode = 'LIVE_CG' | 'NORMAL';
 export type AgentTask = 'cg' | 'lineup' | 'news' | 'rights' | 'shifts' | 'general';
 
 /**
+ * Authenticated user context propagated to every tool.
+ *
+ * Permissions are sourced from the api-gateway via the `x-user-permissions`
+ * header (see middleware.authPassthrough). When the header is missing
+ * (e.g. legacy callers) the field is undefined and tools must treat the
+ * caller as having NO data permissions for safety.
+ */
+export interface UserContext {
+  userId: string;
+  email?: string;
+  displayName?: string;
+  permissions?: string[];
+  departmentId?: string;
+  systemRole?: string;
+}
+
+/**
  * Message context for processing
  */
 export interface MessageContext {
@@ -77,6 +94,11 @@ export interface MessageContext {
     mode?: AgentMode;
     task?: AgentTask;
   };
+  /**
+   * Authenticated user context (permissions, department, role).
+   * Used by data-reading tools to enforce RBAC.
+   */
+  user?: UserContext;
 }
 
 /**
@@ -110,9 +132,15 @@ export function registerTool(intentType: string, handler: ToolHandler): void {
 /**
  * Intents that REQUIRE tool execution (never free chat).
  * If the tool is registered, execute it; otherwise return error/clarification.
+ *
+ * The new "lookup" intents (help, preset, equipment_lookup, shift_lookup,
+ * broadcast_lookup, user_lookup) are also operational: the AI must answer
+ * from real DB / RAG data, never from its own imagination.
  */
 const OPERATIONAL_INTENTS: ReadonlySet<string> = new Set([
   'cg', 'lineup', 'shifts', 'news', 'rights',
+  'help', 'preset', 'equipment_lookup',
+  'shift_lookup', 'broadcast_lookup', 'user_lookup',
 ]);
 
 /**
@@ -164,6 +192,14 @@ const REQUIRED_ENTITIES: Record<string, { keys: string[]; messageHints: Array<{ 
     keys: [],  // rights can work with defaults (all sports)
     messageHints: [],
   },
+  // ── New read-only lookup intents — all use sensible defaults ─────
+  // (today / current user / current department) when entities are absent.
+  help: { keys: [], messageHints: [] },
+  preset: { keys: [], messageHints: [] },
+  equipment_lookup: { keys: [], messageHints: [] },
+  shift_lookup: { keys: [], messageHints: [] },
+  broadcast_lookup: { keys: [], messageHints: [] },
+  user_lookup: { keys: [], messageHints: [] },
 };
 
 /**
@@ -211,6 +247,12 @@ export function buildMissingEntitiesClarification(intent: string, missing: strin
     shifts: 'לאיזה שבוע ומחלקה לבנות משמרות?',
     news: 'על איזה נושא או קטגוריה להביא חדשות?',
     rights: 'על איזו ליגה או ענף ספורט תרצה מידע?',
+    help: 'מה תרצה לדעת איך לעשות?',
+    preset: 'לאיזה סוג שידור אתה מחפש פריסט? (משחק מרכזי, שידור חוץ סטנדרטי, וכו\')',
+    equipment_lookup: 'איזה ציוד לבדוק? (קטגוריה / שם / ברקוד)',
+    shift_lookup: 'לאיזה תאריך / מחלקה אתה מתייחס?',
+    broadcast_lookup: 'לאיזה תאריך אתה מתייחס? (היום, מחר, השבוע)',
+    user_lookup: 'את מי אתה מחפש? (שם / תפקיד / מחלקה)',
   };
 
   return templates[intent] || 'אנא ספק פרטים נוספים כדי שאוכל לעזור.';

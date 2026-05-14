@@ -5,6 +5,8 @@ import { useQuery } from '@apollo/client'
 import { Card, Table, Tag, Input, Select, DatePicker, Space, Button, Spin, Drawer } from 'antd'
 import { ShieldCheckIcon, FunnelIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline'
 import { useAuth } from '@/contexts/AuthContext'
+import ProtectedRoute from '@/components/auth/ProtectedRoute'
+import { Permission } from '@/rbac'
 import { GET_AUDIT_LOGS } from '@/graphql/saasQueries'
 
 const { RangePicker } = DatePicker
@@ -126,6 +128,7 @@ export default function AuditLogPage() {
   ]
 
   return (
+    <ProtectedRoute requires={Permission.AUDIT_VIEW}>
     <div className="max-w-7xl mx-auto">
       <div className="mb-6">
         <div className="flex items-center gap-3 mb-2">
@@ -237,5 +240,6 @@ export default function AuditLogPage() {
         )}
       </Drawer>
     </div>
+    </ProtectedRoute>
   )
 }

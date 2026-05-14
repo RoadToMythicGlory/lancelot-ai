@@ -12,6 +12,8 @@ import {
   ClipboardDocumentIcon,
 } from '@heroicons/react/24/outline'
 import { useAuth } from '@/contexts/AuthContext'
+import ProtectedRoute from '@/components/auth/ProtectedRoute'
+import { Permission } from '@/rbac'
 import { GET_API_KEYS, GET_WEBHOOKS } from '@/graphql/saasQueries'
 import {
   CREATE_API_KEY,
@@ -208,7 +210,11 @@ export default function IntegrationsPage() {
     },
   ]
 
+  const { hasPermission } = useAuth()
+  const canManage = hasPermission(Permission.INTEGRATIONS_MANAGE)
+
   return (
+    <ProtectedRoute requires={Permission.INTEGRATIONS_VIEW}>
     <div className="max-w-7xl mx-auto">
       <div className="mb-6">
         <div className="flex items-center gap-3 mb-1">
@@ -234,13 +240,15 @@ export default function IntegrationsPage() {
               <div>
                 <div className="flex justify-between mb-4">
                   <p className="text-gray-500">ניהול מפתחות API לגישה חיצונית למערכת</p>
-                  <Button
-                    type="primary"
-                    icon={<PlusIcon className="h-4 w-4" />}
-                    onClick={() => setCreateKeyModal(true)}
-                  >
-                    מפתח חדש
-                  </Button>
+                  {canManage && (
+                    <Button
+                      type="primary"
+                      icon={<PlusIcon className="h-4 w-4" />}
+                      onClick={() => setCreateKeyModal(true)}
+                    >
+                      מפתח חדש
+                    </Button>
+                  )}
                 </div>
                 <Card>
                   <Table
@@ -266,13 +274,15 @@ export default function IntegrationsPage() {
               <div>
                 <div className="flex justify-between mb-4">
                   <p className="text-gray-500">קבל התראות בזמן אמת על אירועים במערכת</p>
-                  <Button
-                    type="primary"
-                    icon={<PlusIcon className="h-4 w-4" />}
-                    onClick={() => setCreateWebhookModal(true)}
-                  >
-                    Webhook חדש
-                  </Button>
+                  {canManage && (
+                    <Button
+                      type="primary"
+                      icon={<PlusIcon className="h-4 w-4" />}
+                      onClick={() => setCreateWebhookModal(true)}
+                    >
+                      Webhook חדש
+                    </Button>
+                  )}
                 </div>
                 <Card>
                   <Table
@@ -376,5 +386,6 @@ export default function IntegrationsPage() {
         </Form>
       </Modal>
     </div>
+    </ProtectedRoute>
   )
 }

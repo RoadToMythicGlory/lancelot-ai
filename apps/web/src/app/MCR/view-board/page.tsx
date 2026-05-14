@@ -7,6 +7,8 @@ import { GET_ACTIVITY_ROWS } from '@/graphql/mcrQueries';
 import { Button, DatePicker } from 'antd';
 import { LeftOutlined, RightOutlined, LoadingOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import { Permission } from '@/rbac';
 
 const HEBREW_WEEKDAYS = ['יום ראשון', 'יום שני', 'יום שלישי', 'יום רביעי', 'יום חמישי', 'יום שישי', 'שבת'];
 
@@ -94,6 +96,7 @@ export default function ViewBoardPage() {
     : '';
 
   return (
+    <ProtectedRoute requires={Permission.MCR_VIEW}>
     <div className="min-h-screen bg-black text-white p-4" dir="rtl">
       <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
         <div>
@@ -221,5 +224,6 @@ export default function ViewBoardPage() {
         </table>
       </div>
     </div>
+    </ProtectedRoute>
   );
 }

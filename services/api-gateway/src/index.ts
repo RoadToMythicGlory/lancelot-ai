@@ -39,6 +39,7 @@ import { trackingRoutes } from './routes/trackingRoutes';
 import { equipmentSetsResolvers } from './resolvers/equipmentSets';
 import { internalAssignmentsResolvers } from './resolvers/internalAssignments';
 import { trackingResolvers } from './resolvers/tracking';
+import { roleTemplateResolvers } from './resolvers/roleTemplate';
 import { startTrackerIngest, stopTrackerIngest } from './services/trackerIngestService';
 
 // Load GraphQL schema
@@ -87,6 +88,8 @@ const resolvers = {
     ...streamerResolvers.Query,
     // BLE Tracking queries
     ...trackingResolvers.Query,
+    // Role Templates
+    ...roleTemplateResolvers.Query,
     health: () => ({
       status: 'OK',
       timestamp: new Date().toISOString(),
@@ -148,6 +151,8 @@ const resolvers = {
     ...streamerResolvers.Mutation,
     // BLE Tracking mutations
     ...trackingResolvers.Mutation,
+    // Role Templates
+    ...roleTemplateResolvers.Mutation,
   },
   Subscription: {
     ...enhancedBroadcastResolvers.Subscription,
@@ -181,6 +186,8 @@ const resolvers = {
   EmployeeSettings: shiftsResolvers.EmployeeSettings,
   // Add user field resolver
   User: userResolvers.User,
+  // Role template field resolver
+  RoleTemplate: roleTemplateResolvers.RoleTemplate,
   // Equipment set field resolver
   EquipmentSetItem: equipmentSetsResolvers.EquipmentSetItem,
   // Internal equipment assignment field resolvers (lazy `equipment` and `assignedToUser`)

@@ -5,6 +5,8 @@ import { useQuery, useMutation } from '@apollo/client'
 import { Card, Button, Tag, Progress, Table, Badge, Modal, Radio, message, Spin, Alert, Divider } from 'antd'
 import { CreditCardIcon, DocumentTextIcon, ChartBarIcon, ArrowUpIcon } from '@heroicons/react/24/outline'
 import { useAuth } from '@/contexts/AuthContext'
+import ProtectedRoute from '@/components/auth/ProtectedRoute'
+import { Permission } from '@/rbac'
 import { GET_MY_SUBSCRIPTION, GET_INVOICES } from '@/graphql/saasQueries'
 import { CHANGE_PLAN, CANCEL_SUBSCRIPTION } from '@/graphql/saasMutations'
 
@@ -131,6 +133,7 @@ export default function BillingPage() {
   ]
 
   return (
+    <ProtectedRoute requires={Permission.BILLING_VIEW}>
     <div className="max-w-6xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">חיוב ומנוי</h1>
@@ -271,5 +274,6 @@ export default function BillingPage() {
         </div>
       </Modal>
     </div>
+    </ProtectedRoute>
   )
 }

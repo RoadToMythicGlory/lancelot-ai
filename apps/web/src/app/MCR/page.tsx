@@ -5,11 +5,14 @@ import { useTranslation } from 'react-i18next';
 import CalendarWidget from './components/CalendarWidget';
 import ButtonsWidget from './components/ButtonsWidget';
 import BulletinWidget from './components/BulletinWidget';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import { Permission } from '@/rbac';
 
 export default function MCRPage() {
   const { t } = useTranslation();
 
   return (
+    <ProtectedRoute requires={Permission.MCR_VIEW}>
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-full mx-auto">
         {/* Page Title */}
@@ -34,6 +37,7 @@ export default function MCRPage() {
         </div>
       </div>
     </div>
+    </ProtectedRoute>
   );
 }
 

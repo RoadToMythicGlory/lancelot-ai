@@ -37,6 +37,8 @@ import EquipmentSetsManager from '../../components/warehouse/EquipmentSetsManage
 import EquipmentLiveTracking from '../../components/warehouse/tracking/EquipmentLiveTracking';
 import InternalAssignmentsTab from '../../components/warehouse/internalAssignments/InternalAssignmentsTab';
 import dayjs from 'dayjs';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import { Permission } from '@/rbac';
 
 const { RangePicker } = DatePicker;
 
@@ -892,6 +894,7 @@ const WarehousePage: React.FC = () => {
   };
 
   return (
+    <ProtectedRoute requires={Permission.WAREHOUSE_VIEW}>
     <div className="min-h-screen bg-gray-50 px-4 py-6">
       <div className="max-w-7xl mx-auto">
         {/* Breadcrumb */}
@@ -1182,6 +1185,7 @@ const WarehousePage: React.FC = () => {
         </Modal>
       </div>
     </div>
+    </ProtectedRoute>
   );
 };
 

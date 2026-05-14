@@ -10,6 +10,12 @@ export * from './lineup-builder';
 export * from './cg-spec-generator';
 export * from './shift-solver';
 export * from './rights-board';
+export * from './help-search';
+export * from './preset-search';
+export * from './equipment-availability';
+export * from './shift-lookup';
+export * from './broadcast-lookup';
+export * from './user-lookup';
 
 export { default as registry } from './registry';
 export { default as newsFetcher } from './news-fetcher';
@@ -17,6 +23,12 @@ export { default as lineupBuilder } from './lineup-builder';
 export { default as cgSpecGenerator } from './cg-spec-generator';
 export { default as shiftSolver } from './shift-solver';
 export { default as rightsBoard } from './rights-board';
+export { default as helpSearchTool } from './help-search';
+export { default as presetSearchTool } from './preset-search';
+export { default as equipmentAvailabilityTool } from './equipment-availability';
+export { default as shiftLookupTool } from './shift-lookup';
+export { default as broadcastLookupTool } from './broadcast-lookup';
+export { default as userLookupTool } from './user-lookup';
 
 import { registerAgentTool } from './registry';
 import { generateNewsBrief, fetchAllSources } from './news-fetcher';
@@ -26,6 +38,12 @@ import { buildShiftSchedule, parseShiftRequest, extractShiftConstraints, runSolv
 import { SOLVER_VERSION } from '../shift/types';
 import { buildRightsBoard, parseRightsBoardRequest, initializeRightsStore } from './rights-board';
 import { detectLineupType, extractItemCount, extractCategoryCounts } from '../agent/intent-classifier';
+import helpSearchTool, { helpSearchInputSchema } from './help-search';
+import presetSearchTool, { presetSearchInputSchema } from './preset-search';
+import equipmentAvailabilityTool, { equipmentLookupInputSchema } from './equipment-availability';
+import shiftLookupTool, { shiftLookupInputSchema } from './shift-lookup';
+import broadcastLookupTool, { broadcastLookupInputSchema } from './broadcast-lookup';
+import userLookupTool, { userLookupInputSchema } from './user-lookup';
 import { createLogger } from '../utils/logger';
 import { rssPipelineConfig, getActiveFeeds } from '../rss/rss-config';
 import { fetchActiveFeeds } from '../rss/rss-client';
@@ -600,8 +618,84 @@ export async function initializeTools(): Promise<void> {
   } catch (error) {
     logger.warn('Failed to initialize rights store', { error: (error as Error).message });
   }
-  
+
+  // ── Read-only "AI lives in the system" tools ───────────────────────
+  // These mirror the new lookup intents added in agent/intent-classifier.ts.
+  // Each tool enforces RBAC internally via `data/erp/rbac.ts`.
+
+  registerAgentTool({
+    name: 'help-search',
+    description: 'Searches help-center articles via RAG to answer how-to/documentation questions',
+    intentType: 'help',
+    version: '1.0.0',
+    isAsync: true,
+    handler: helpSearchTool,
+    inputSchema: helpSearchInputSchema,
+  });
+
+  registerAgentTool({
+    name: 'preset-search',
+    description: 'Searches external broadcast presets to answer "what equipment / crew" questions',
+    intentType: 'preset',
+    version: '1.0.0',
+    isAsync: true,
+    handler: presetSearchTool,
+    inputSchema: presetSearchInputSchema,
+  });
+
+  registerAgentTool({
+    name: 'equipment-availability',
+    description: 'Reports warehouse equipment stock, availability, and suspension status',
+    intentType: 'equipment_lookup',
+    version: '1.0.0',
+    isAsync: true,
+    handler: equipmentAvailabilityTool,
+    inputSchema: equipmentLookupInputSchema,
+  });
+
+  registerAgentTool({
+    name: 'shift-lookup',
+    description: 'Read-only shift lookup (who is on shift today, my upcoming shifts, etc.)',
+    intentType: 'shift_lookup',
+    version: '1.0.0',
+    isAsync: true,
+    handler: shiftLookupTool,
+    inputSchema: shiftLookupInputSchema,
+  });
+
+  registerAgentTool({
+    name: 'broadcast-lookup',
+    description: 'Calendar of broadcasts/events for today, tomorrow, or this week',
+    intentType: 'broadcast_lookup',
+    version: '1.0.0',
+    isAsync: true,
+    handler: broadcastLookupTool,
+    inputSchema: broadcastLookupInputSchema,
+  });
+
+  registerAgentTool({
+    name: 'user-lookup',
+    description: 'Directory queries (find a producer, director, contact details) with strict field allowlist',
+    intentType: 'user_lookup',
+    version: '1.0.0',
+    isAsync: true,
+    handler: userLookupTool,
+    inputSchema: userLookupInputSchema,
+  });
+
   logger.info('Tools initialized', {
-    registeredTools: ['news-fetcher', 'lineup-builder', 'cg-spec-generator', 'shift-solver', 'rights-board'],
+    registeredTools: [
+      'news-fetcher',
+      'lineup-builder',
+      'cg-spec-generator',
+      'shift-solver',
+      'rights-board',
+      'help-search',
+      'preset-search',
+      'equipment-availability',
+      'shift-lookup',
+      'broadcast-lookup',
+      'user-lookup',
+    ],
   });
 }

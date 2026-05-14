@@ -2,7 +2,8 @@ import { connectMongoose } from '../config/mongodb';
 import { Equipment, EquipmentAssignment, EquipmentHistory, QUANTITY_BASED_DEFAULT_CATEGORIES } from '../models/equipment.models';
 import { EquipmentSet } from '../models/equipmentSet.models';
 import { BroadcastEvent } from '../models/broadcast.models';
-import { authenticateUser } from '../middleware/auth';
+import { requireAuth, requirePermission } from '../middleware/auth';
+import { Permission } from '../rbac';
 import mongoose from 'mongoose';
 
 let mongooseConnected = false;
@@ -111,7 +112,7 @@ export const equipmentSetsResolvers = {
   Mutation: {
     createEquipmentSet: async (_: any, { input }: { input: any }, context: any) => {
       await ensureMongoConnection();
-      const user = authenticateUser(context);
+      const user = requirePermission(context, Permission.WAREHOUSE_MANAGE);
 
       const existing = await EquipmentSet.findOne({ barcode: input.barcode }).exec();
       if (existing) {
@@ -128,7 +129,7 @@ export const equipmentSetsResolvers = {
           required: i.required ?? true,
         })),
         notes: input.notes,
-        createdBy: user.id,
+        createdBy: user.userId,
       });
       const saved = await doc.save();
       return mapSetToGql(saved);
@@ -136,7 +137,7 @@ export const equipmentSetsResolvers = {
 
     updateEquipmentSet: async (_: any, { id, input }: { id: string; input: any }, context: any) => {
       await ensureMongoConnection();
-      authenticateUser(context);
+      requirePermission(context, Permission.WAREHOUSE_MANAGE);
 
       const updateData: any = {};
       if (input.name !== undefined) updateData.name = input.name;
@@ -165,7 +166,7 @@ export const equipmentSetsResolvers = {
 
     deleteEquipmentSet: async (_: any, { id }: { id: string }, context: any) => {
       await ensureMongoConnection();
-      authenticateUser(context);
+      requirePermission(context, Permission.WAREHOUSE_MANAGE);
       const result = await EquipmentSet.findByIdAndDelete(id).exec();
       if (!result) throw new Error('Equipment set not found');
       return true;
@@ -173,7 +174,7 @@ export const equipmentSetsResolvers = {
 
     assignEquipmentSetToEvent: async (_: any, { eventId, setId }: { eventId: string; setId: string }, context: any) => {
       await ensureMongoConnection();
-      const user = authenticateUser(context);
+      const user = requirePermission(context, Permission.WAREHOUSE_MANAGE);
 
       const set = await EquipmentSet.findById(setId).exec();
       if (!set) throw new Error('Equipment set not found');
@@ -203,7 +204,7 @@ export const equipmentSetsResolvers = {
           location: eventDoc.location || eventDoc.venue || '',
           status: 'active',
           quantityAssigned: setItem.quantity,
-          assignedBy: user.id,
+          assignedBy: user.userId,
           assignedByName: `${user.firstName} ${user.lastName}`,
           assignedAt: now,
         });
@@ -222,7 +223,7 @@ export const equipmentSetsResolvers = {
           eventName: eventDoc.title || eventDoc.hebrewTitle || 'Unknown',
           action: 'set_assigned',
           quantity: setItem.quantity,
-          performedBy: user.id,
+          performedBy: user.userId,
           performedByName: `${user.firstName} ${user.lastName}`,
           notes: `הוקצה כחלק מסט "${set.name}" (${set.barcode})`,
           date: now,
@@ -284,7 +285,7 @@ export const equipmentSetsResolvers = {
       context: any,
     ) => {
       await ensureMongoConnection();
-      const user = authenticateUser(context);
+      const user = requirePermission(context, Permission.WAREHOUSE_MANAGE);
 
       const set = await EquipmentSet.findById(setId).exec();
       if (!set) throw new Error('Equipment set not found');
@@ -315,7 +316,7 @@ export const equipmentSetsResolvers = {
             eventName: (event as any).title || 'Unknown',
             action: 'item_missing',
             quantity: setItem.quantity,
-            performedBy: user.id,
+            performedBy: user.userId,
             performedByName: `${user.firstName} ${user.lastName}`,
             notes: `פריט חסר בסט "${set.name}" (${set.barcode})`,
             date: now,
@@ -344,7 +345,7 @@ export const equipmentSetsResolvers = {
             eventName: (event as any).title || 'Unknown',
             action: 'item_replaced',
             quantity: setItem.quantity,
-            performedBy: user.id,
+            performedBy: user.userId,
             performedByName: `${user.firstName} ${user.lastName}`,
             notes: `הוחלף בסט "${set.name}" (${set.barcode}). פריט חלופי: ${replacementId}`,
             date: now,
@@ -353,7 +354,7 @@ export const equipmentSetsResolvers = {
           // Cancel the original assignment and mark completed
           await EquipmentAssignment.updateMany(
             { equipmentId: setItem.equipmentId, eventId: event._id, status: 'active' },
-            { $set: { status: 'completed', returnedAt: now, returnedBy: user.id } },
+            { $set: { status: 'completed', returnedAt: now, returnedBy: user.userId } },
           );
           continue;
         }
@@ -376,7 +377,7 @@ export const equipmentSetsResolvers = {
             eventName: (event as any).title || 'Unknown',
             action: 'set_returned',
             quantity: setItem.quantity,
-            performedBy: user.id,
+            performedBy: user.userId,
             performedByName: `${user.firstName} ${user.lastName}`,
             notes: `הוחזר כחלק מסט "${set.name}" (${set.barcode})`,
             date: now,
@@ -384,7 +385,7 @@ export const equipmentSetsResolvers = {
 
           await EquipmentAssignment.updateMany(
             { equipmentId: equipment._id, eventId: event._id, status: 'active' },
-            { $set: { status: 'completed', returnedAt: now, returnedBy: user.id } },
+            { $set: { status: 'completed', returnedAt: now, returnedBy: user.userId } },
           );
         }
       }

@@ -1,10 +1,11 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { useRouter, usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
+import { Permission } from '@/rbac'
 import { 
   HomeIcon, 
   UsersIcon, 
@@ -30,8 +31,15 @@ import NotificationCenter from './NotificationCenter'
 import InboxCenter from './InboxCenter'
 import GlobalSearch from './GlobalSearch'
 
+interface NavItem {
+  name: string
+  href: string
+  icon: React.ForwardRefExoticComponent<any>
+  requires?: Permission
+}
+
 export default function Sidebar() {
-  const { user, logout } = useAuth()
+  const { user, logout, hasPermission } = useAuth()
   const router = useRouter()
   const pathname = usePathname()
   const [isCollapsed, setIsCollapsed] = useState(false)
@@ -42,36 +50,70 @@ export default function Sidebar() {
     router.push('/login')
   }
 
-  const mainNavigation = [
-    { name: 'דף הבית', href: '/', icon: HomeIcon },
-    { name: 'משתמשים', href: '/users', icon: UsersIcon },
-    { name: 'משמרות', href: '/shifts', icon: CalendarIcon },
-    { name: 'תכנונית', href: '/broadcast-planning', icon: CalendarIcon },
-    { name: 'שידורי חוץ', href: '/external-broadcasts', icon: GlobeAltIcon },
-    { name: 'MCR', href: '/MCR', icon: ChartBarIcon },
-    { name: 'מחסן', href: '/warehouse', icon: CubeIcon },
+  const mainNavigation: NavItem[] = [
+    { name: 'דף הבית', href: '/', icon: HomeIcon, requires: Permission.DASHBOARD_VIEW },
+    { name: 'משתמשים', href: '/users', icon: UsersIcon, requires: Permission.USERS_VIEW },
+    { name: 'משמרות', href: '/shifts', icon: CalendarIcon, requires: Permission.SHIFTS_VIEW_OWN },
+    { name: 'תכנונית', href: '/broadcast-planning', icon: CalendarIcon, requires: Permission.BROADCAST_VIEW },
+    { name: 'שידורי חוץ', href: '/external-broadcasts', icon: GlobeAltIcon, requires: Permission.BROADCAST_VIEW },
+    { name: 'MCR', href: '/MCR', icon: ChartBarIcon, requires: Permission.MCR_VIEW },
+    { name: 'מחסן', href: '/warehouse', icon: CubeIcon, requires: Permission.WAREHOUSE_VIEW },
   ]
 
-  const saasNavigation = [
-    { name: 'מדיה (DAM)', href: '/media', icon: PhotoIcon },
-    { name: 'זכויות שידור', href: '/rights', icon: DocumentCheckIcon },
-    { name: 'תהליכים', href: '/workflows', icon: ArrowPathIcon },
+  const saasNavigation: NavItem[] = [
+    { name: 'מדיה (DAM)', href: '/media', icon: PhotoIcon, requires: Permission.MEDIA_VIEW },
+    { name: 'זכויות שידור', href: '/rights', icon: DocumentCheckIcon, requires: Permission.RIGHTS_VIEW },
+    { name: 'תהליכים', href: '/workflows', icon: ArrowPathIcon, requires: Permission.WORKFLOWS_VIEW },
   ]
 
-  const bottomNavigation = [
-    { name: 'הגדרות', href: '/settings', icon: Cog6ToothIcon },
-    { name: 'חיוב', href: '/billing', icon: CreditCardIcon },
-    { name: 'יומן ביקורת', href: '/audit-log', icon: ShieldCheckIcon },
+  const bottomNavigation: NavItem[] = [
+    { name: 'הגדרות', href: '/settings', icon: Cog6ToothIcon, requires: Permission.SETTINGS_VIEW },
+    { name: 'חיוב', href: '/billing', icon: CreditCardIcon, requires: Permission.BILLING_VIEW },
+    { name: 'יומן ביקורת', href: '/audit-log', icon: ShieldCheckIcon, requires: Permission.AUDIT_VIEW },
     { name: 'עזרה', href: '/help', icon: QuestionMarkCircleIcon },
   ]
 
-  const navigation = mainNavigation
+  const filteredMain = useMemo(
+    () => mainNavigation.filter((item) => !item.requires || hasPermission(item.requires)),
+    [hasPermission],
+  )
+  const filteredSaas = useMemo(
+    () => saasNavigation.filter((item) => !item.requires || hasPermission(item.requires)),
+    [hasPermission],
+  )
+  const filteredBottom = useMemo(
+    () => bottomNavigation.filter((item) => !item.requires || hasPermission(item.requires)),
+    [hasPermission],
+  )
 
   const isActiveRoute = (href: string) => {
     return pathname === href
   }
 
   if (!user) return null
+
+  const renderNavItem = (item: NavItem) => (
+    <Link
+      key={item.name}
+      href={item.href}
+      onClick={() => setIsMobileOpen(false)}
+      className={`
+        flex items-center px-3 py-2 rounded-lg transition-colors
+        ${isActiveRoute(item.href)
+          ? 'bg-blue-100 text-blue-700 font-medium'
+          : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+        }
+      `}
+    >
+      <item.icon className={`h-5 w-5 flex-shrink-0 ${!isCollapsed && 'ml-3'}`} />
+      {!isCollapsed && (
+        <span className="mr-3">{item.name}</span>
+      )}
+      {isCollapsed && (
+        <span className="sr-only">{item.name}</span>
+      )}
+    </Link>
+  )
 
   return (
     <>
@@ -146,90 +188,27 @@ export default function Sidebar() {
           {/* Navigation links */}
           <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
             {/* Main navigation */}
-            {navigation.map((item) => (
-              <Link
-                key={item.name}
-                href={item.href}
-                onClick={() => setIsMobileOpen(false)}
-                className={`
-                  flex items-center px-3 py-2 rounded-lg transition-colors
-                  ${isActiveRoute(item.href)
-                    ? 'bg-blue-100 text-blue-700 font-medium'
-                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-                  }
-                `}
-              >
-                <item.icon className={`h-5 w-5 flex-shrink-0 ${!isCollapsed && 'ml-3'}`} />
-                {!isCollapsed && (
-                  <span className="mr-3">{item.name}</span>
-                )}
-                {isCollapsed && (
-                  <span className="sr-only">{item.name}</span>
-                )}
-              </Link>
-            ))}
+            {filteredMain.map(renderNavItem)}
 
             {/* SaaS Features separator */}
-            {!isCollapsed && (
+            {filteredSaas.length > 0 && !isCollapsed && (
               <div className="pt-3 pb-1">
                 <p className="px-3 text-xs font-semibold text-gray-400 uppercase">ניהול</p>
               </div>
             )}
 
             {/* SaaS navigation */}
-            {saasNavigation.map((item) => (
-              <Link
-                key={item.name}
-                href={item.href}
-                onClick={() => setIsMobileOpen(false)}
-                className={`
-                  flex items-center px-3 py-2 rounded-lg transition-colors
-                  ${isActiveRoute(item.href)
-                    ? 'bg-blue-100 text-blue-700 font-medium'
-                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-                  }
-                `}
-              >
-                <item.icon className={`h-5 w-5 flex-shrink-0 ${!isCollapsed && 'ml-3'}`} />
-                {!isCollapsed && (
-                  <span className="mr-3">{item.name}</span>
-                )}
-                {isCollapsed && (
-                  <span className="sr-only">{item.name}</span>
-                )}
-              </Link>
-            ))}
+            {filteredSaas.map(renderNavItem)}
 
             {/* Bottom separator */}
-            {!isCollapsed && (
+            {filteredBottom.length > 0 && !isCollapsed && (
               <div className="pt-3 pb-1">
                 <p className="px-3 text-xs font-semibold text-gray-400 uppercase">מערכת</p>
               </div>
             )}
 
             {/* Bottom navigation */}
-            {bottomNavigation.map((item) => (
-              <Link
-                key={item.name}
-                href={item.href}
-                onClick={() => setIsMobileOpen(false)}
-                className={`
-                  flex items-center px-3 py-2 rounded-lg transition-colors
-                  ${isActiveRoute(item.href)
-                    ? 'bg-blue-100 text-blue-700 font-medium'
-                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-                  }
-                `}
-              >
-                <item.icon className={`h-5 w-5 flex-shrink-0 ${!isCollapsed && 'ml-3'}`} />
-                {!isCollapsed && (
-                  <span className="mr-3">{item.name}</span>
-                )}
-                {isCollapsed && (
-                  <span className="sr-only">{item.name}</span>
-                )}
-              </Link>
-            ))}
+            {filteredBottom.map(renderNavItem)}
           </nav>
 
           {/* User info and logout */}
@@ -268,4 +247,4 @@ export default function Sidebar() {
       </div>
     </>
   )
-} 
+}

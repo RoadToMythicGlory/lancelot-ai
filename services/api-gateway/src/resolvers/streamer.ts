@@ -2,6 +2,7 @@ import { ObjectId } from 'mongodb';
 import bcrypt from 'bcrypt';
 import { connectMongoDB } from '../config/mongodb';
 import { config } from '../config';
+import { requireAuth } from '../middleware/auth';
 import { StreamEvent } from '../models/streamEvent.models';
 import { PodcastEpisode } from '../models/podcastEpisode.models';
 import { PodcastShow } from '../models/podcastShow.models';

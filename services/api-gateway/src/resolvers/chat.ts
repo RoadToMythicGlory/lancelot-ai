@@ -2,9 +2,11 @@ import { GraphQLResolveInfo } from 'graphql';
 import { v4 as uuidv4 } from 'uuid';
 import { MongoClient, Db, ObjectId } from 'mongodb';
 import { connectMongoDB } from '../config/mongodb';
+import { requireAuth } from '../middleware/auth';
+import { Permission } from '../rbac';
 
 interface Context {
-  user: { userId: string; email: string; firstName: string; lastName: string; displayName?: string };
+  user: { userId: string; email: string; firstName: string; lastName: string; displayName?: string } | null;
   mongoDb: Db;
 }
 
@@ -74,7 +76,7 @@ export const chatResolvers = {
           // Count unread messages for the current user
           const unreadCount = await messagesCollection.countDocuments({
             conversationId: conv.id,
-            fromUserId: { $ne: context.user.userId },
+            fromUserId: { $ne: context.user!.userId },
             isRead: false
           });
 
@@ -82,7 +84,7 @@ export const chatResolvers = {
             id: conv.id,
             participant1: userMap.get(conv.participant1Id) || { id: conv.participant1Id },
             participant2: userMap.get(conv.participant2Id) || { id: conv.participant2Id },
-            unreadCount: conv.participant1Id === context.user.userId 
+            unreadCount: conv.participant1Id === context.user!.userId 
               ? conv.unreadCounts?.participant1 || unreadCount
               : conv.unreadCounts?.participant2 || unreadCount,
             lastMessageAt: conv.lastMessageAt

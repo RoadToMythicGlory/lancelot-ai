@@ -47,6 +47,8 @@ type User {
   updatedAt: DateTime!
   createdBy: User
   updatedBy: User
+  roleTemplateId: ID
+  roleTemplateName: String
 }
 
 # Hierarchical System Roles
@@ -91,6 +93,8 @@ input CreateUserInput {
   phone: String
   mobile: String
   isActive: Boolean
+  roleTemplateId: ID
+  customPermissions: [String!]
 }
 
 input UpdateUserInput {
@@ -102,6 +106,8 @@ input UpdateUserInput {
   mobile: String
   isActive: Boolean
   password: String
+  roleTemplateId: ID
+  customPermissions: [String!]
 }
 
 input UserDepartmentInput {
@@ -2313,6 +2319,15 @@ extend type Mutation {
   
   # Trigger news fetch
   triggerNewsFetch(sources: [String!]): JSON!
+
+  # Re-index AI knowledge base (help articles + presets). Admin only.
+  reindexAIKnowledge: AIReindexResult!
+}
+
+type AIReindexResult {
+  success: Boolean!
+  documentsIndexed: Int!
+  message: String!
 }
 
 # ========================================================================================
@@ -4014,4 +4029,52 @@ extend type Mutation {
 
 extend type Subscription {
   trackerPositionUpdated(siteId: ID): TrackerPosition!
+}
+
+# ==================== Role Templates ====================
+
+type RoleTemplate {
+  id: ID!
+  name: String!
+  description: String
+  baseSystemRole: String!
+  departmentScope: String
+  permissions: [String!]!
+  allowedForDeptAdmins: Boolean!
+  isActive: Boolean!
+  createdBy: ID!
+  updatedBy: ID
+  createdAt: String!
+  updatedAt: String!
+}
+
+input CreateRoleTemplateInput {
+  name: String!
+  description: String
+  baseSystemRole: String!
+  departmentScope: String
+  permissions: [String!]!
+  allowedForDeptAdmins: Boolean!
+}
+
+input UpdateRoleTemplateInput {
+  name: String
+  description: String
+  baseSystemRole: String
+  departmentScope: String
+  permissions: [String!]
+  allowedForDeptAdmins: Boolean
+  isActive: Boolean
+}
+
+extend type Query {
+  roleTemplates(departmentId: ID): [RoleTemplate!]!
+  roleTemplate(id: ID!): RoleTemplate
+  assignableRoleTemplates: [RoleTemplate!]!
+}
+
+extend type Mutation {
+  createRoleTemplate(input: CreateRoleTemplateInput!): RoleTemplate!
+  updateRoleTemplate(id: ID!, input: UpdateRoleTemplateInput!): RoleTemplate!
+  deleteRoleTemplate(id: ID!): Boolean!
 }

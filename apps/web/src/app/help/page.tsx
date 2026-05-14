@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'
 import { useQuery, useMutation } from '@apollo/client'
-import { Card, Input, Tag, Button, Tabs, Modal, Form, Select, List, Empty, Spin, Badge, Timeline, Divider } from 'antd'
+import { Card, Input, Tag, Button, Tabs, Modal, Form, Select, List, Empty, Spin, Badge, Timeline, Divider, Tooltip, message as antMessage } from 'antd'
 import {
   QuestionMarkCircleIcon,
   BookOpenIcon,
@@ -12,8 +12,10 @@ import {
   PlusIcon,
   HandThumbUpIcon,
   HandThumbDownIcon,
+  ArrowPathIcon,
 } from '@heroicons/react/24/outline'
 import { useAuth } from '@/contexts/AuthContext'
+import { Permission } from '@/rbac'
 import {
   GET_HELP_ARTICLES,
   GET_MY_SUPPORT_TICKETS,
@@ -25,6 +27,7 @@ import {
   ADD_TICKET_MESSAGE,
   CLOSE_SUPPORT_TICKET,
   RATE_HELP_ARTICLE,
+  REINDEX_AI_KNOWLEDGE,
 } from '@/graphql/saasMutations'
 
 const categoryLabels: Record<string, string> = {
@@ -58,12 +61,26 @@ const changeTypeLabels: Record<string, { label: string; color: string }> = {
 }
 
 export default function HelpPage() {
-  const { user } = useAuth()
+  const { user, hasPermission } = useAuth()
   const [activeTab, setActiveTab] = useState('articles')
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<string | undefined>()
   const [createTicketModal, setCreateTicketModal] = useState(false)
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null)
+  const canManageAIKnowledge = hasPermission(Permission.SETTINGS_MANAGE)
+  const [reindexAIKnowledge, { loading: isReindexing }] = useMutation(REINDEX_AI_KNOWLEDGE, {
+    onCompleted: (data) => {
+      const result = data?.reindexAIKnowledge
+      if (result?.success) {
+        antMessage.success(result.message || `סיום: ${result.documentsIndexed} מסמכים נטענו ל-AI`)
+      } else {
+        antMessage.warning(result?.message || 'הריענון הסתיים ללא שגיאות')
+      }
+    },
+    onError: (err) => {
+      antMessage.error(`ריענון נכשל: ${err.message}`)
+    },
+  })
 
   const { data: articlesData, loading: aLoading } = useQuery(GET_HELP_ARTICLES, {
     variables: { category: selectedCategory, searchTerm: searchTerm || undefined },
@@ -106,12 +123,29 @@ export default function HelpPage() {
 
   return (
     <div className="max-w-6xl mx-auto">
-      <div className="mb-6">
-        <div className="flex items-center gap-3 mb-2">
-          <QuestionMarkCircleIcon className="h-7 w-7 text-blue-600" />
-          <h1 className="text-2xl font-bold text-gray-900">מרכז עזרה ותמיכה</h1>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-3 mb-2">
+            <QuestionMarkCircleIcon className="h-7 w-7 text-blue-600" />
+            <h1 className="text-2xl font-bold text-gray-900">מרכז עזרה ותמיכה</h1>
+          </div>
+          <p className="text-gray-500">מאמרי עזרה, פניות תמיכה ולוג שינויים</p>
         </div>
-        <p className="text-gray-500">מאמרי עזרה, פניות תמיכה ולוג שינויים</p>
+        {canManageAIKnowledge && (
+          <Tooltip
+            title="טוען מחדש את כל מאמרי העזרה והפריסטים לבסיס הידע של ה-AI. השתמש לאחר עריכת מאמרים."
+            placement="bottomLeft"
+          >
+            <Button
+              icon={<ArrowPathIcon className="h-4 w-4" />}
+              loading={isReindexing}
+              onClick={() => reindexAIKnowledge()}
+              type="default"
+            >
+              {isReindexing ? 'מרענן...' : 'רענן בסיס ידע של AI'}
+            </Button>
+          </Tooltip>
+        )}
       </div>
 
       <Tabs

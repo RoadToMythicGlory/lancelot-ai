@@ -405,12 +405,19 @@ const ConversationOverlay: React.FC<ConversationOverlayProps> = ({
                         <Sparkles size={20} className="absolute -top-1 -right-1 text-yellow-400" />
                       </div>
                       <p className="text-gray-600 font-medium">שלום! אני Lancelot AI</p>
-                      <p className="text-gray-400 text-sm mt-1">איך אפשר לעזור לך היום?</p>
-                      <div className="mt-4 flex flex-wrap gap-2 justify-center">
+                      <p className="text-gray-400 text-sm mt-1">
+                        אפשר לשאול אותי איך עובדת המערכת או על מידע חי מהמסד.
+                      </p>
+                      <div className="mt-4 flex flex-wrap gap-2 justify-center max-w-[300px] mx-auto">
                         <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs">בניית רנדאון</span>
                         <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs">גרפיקה</span>
                         <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs">משמרות</span>
                         <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs">חדשות</span>
+                        <span className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs">איך משהו עובד?</span>
+                        <span className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs">איזה ציוד למשחק מרכזי?</span>
+                        <span className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs">כמה מצלמות פנויות?</span>
+                        <span className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs">מתי המשמרת שלי?</span>
+                        <span className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs">מה משדרים היום?</span>
                       </div>
                     </>
                   ) : (

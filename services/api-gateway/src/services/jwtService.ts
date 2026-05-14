@@ -5,7 +5,8 @@ import { config } from '../config';
 export interface JWTPayload {
   userId: string;
   email: string;
-  role: string;
+  /** @deprecated Use systemRole instead. Kept for backward compat with old tokens. */
+  role?: string;
   systemRole?: string;
   accountType?: string; // 'streamer' for B2C users, undefined for ERP users
   departmentId?: string;

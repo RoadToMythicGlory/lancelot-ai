@@ -7,8 +7,10 @@
 export * from './provider';
 export * from './ollama-client';
 export * from './prompt-templates';
+export * from './embeddings';
 
 export { default as OllamaClient } from './ollama-client';
+export { default as embeddings } from './embeddings';
 
 import { config } from '../config';
 import { OllamaClient } from './ollama-client';

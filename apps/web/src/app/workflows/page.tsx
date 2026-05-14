@@ -11,6 +11,8 @@ import {
   PlusIcon,
 } from '@heroicons/react/24/outline'
 import { useAuth } from '@/contexts/AuthContext'
+import ProtectedRoute from '@/components/auth/ProtectedRoute'
+import { Permission } from '@/rbac'
 import { GET_WORKFLOW_TEMPLATES, GET_WORKFLOW_INSTANCES, GET_MY_PENDING_APPROVALS } from '@/graphql/saasQueries'
 import { CREATE_WORKFLOW_TEMPLATE, PROCESS_WORKFLOW_ACTION, START_WORKFLOW } from '@/graphql/saasMutations'
 
@@ -171,6 +173,7 @@ export default function WorkflowsPage() {
   ]
 
   return (
+    <ProtectedRoute requires={Permission.WORKFLOWS_VIEW}>
     <div className="max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -294,5 +297,6 @@ export default function WorkflowsPage() {
         )}
       </Modal>
     </div>
+    </ProtectedRoute>
   )
 }

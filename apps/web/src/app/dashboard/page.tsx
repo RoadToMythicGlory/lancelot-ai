@@ -500,7 +500,7 @@ const LancelotDashboard: React.FC = () => {
                   <Text strong>{user?.displayName || user?.email}</Text>
                   <br />
                   <Text type="secondary" className="text-sm">
-                    {getRoleName(user?.role)} • {getDepartmentName(user?.department)}
+                    {getRoleName(user?.systemRole)} • {getDepartmentName(user?.department)}
                   </Text>
                 </div>
               </Space>

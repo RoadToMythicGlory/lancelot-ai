@@ -15,6 +15,7 @@
     "migrate-passwords": "ts-node src/scripts/migrate-passwords.ts",
     "migrate:users": "ts-node src/scripts/migrate-users-to-hierarchical.ts",
     "seed:users": "ts-node src/scripts/seed-users.ts",
+    "seed:help": "ts-node src/scripts/seed-help-articles.ts",
     "seed:departments-users": "ts-node src/scripts/seed-departments-users.ts",
     "seed:department-users": "ts-node src/scripts/seed-department-users.ts",
     "seed:production-mcr": "cross-env NODE_ENV=production ts-node src/scripts/seed-production-mcr-admin.ts",

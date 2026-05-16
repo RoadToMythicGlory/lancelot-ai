@@ -50,10 +50,13 @@ function FlightBoardPageInner() {
   const pageRef = React.useRef<HTMLDivElement>(null);
 
   // Keep `kiosk` in sync with the browser's native fullscreen state so the
-  // user pressing Esc properly exits kiosk mode.
+  // user pressing Esc properly exits kiosk mode and any single-panel expand.
   useEffect(() => {
     const handler = () => {
-      if (!document.fullscreenElement) setKiosk(false);
+      if (!document.fullscreenElement) {
+        setKiosk(false);
+        setExpandedPanelId(null);
+      }
     };
     document.addEventListener('fullscreenchange', handler);
     return () => document.removeEventListener('fullscreenchange', handler);
@@ -63,34 +66,55 @@ function FlightBoardPageInner() {
   useEffect(() => {
     if (!kiosk) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !document.fullscreenElement) setKiosk(false);
+      if (e.key === 'Escape' && !document.fullscreenElement) {
+        setKiosk(false);
+        setExpandedPanelId(null);
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [kiosk]);
 
-  const toggleKiosk = async () => {
+  const enterKiosk = async () => {
     const el = pageRef.current;
     if (!el) return;
-    if (!kiosk) {
-      setKiosk(true);
-      try {
-        if (!document.fullscreenElement && el.requestFullscreen) {
-          await el.requestFullscreen();
-        }
-      } catch {
-        // Fullscreen API may be blocked; the kiosk class still hides chrome.
+    setKiosk(true);
+    try {
+      if (!document.fullscreenElement && el.requestFullscreen) {
+        await el.requestFullscreen();
       }
-    } else {
-      setKiosk(false);
-      try {
-        if (document.fullscreenElement && document.exitFullscreen) {
-          await document.exitFullscreen();
-        }
-      } catch {
-        /* noop */
-      }
+    } catch {
+      // Fullscreen API may be blocked; the kiosk class still hides chrome.
     }
+  };
+
+  const exitKiosk = async () => {
+    setKiosk(false);
+    setExpandedPanelId(null);
+    try {
+      if (document.fullscreenElement && document.exitFullscreen) {
+        await document.exitFullscreen();
+      }
+    } catch {
+      /* noop */
+    }
+  };
+
+  const toggleKiosk = async () => {
+    if (!kiosk) await enterKiosk();
+    else await exitKiosk();
+  };
+
+  // "הצג מורחב" reuses the kiosk layout for a single panel: enter kiosk and
+  // pin the panel id so the grid filters down to just that one. Toggling it
+  // off exits kiosk too, so users get one consistent immersive view.
+  const handleTogglePanelExpand = async (panelId: string) => {
+    if (expandedPanelId === panelId) {
+      await exitKiosk();
+      return;
+    }
+    setExpandedPanelId(panelId);
+    if (!kiosk) await enterKiosk();
   };
 
   const {
@@ -236,9 +260,7 @@ function FlightBoardPageInner() {
             items={items}
             loading={dataQuery.loading || dataQuery.networkStatus === 4}
             expanded={expandedPanelId === panel.id}
-            onToggleExpand={() =>
-              setExpandedPanelId((cur) => (cur === panel.id ? null : panel.id))
-            }
+            onToggleExpand={() => handleTogglePanelExpand(panel.id)}
             canEdit={canManage}
             onEdit={() => setEditPanelTarget(panel)}
           />
@@ -332,11 +354,17 @@ function FlightBoardPageInner() {
         )}
       </div>
 
-      {expandedPanelId && (
-        <div
-          className="flight-board-backdrop"
-          onClick={() => setExpandedPanelId(null)}
-        />
+      {kiosk && (
+        <Tooltip title="יציאה ממסך מלא (Esc)" placement="bottomRight">
+          <button
+            type="button"
+            className="flight-board-kiosk-exit"
+            onClick={toggleKiosk}
+            aria-label="יציאה ממסך מלא"
+          >
+            <FullscreenExitOutlined />
+          </button>
+        </Tooltip>
       )}
 
       <BoardBuilder

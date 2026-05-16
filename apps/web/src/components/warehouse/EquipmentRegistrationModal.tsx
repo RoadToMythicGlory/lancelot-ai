@@ -82,7 +82,8 @@ const EquipmentRegistrationModal: React.FC<EquipmentRegistrationModalProps> = ({
           cell: values.cell || null
         },
         quantityTotal: values.quantityTotal || 1,
-        isQuantityBased: values.isQuantityBased ?? false
+        isQuantityBased: values.isQuantityBased ?? false,
+        isSharedEngineeringEquipment: values.isSharedEngineeringEquipment ?? false
       };
 
       await createEquipment({
@@ -187,6 +188,15 @@ const EquipmentRegistrationModal: React.FC<EquipmentRegistrationModalProps> = ({
                     label="מעקב כמותי (ללא ברקוד ליחידה)"
                     valuePropName="checked"
                     tooltip="פריטים כמותיים מנוהלים כמאגר עם כפתור 'התאם כמות' במקום סריקת ברקוד ליחידה"
+                  >
+                    <Switch />
+                  </Form.Item>
+
+                  <Form.Item
+                    name="isSharedEngineeringEquipment"
+                    label="ציוד הנדסה שיתופי"
+                    valuePropName="checked"
+                    tooltip="סימון ציוד שיופיע בלשונית ייעודית ב-MCR בכל פעם שהוא מוקצה לאירוע או לאיש צוות"
                   >
                     <Switch />
                   </Form.Item>

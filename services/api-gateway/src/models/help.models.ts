@@ -225,14 +225,22 @@ const changelogSchema = new Schema<IChangelog>({
 helpArticleSchema.index({ slug: 1 }, { unique: true });
 helpArticleSchema.index({ category: 1, isPublished: 1, order: 1 });
 helpArticleSchema.index({ title: 'text', content: 'text', tags: 'text' });
+helpArticleSchema.index({ tags: 1 });
+helpArticleSchema.index({ authorId: 1 });
+helpArticleSchema.index({ isPublished: 1, updatedAt: -1 });
 
 supportTicketSchema.index({ organizationId: 1, status: 1, createdAt: -1 });
 supportTicketSchema.index({ ticketNumber: 1 }, { unique: true });
 supportTicketSchema.index({ createdBy: 1, status: 1 });
 supportTicketSchema.index({ assignedTo: 1, status: 1 });
+supportTicketSchema.index({ organizationId: 1, priority: 1, status: 1 });
+supportTicketSchema.index({ organizationId: 1, category: 1 });
+supportTicketSchema.index({ status: 1, createdAt: -1 });
+supportTicketSchema.index({ priority: 1, status: 1, createdAt: -1 });
 
 changelogSchema.index({ isPublished: 1, publishedAt: -1 });
 changelogSchema.index({ version: 1 });
+changelogSchema.index({ authorId: 1 });
 
 export const HelpArticle = mongoose.model<IHelpArticle>('HelpArticle', helpArticleSchema);
 export const SupportTicket = mongoose.model<ISupportTicket>('SupportTicket', supportTicketSchema);

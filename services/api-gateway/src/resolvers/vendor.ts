@@ -1,7 +1,11 @@
+import mongoose from 'mongoose';
 import { Vendor } from '../models/vendor.models';
 import { connectMongoose } from '../config/mongodb';
 import { requireAuth, requirePermission } from '../middleware/auth';
 import { Permission } from '../rbac';
+
+// Hard cap on the vendor list query.
+const MAX_VENDOR_LIST = 1000;
 
 let mongooseConnected = false;
 
@@ -39,7 +43,7 @@ export const vendorResolvers = {
           }
         }
         
-        const vendors = await Vendor.find(query).sort({ name: 1 }).exec();
+        const vendors = await Vendor.find(query).sort({ name: 1 }).limit(MAX_VENDOR_LIST).exec();
         
         // Map to GraphQL format
         return vendors.map(vendor => ({
@@ -70,7 +74,11 @@ export const vendorResolvers = {
       try {
         await ensureMongoConnection();
         requirePermission(context, Permission.WAREHOUSE_VIEW);
-        
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+          throw new Error('Invalid vendor ID');
+        }
+
         const vendor = await Vendor.findById(id).exec();
         
         if (!vendor) {
@@ -148,7 +156,11 @@ export const vendorResolvers = {
       try {
         await ensureMongoConnection();
         const user = requirePermission(context, Permission.WAREHOUSE_MANAGE);
-        
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+          throw new Error('Invalid vendor ID');
+        }
+
         // Check if user has permission (must be department admin)
         if (user.systemRole !== 'SYSTEM_ADMIN' && user.systemRole !== 'DEPARTMENT_ADMIN') {
           throw new Error('Unauthorized: Only Department Admins can update vendors');
@@ -192,7 +204,11 @@ export const vendorResolvers = {
       try {
         await ensureMongoConnection();
         const user = requirePermission(context, Permission.WAREHOUSE_MANAGE);
-        
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+          throw new Error('Invalid vendor ID');
+        }
+
         // Check if user has permission (must be department admin)
         if (user.systemRole !== 'SYSTEM_ADMIN' && user.systemRole !== 'DEPARTMENT_ADMIN') {
           throw new Error('Unauthorized: Only Department Admins can delete vendors');
@@ -215,7 +231,11 @@ export const vendorResolvers = {
       try {
         await ensureMongoConnection();
         const user = requirePermission(context, Permission.WAREHOUSE_MANAGE);
-        
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+          throw new Error('Invalid vendor ID');
+        }
+
         // Check if user has permission (must be department admin)
         if (user.systemRole !== 'SYSTEM_ADMIN' && user.systemRole !== 'DEPARTMENT_ADMIN') {
           throw new Error('Unauthorized: Only Department Admins can toggle vendor status');

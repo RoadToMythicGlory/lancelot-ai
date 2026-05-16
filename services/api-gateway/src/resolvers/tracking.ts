@@ -10,6 +10,8 @@ import {
 import { Equipment } from '../models/equipment.models';
 import { TRACKER_POSITION_UPDATED, invalidateGatewayCache } from '../services/trackerIngestService';
 import { config } from '../config';
+import { requireAuth, requirePermission } from '../middleware/auth';
+import { Permission } from '../rbac';
 
 function mapTag(doc: any): Record<string, any> {
   return {
@@ -89,7 +91,8 @@ function mapPosition(doc: any) {
 
 export const trackingResolvers = {
   Query: {
-    trackerSites: async () => {
+    trackerSites: async (_: any, __: any, context: any) => {
+      requirePermission(context, Permission.WAREHOUSE_VIEW);
       const docs = await TrackerSite.find({ isActive: true }).sort({ name: 1 }).lean();
       const sites = docs.map(mapSite);
       for (const site of sites) {
@@ -99,7 +102,8 @@ export const trackingResolvers = {
       return sites;
     },
 
-    trackerSite: async (_: any, { id }: { id: string }) => {
+    trackerSite: async (_: any, { id }: { id: string }, context: any) => {
+      requirePermission(context, Permission.WAREHOUSE_VIEW);
       const doc = await TrackerSite.findById(id).lean();
       if (!doc) return null;
       const site = mapSite(doc);
@@ -108,7 +112,8 @@ export const trackingResolvers = {
       return site;
     },
 
-    trackerTags: async (_: any, { siteId }: { siteId?: string }) => {
+    trackerTags: async (_: any, { siteId }: { siteId?: string }, context: any) => {
+      requirePermission(context, Permission.WAREHOUSE_VIEW);
       let tags;
       if (siteId) {
         const positions = await TrackerLatestPosition.find({ siteId }).lean();
@@ -136,7 +141,8 @@ export const trackingResolvers = {
       return result;
     },
 
-    trackerTag: async (_: any, { id }: { id: string }) => {
+    trackerTag: async (_: any, { id }: { id: string }, context: any) => {
+      requirePermission(context, Permission.WAREHOUSE_VIEW);
       const doc = await TrackerTag.findById(id).lean();
       if (!doc) return null;
       const mapped = mapTag(doc);
@@ -153,7 +159,8 @@ export const trackingResolvers = {
       return mapped;
     },
 
-    trackerLatestPositions: async (_: any, { siteId }: { siteId?: string }) => {
+    trackerLatestPositions: async (_: any, { siteId }: { siteId?: string }, context: any) => {
+      requirePermission(context, Permission.WAREHOUSE_VIEW);
       const filter: any = {};
       if (siteId) filter.siteId = siteId;
 
@@ -175,7 +182,8 @@ export const trackingResolvers = {
       return result;
     },
 
-    trackerTagHistory: async (_: any, args: { tagId: string; since?: string; until?: string; limit?: number }) => {
+    trackerTagHistory: async (_: any, args: { tagId: string; since?: string; until?: string; limit?: number }, context: any) => {
+      requirePermission(context, Permission.WAREHOUSE_VIEW);
       const filter: any = { tagId: args.tagId };
       if (args.since || args.until) {
         filter.ts = {};
@@ -202,7 +210,8 @@ export const trackingResolvers = {
       }));
     },
 
-    trackerGateways: async (_: any, { siteId }: { siteId?: string }) => {
+    trackerGateways: async (_: any, { siteId }: { siteId?: string }, context: any) => {
+      requirePermission(context, Permission.WAREHOUSE_VIEW);
       const filter: any = { isActive: true };
       if (siteId) filter.siteId = siteId;
       const docs = await TrackerGateway.find(filter).sort({ name: 1 }).lean();
@@ -211,7 +220,8 @@ export const trackingResolvers = {
   },
 
   Mutation: {
-    registerTrackerTag: async (_: any, { equipmentId, bleAddress, label }: { equipmentId?: string; bleAddress: string; label: string }) => {
+    registerTrackerTag: async (_: any, { equipmentId, bleAddress, label }: { equipmentId?: string; bleAddress: string; label: string }, context: any) => {
+      requirePermission(context, Permission.WAREHOUSE_MANAGE);
       const existing = await TrackerTag.findOne({ bleAddress: bleAddress.toUpperCase().trim() });
       if (existing) {
         throw new Error(`Tag with BLE address ${bleAddress} already exists`);
@@ -231,7 +241,8 @@ export const trackingResolvers = {
       return mapTag(tag);
     },
 
-    unregisterTrackerTag: async (_: any, { tagId }: { tagId: string }) => {
+    unregisterTrackerTag: async (_: any, { tagId }: { tagId: string }, context: any) => {
+      requirePermission(context, Permission.WAREHOUSE_MANAGE);
       const tag = await TrackerTag.findById(tagId);
       if (!tag) throw new Error('Tag not found');
       tag.status = 'retired';
@@ -243,7 +254,8 @@ export const trackingResolvers = {
       return true;
     },
 
-    bindTrackerTagToEquipment: async (_: any, { tagId, equipmentId }: { tagId: string; equipmentId: string }) => {
+    bindTrackerTagToEquipment: async (_: any, { tagId, equipmentId }: { tagId: string; equipmentId: string }, context: any) => {
+      requirePermission(context, Permission.WAREHOUSE_MANAGE);
       const tag = await TrackerTag.findById(tagId);
       if (!tag) throw new Error('Tag not found');
       const equipment = await Equipment.findById(equipmentId);
@@ -261,7 +273,8 @@ export const trackingResolvers = {
       return mapTag(tag);
     },
 
-    unbindTrackerTagFromEquipment: async (_: any, { tagId }: { tagId: string }) => {
+    unbindTrackerTagFromEquipment: async (_: any, { tagId }: { tagId: string }, context: any) => {
+      requirePermission(context, Permission.WAREHOUSE_MANAGE);
       const tag = await TrackerTag.findById(tagId);
       if (!tag) throw new Error('Tag not found');
       if (tag.equipmentId) {
@@ -272,7 +285,8 @@ export const trackingResolvers = {
       return mapTag(tag);
     },
 
-    createTrackerSite: async (_: any, { input }: { input: any }) => {
+    createTrackerSite: async (_: any, { input }: { input: any }, context: any) => {
+      requirePermission(context, Permission.WAREHOUSE_MANAGE);
       const siteData: any = {
         name: input.name,
         floorPlanImageUrl: input.floorPlanImageUrl,
@@ -290,7 +304,8 @@ export const trackingResolvers = {
       return { ...mapSite(doc), gateways: [] };
     },
 
-    updateTrackerSite: async (_: any, { id, input }: { id: string; input: any }) => {
+    updateTrackerSite: async (_: any, { id, input }: { id: string; input: any }, context: any) => {
+      requirePermission(context, Permission.WAREHOUSE_MANAGE);
       const updates: any = {};
       if (input.name != null) updates.name = input.name;
       if (input.floorPlanImageUrl != null) updates.floorPlanImageUrl = input.floorPlanImageUrl;
@@ -312,13 +327,15 @@ export const trackingResolvers = {
       return site;
     },
 
-    deleteTrackerSite: async (_: any, { id }: { id: string }) => {
+    deleteTrackerSite: async (_: any, { id }: { id: string }, context: any) => {
+      requirePermission(context, Permission.WAREHOUSE_MANAGE);
       await TrackerSite.findByIdAndDelete(id);
       await TrackerGateway.updateMany({ siteId: id }, { $set: { isActive: false } });
       return true;
     },
 
-    createTrackerGateway: async (_: any, { input }: { input: any }) => {
+    createTrackerGateway: async (_: any, { input }: { input: any }, context: any) => {
+      requirePermission(context, Permission.WAREHOUSE_MANAGE);
       const gwData: any = {
         gatewayKey: input.gatewayKey,
         name: input.name,
@@ -335,7 +352,8 @@ export const trackingResolvers = {
       return mapGateway(doc);
     },
 
-    updateTrackerGatewayPosition: async (_: any, { id, x, y }: { id: string; x: number; y: number }) => {
+    updateTrackerGatewayPosition: async (_: any, { id, x, y }: { id: string; x: number; y: number }, context: any) => {
+      requirePermission(context, Permission.WAREHOUSE_MANAGE);
       const doc = await TrackerGateway.findByIdAndUpdate(
         id,
         { $set: { position: { x, y } } },
@@ -346,7 +364,8 @@ export const trackingResolvers = {
       return mapGateway(doc);
     },
 
-    deleteTrackerGateway: async (_: any, { id }: { id: string }) => {
+    deleteTrackerGateway: async (_: any, { id }: { id: string }, context: any) => {
+      requirePermission(context, Permission.WAREHOUSE_MANAGE);
       const gw = await TrackerGateway.findById(id).lean();
       if (gw) invalidateGatewayCache((gw as any).gatewayKey);
       await TrackerGateway.findByIdAndDelete(id);
@@ -357,7 +376,10 @@ export const trackingResolvers = {
   Subscription: {
     trackerPositionUpdated: {
       subscribe: withFilter(
-        () => pubsub.asyncIterator([TRACKER_POSITION_UPDATED]),
+        (_root: any, _args: any, context: any) => {
+          requirePermission(context, Permission.WAREHOUSE_VIEW);
+          return pubsub.asyncIterator([TRACKER_POSITION_UPDATED]);
+        },
         (payload: any, variables: any) => {
           if (!variables.siteId) return true;
           return payload.trackerPositionUpdated?.siteId === variables.siteId;

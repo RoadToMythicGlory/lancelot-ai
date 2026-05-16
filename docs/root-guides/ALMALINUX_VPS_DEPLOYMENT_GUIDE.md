@@ -122,9 +122,9 @@ Update the .env file with:
 NODE_ENV=production
 
 # MongoDB - Using Docker MongoDB
-MONGODB_URL=mongodb://LancelotERP_DB:<MONGO_PASSWORD>@mongodb:27017/lancelot?authSource=admin
-MONGO_USERNAME=LancelotERP_DB
-MONGO_PASSWORD=<MONGO_PASSWORD>
+MONGODB_URL=mongodb://<USER>:<PASSWORD>@mongodb:27017/lancelot?authSource=admin
+MONGO_USERNAME=<your-username>
+MONGO_PASSWORD=<your-password>
 
 # API Configuration
 API_PORT=4000
@@ -314,10 +314,10 @@ BACKUP_DIR="/opt/lancelot/backups"
 DATE=$(date +%Y%m%d_%H%M%S)
 mkdir -p $BACKUP_DIR
 
-# Backup MongoDB
+# Backup MongoDB (read credentials from environment, e.g. /etc/lancelot.env)
 docker-compose exec -T mongodb mongodump \
-  --username=LancelotERP_DB \
-  --password=<MONGO_PASSWORD> \
+  --username="$MONGO_USERNAME" \
+  --password="$MONGO_PASSWORD" \
   --authenticationDatabase=admin \
   --archive=/backup/mongodb_$DATE.gz \
   --gzip
@@ -418,7 +418,7 @@ ctop
 docker-compose logs mongodb
 
 # Test MongoDB connection
-docker-compose exec mongodb mongosh -u LancelotERP_DB -p <MONGO_PASSWORD> --authenticationDatabase admin
+docker-compose exec mongodb mongosh -u "$MONGO_USERNAME" -p "$MONGO_PASSWORD" --authenticationDatabase admin
 ```
 
 ### Permission Issues

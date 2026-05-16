@@ -33,17 +33,19 @@ const buildMongoUrl = (): string => {
   const port = process.env.MONGO_PORT || '27017';
   const database = process.env.MONGO_DATABASE || 'broadcast';
 
-  // Production requires authentication
-  const username = process.env.MONGO_USERNAME || 'LancelotERP_DB';
-  const password = process.env.MONGO_PASSWORD || '<MONGO_PASSWORD>';
+  // Production / staging require explicit credentials. No hardcoded password defaults.
+  const username = process.env.MONGO_USERNAME;
+  const password = process.env.MONGO_PASSWORD;
 
-  // Validate password in production
-  if (!password && process.env.NODE_ENV === 'production') {
-    throw new Error('❌ SECURITY ERROR: MONGO_PASSWORD is required in production environment');
+  if (!username || !password) {
+    throw new Error(
+      '❌ SECURITY ERROR: MONGO_USERNAME and MONGO_PASSWORD are required in non-development environments. ' +
+      'Provide MONGODB_URL or set MONGO_USERNAME/MONGO_PASSWORD environment variables.'
+    );
   }
 
   // Build URL with authentication for production
-  return `mongodb://${username}:${encodeURIComponent(password!)}@${host}:${port}/${database}?authSource=admin`;
+  return `mongodb://${username}:${encodeURIComponent(password)}@${host}:${port}/${database}?authSource=admin`;
 };
 
 // Get MongoDB URL

@@ -1,12 +1,25 @@
 import { AuthenticationError, UserInputError } from 'apollo-server-express';
+import mongoose from 'mongoose';
 import MCREvent, { IMCREvent } from '../models/mcrEvent';
 import BulletinPost, { IBulletinPost } from '../models/bulletinPost';
 import ActivityRow, { IActivityRow } from '../models/activityRow';
+import {
+  MCRDailyCheckTemplate,
+  MCRDailyCheckEntry,
+  IMCRDailyCheckTemplate,
+  IMCRDailyCheckEntry,
+  ensureDefaultDailyChecks,
+} from '../models/mcrDailyCheck';
+import MCRExchangeGroup, { IMCRExchangeGroup } from '../models/mcrExchangeGroup';
 import { BroadcastEvent } from '../models/broadcast.models';
-import { EquipmentAssignment } from '../models/equipment.models';
+import { Equipment, EquipmentAssignment } from '../models/equipment.models';
+import { InternalEquipmentAssignment } from '../models/internalEquipmentAssignment.models';
 import { pubsub } from '../utils/pubsub';
 import { requireAuth, requirePermission, withAuth } from '../middleware/auth';
 import { Permission } from '../rbac';
+import { parseMcrDocument } from '../services/mcrDocumentParser';
+import { logMcrAction } from '../services/mcr.service';
+import { ensureShadowMcrEventForBroadcast } from '../services/mcrShadowEvent';
 
 // Subscription topics
 const MCR_EVENT_CREATED = 'MCR_EVENT_CREATED';
@@ -18,11 +31,81 @@ const BULLETIN_POST_DELETED = 'BULLETIN_POST_DELETED';
 const ACTIVITY_ROW_CREATED = 'ACTIVITY_ROW_CREATED';
 const ACTIVITY_ROW_UPDATED = 'ACTIVITY_ROW_UPDATED';
 const ACTIVITY_ROW_DELETED = 'ACTIVITY_ROW_DELETED';
+const MCR_DAILY_CHECK_ENTRY_UPDATED = 'MCR_DAILY_CHECK_ENTRY_UPDATED';
+const MCR_DAILY_CHECK_TEMPLATE_CHANGED = 'MCR_DAILY_CHECK_TEMPLATE_CHANGED';
+const MCR_EXCHANGE_GROUP_UPDATED = 'MCR_EXCHANGE_GROUP_UPDATED';
+
+// Normalize sub-document arrays sent by the client. The frontend sometimes
+// resends previously saved rows verbatim (with their stringified `id`), and
+// sometimes sends brand-new rows with `id: undefined`. Mongoose only treats a
+// row as the "same" sub-document if `_id` is present.
+function normalizeSubDocs<T extends Record<string, any>>(arr: T[] | undefined | null): any[] {
+  if (!Array.isArray(arr)) return [];
+  return arr.map((item) => {
+    if (!item || typeof item !== 'object') return item;
+    const { id, _id, ...rest } = item;
+    const resolvedId = _id || id;
+    if (resolvedId && mongoose.Types.ObjectId.isValid(resolvedId)) {
+      return { _id: new mongoose.Types.ObjectId(resolvedId), ...rest };
+    }
+    return rest;
+  });
+}
+
+// Map of GraphQL input -> mongoose field updates for an MCR event.
+function mapEventInput(input: any): Record<string, any> {
+  const out: Record<string, any> = { ...input };
+  if (Array.isArray(input.feeds)) out.feeds = normalizeSubDocs(input.feeds);
+  if (Array.isArray(input.contacts)) out.contacts = normalizeSubDocs(input.contacts);
+  if (Array.isArray(input.outputPlatforms)) {
+    out.outputPlatforms = normalizeSubDocs(input.outputPlatforms);
+  }
+  return out;
+}
 
 const resolvers = {
   Query: {
     // MCR Events
     mcrEvents: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_VIEW);
+
+      // Self-heal: any Broadcast Event inside the requested window that
+      // doesn't yet have a shadow MCREvent (because it was created before
+      // shadow-events shipped) gets one now. This matches how the
+      // `activityRows` resolver back-fills the Schedule tab.
+      if (args.start && args.end) {
+        try {
+          const startDate = new Date(args.start);
+          const endDate = new Date(args.end);
+          const broadcastEvents = await BroadcastEvent.find({
+            $or: [
+              { startTime: { $gte: startDate, $lte: endDate } },
+              { endTime: { $gte: startDate, $lte: endDate } },
+              { startTime: { $lte: startDate }, endTime: { $gte: endDate } },
+            ],
+          }).select({ _id: 1, title: 1, hebrewTitle: 1, startTime: 1, endTime: 1, channel: 1 });
+
+          if (broadcastEvents.length > 0) {
+            const ids = broadcastEvents.map((e) => e._id);
+            const existing = await MCREvent.find(
+              { broadcastEventId: { $in: ids } },
+              { broadcastEventId: 1 },
+            );
+            const haveShadow = new Set(
+              existing.map((e) => e.broadcastEventId?.toString()).filter(Boolean) as string[],
+            );
+            const missing = broadcastEvents.filter(
+              (e) => !haveShadow.has(e._id.toString()),
+            );
+            for (const ev of missing) {
+              await ensureShadowMcrEventForBroadcast(ev as any, context?.user?.userId);
+            }
+          }
+        } catch (err) {
+          console.error('[mcrEvents] shadow back-fill failed:', err);
+        }
+      }
+
       const query: any = {};
       
       if (args.start && args.end) {
@@ -37,23 +120,30 @@ const resolvers = {
         query.broadcastType = args.broadcastType;
       }
       
+      const limit = Math.min(Math.max(Number(args.limit) || 200, 1), 500);
+      const offset = Math.max(Number(args.offset) || 0, 0);
       return await MCREvent.find(query)
-        .sort({ start: 1 });
+        .sort({ start: 1 })
+        .skip(offset)
+        .limit(limit);
     }),
 
-    mcrEvent: withAuth(async (_: any, args: any) => {
+    mcrEvent: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_VIEW);
+      if (!mongoose.Types.ObjectId.isValid(args.id)) {
+        throw new Error('Invalid MCR event ID');
+      }
       return await MCREvent.findById(args.id);
     }),
 
     // Bulletin Posts
     mcrBulletinPosts: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_VIEW);
       const query: any = {};
       
       if (args.departmentId) {
         query.departmentId = args.departmentId;
       } else {
-        // Get MCR department ID
-        // Get MCR department from MongoDB
         const db = await context.mongoDb;
         const departmentsCollection = db.collection('departments');
         const mcrDepartment = await departmentsCollection.findOne({ name: 'MCR' });
@@ -71,23 +161,29 @@ const resolvers = {
         ];
       }
       
+      const limit = Math.min(Math.max(Number(args.limit) || 200, 1), 500);
       return await BulletinPost.find(query)
-        .sort({ createdAt: -1 });
+        .sort({ createdAt: -1 })
+        .limit(limit);
     }),
 
-    mcrBulletinPost: withAuth(async (_: any, args: any) => {
+    mcrBulletinPost: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_VIEW);
+      if (!mongoose.Types.ObjectId.isValid(args.id)) {
+        throw new Error('Invalid bulletin post ID');
+      }
       return await BulletinPost.findById(args.id);
     }),
 
     // Activity Rows — auto-syncs broadcast events into empty activity rows
     activityRows: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_VIEW);
       const startOfDay = new Date(args.date);
       startOfDay.setHours(0, 0, 0, 0);
       
       const endOfDay = new Date(args.date);
       endOfDay.setHours(23, 59, 59, 999);
 
-      // 1. Find broadcast events that fall on this day
       try {
         const broadcastEvents = await BroadcastEvent.find({
           $or: [
@@ -98,7 +194,6 @@ const resolvers = {
         });
 
         if (broadcastEvents.length > 0) {
-          // 2. Check which broadcast events already have an activity row
           const broadcastIds = broadcastEvents.map(e => e._id);
           const existingRows = await ActivityRow.find({
             broadcastEventId: { $in: broadcastIds }
@@ -107,7 +202,6 @@ const resolvers = {
             existingRows.map(r => r.broadcastEventId?.toString())
           );
 
-          // 3. Create empty activity rows for new broadcast events
           const newRows = broadcastEvents
             .filter(event => !existingBroadcastIds.has(event._id.toString()))
             .map(event => {
@@ -139,11 +233,9 @@ const resolvers = {
           }
         }
       } catch (err) {
-        // Log but don't fail — the board should still show existing rows
         console.error('Error syncing broadcast events to activity rows:', err);
       }
 
-      // 4. Return all activity rows for the day
       const query: any = {
         date: { $gte: startOfDay, $lte: endOfDay }
       };
@@ -152,30 +244,39 @@ const resolvers = {
         query.isHidden = { $ne: true };
       }
       
+      const limit = Math.min(Math.max(Number(args.limit) || 200, 1), 500);
       return await ActivityRow.find(query)
-        .sort({ time: 1 });
+        .sort({ time: 1 })
+        .limit(limit);
     }),
 
-    activityRow: withAuth(async (_: any, args: any) => {
+    activityRow: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_VIEW);
+      if (!mongoose.Types.ObjectId.isValid(args.id)) {
+        throw new Error('Invalid activity row ID');
+      }
       return await ActivityRow.findById(args.id);
     }),
 
     activityRowByBroadcastEvent: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_VIEW);
       const { broadcastEventId, date } = args;
+
+      if (!mongoose.Types.ObjectId.isValid(broadcastEventId)) {
+        throw new Error('Invalid broadcast event ID');
+      }
       
       const startOfDay = new Date(date);
       startOfDay.setHours(0, 0, 0, 0);
       const endOfDay = new Date(date);
       endOfDay.setHours(23, 59, 59, 999);
       
-      // Try to find existing row
       let row = await ActivityRow.findOne({
-        broadcastEventId: new (require('mongoose').Types.ObjectId)(broadcastEventId),
+        broadcastEventId: new mongoose.Types.ObjectId(broadcastEventId),
         date: { $gte: startOfDay, $lte: endOfDay }
       });
       
       if (!row) {
-        // Auto-create from broadcast event
         const event = await BroadcastEvent.findById(broadcastEventId);
         if (!event) {
           throw new UserInputError('Broadcast event not found');
@@ -209,24 +310,303 @@ const resolvers = {
       
       return row;
     }),
+
+    // ===== Daily Checks =====
+    mcrDailyCheckTemplates: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_VIEW);
+      await ensureDefaultDailyChecks();
+      const query: any = {};
+      if (args.activeOnly !== false) query.isActive = true;
+      return await MCRDailyCheckTemplate.find(query).sort({ order: 1, name: 1 });
+    }),
+
+    mcrDailyCheck: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_VIEW);
+      await ensureDefaultDailyChecks();
+
+      const startOfDay = new Date(args.date);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(args.date);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const templates = await MCRDailyCheckTemplate.find({ isActive: true }).sort({ order: 1, name: 1 });
+
+      const existingEntries = await MCRDailyCheckEntry.find({
+        date: { $gte: startOfDay, $lte: endOfDay },
+      });
+
+      const byTemplate = new Map<string, IMCRDailyCheckEntry>();
+      for (const e of existingEntries) {
+        byTemplate.set(e.templateId.toString(), e);
+      }
+
+      // Ensure every active template has an entry for the day (creating an
+      // unchecked one if missing). This makes downstream UI simpler.
+      const missingTemplateIds = templates
+        .filter((t) => !byTemplate.has(String(t._id)))
+        .map((t) => t._id);
+
+      if (missingTemplateIds.length > 0) {
+        const inserted = await MCRDailyCheckEntry.insertMany(
+          missingTemplateIds.map((id) => ({
+            date: startOfDay,
+            templateId: id,
+            isCompleted: false,
+          })),
+          { ordered: false },
+        ).catch(() => [] as any[]);
+        for (const e of inserted) {
+          byTemplate.set(e.templateId.toString(), e);
+        }
+      }
+
+      const entries: IMCRDailyCheckEntry[] = [];
+      for (const t of templates) {
+        const e = byTemplate.get(String(t._id));
+        if (e) {
+          (e as any).__template = t;
+          entries.push(e);
+        }
+      }
+
+      const total = entries.length;
+      const completed = entries.filter((e) => e.isCompleted).length;
+      const percentage = total === 0 ? 0 : Math.round((completed / total) * 100);
+
+      return {
+        date: startOfDay,
+        total,
+        completed,
+        percentage,
+        entries,
+      };
+    }),
+
+    // ===== External Exchange =====
+    mcrExchangeGroups: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_VIEW);
+      const query: any = {};
+      if (args.status) query.status = args.status;
+      if (args.mcrEventId) {
+        if (!mongoose.Types.ObjectId.isValid(args.mcrEventId)) {
+          throw new UserInputError('Invalid MCR event ID');
+        }
+        query.linkedMcrEventIds = new mongoose.Types.ObjectId(args.mcrEventId);
+      }
+      return await MCRExchangeGroup.find(query).sort({ createdAt: -1 });
+    }),
+
+    mcrExchangeGroup: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_VIEW);
+      if (!mongoose.Types.ObjectId.isValid(args.id)) {
+        throw new UserInputError('Invalid exchange group ID');
+      }
+      return await MCRExchangeGroup.findById(args.id);
+    }),
+
+    // Combined tracking endpoint for the dedicated "ציוד הנדסה שיתופי" MCR
+    // tab. Pulls every active allocation of equipment flagged as
+    // `isSharedEngineeringEquipment` across two sources:
+    //   1. Broadcast event assignments (joined back to their MCR shadow
+    //      event via `broadcastEventId` so MCR sees the linked shadow).
+    //   2. Internal staff assignments (no event target).
+    mcrSharedEngineeringEquipment: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_VIEW);
+
+      const requestedStatus = typeof args.status === 'string' ? args.status : 'active';
+      const includeAll = requestedStatus === 'all';
+
+      // Step 1: find all equipment that is flagged. Selecting just the
+      // fields we need keeps this responsive even with 4k+ items.
+      const flaggedEquipment = await Equipment.find({ isSharedEngineeringEquipment: true })
+        .select({ _id: 1, name: 1, barcode: 1, category: 1 })
+        .lean()
+        .exec();
+
+      if (flaggedEquipment.length === 0) {
+        return { eventAssignments: [], staffAssignments: [] };
+      }
+
+      const equipmentIds = flaggedEquipment.map((e) => e._id);
+      const equipmentById = new Map<string, any>();
+      for (const e of flaggedEquipment) {
+        equipmentById.set(e._id.toString(), e);
+      }
+
+      // Step 2: pull both assignment types in parallel.
+      const eventAssignmentFilter: any = { equipmentId: { $in: equipmentIds } };
+      const staffAssignmentFilter: any = { equipmentId: { $in: equipmentIds } };
+      if (!includeAll) {
+        eventAssignmentFilter.status = requestedStatus;
+        staffAssignmentFilter.status = requestedStatus;
+      }
+
+      const [eventAssignments, staffAssignments] = await Promise.all([
+        EquipmentAssignment.find(eventAssignmentFilter)
+          .sort({ assignedAt: -1 })
+          .limit(1000)
+          .lean()
+          .exec(),
+        InternalEquipmentAssignment.find(staffAssignmentFilter)
+          .sort({ assignedAt: -1 })
+          .limit(1000)
+          .lean()
+          .exec(),
+      ]);
+
+      // Step 3: hydrate the linked broadcast events and MCR shadow events
+      // referenced by the event assignments.
+      const broadcastIds = Array.from(
+        new Set(
+          eventAssignments
+            .map((a: any) => a.eventId?.toString?.())
+            .filter(Boolean),
+        ),
+      ).map((id) => new mongoose.Types.ObjectId(id));
+
+      const [broadcastEvents, shadowEvents] = await Promise.all([
+        broadcastIds.length > 0
+          ? BroadcastEvent.find({ _id: { $in: broadcastIds } })
+              .select({ _id: 1, title: 1, hebrewTitle: 1, startTime: 1, endTime: 1 })
+              .lean()
+              .exec()
+          : Promise.resolve([] as any[]),
+        broadcastIds.length > 0
+          ? MCREvent.find({ broadcastEventId: { $in: broadcastIds } })
+              .select({ _id: 1, title: 1, start: 1, end: 1, broadcastEventId: 1 })
+              .lean()
+              .exec()
+          : Promise.resolve([] as any[]),
+      ]);
+
+      const broadcastById = new Map<string, any>();
+      for (const b of broadcastEvents) {
+        broadcastById.set(b._id.toString(), b);
+      }
+      const shadowByBroadcast = new Map<string, any>();
+      for (const s of shadowEvents) {
+        if (s.broadcastEventId) {
+          shadowByBroadcast.set(s.broadcastEventId.toString(), s);
+        }
+      }
+
+      const mappedEventAssignments = eventAssignments.map((a: any) => {
+        const equipment = equipmentById.get(a.equipmentId?.toString?.() || '');
+        const broadcastId = a.eventId?.toString?.() || '';
+        const broadcast = broadcastById.get(broadcastId);
+        const shadow = shadowByBroadcast.get(broadcastId);
+        return {
+          assignmentId: a._id.toString(),
+          equipmentId: equipment?._id?.toString?.() || a.equipmentId?.toString?.() || '',
+          equipmentName: equipment?.name || a.eventName || 'ציוד',
+          barcode: equipment?.barcode || null,
+          category: equipment?.category || null,
+          quantity: a.quantityAssigned ?? 1,
+          status: a.status || 'active',
+          assignedAt: a.assignedAt ? new Date(a.assignedAt) : null,
+          returnedAt: a.returnedAt ? new Date(a.returnedAt) : null,
+          assignedByName: a.assignedByName || null,
+          notes: a.notes || null,
+          broadcastEventId: broadcastId,
+          broadcastEventTitle:
+            broadcast?.hebrewTitle || broadcast?.title || a.eventName || null,
+          broadcastEventStart: broadcast?.startTime
+            ? new Date(broadcast.startTime)
+            : null,
+          broadcastEventEnd: broadcast?.endTime
+            ? new Date(broadcast.endTime)
+            : null,
+          mcrEventId: shadow?._id?.toString?.() || null,
+          mcrEventTitle: shadow?.title || null,
+          mcrEventStart: shadow?.start ? new Date(shadow.start) : null,
+          mcrEventEnd: shadow?.end ? new Date(shadow.end) : null,
+        };
+      });
+
+      const mappedStaffAssignments = staffAssignments.map((a: any) => {
+        const equipment = equipmentById.get(a.equipmentId?.toString?.() || '');
+        return {
+          assignmentId: a._id.toString(),
+          equipmentId: equipment?._id?.toString?.() || a.equipmentId?.toString?.() || '',
+          equipmentName: equipment?.name || 'ציוד',
+          barcode: equipment?.barcode || null,
+          category: equipment?.category || null,
+          quantity: a.quantityAssigned ?? 1,
+          status: a.status || 'active',
+          assignedToType: a.assignedToType || 'internal',
+          assignedToUserId: a.assignedToUserId ? a.assignedToUserId.toString() : null,
+          assignedToName: a.assignedToName || '',
+          assignedToPhone: a.assignedToPhone || null,
+          assignedAt: a.assignedAt ? new Date(a.assignedAt) : null,
+          assignedByName: a.assignedByName || null,
+          returnedAt: a.returnedAt ? new Date(a.returnedAt) : null,
+          notes: a.notes || null,
+        };
+      });
+
+      const activeEventEquipmentIds = new Set(
+        eventAssignments
+          .filter((a: any) => (a.status || 'active') === 'active')
+          .map((a: any) => a.equipmentId?.toString?.())
+          .filter(Boolean),
+      );
+      const activeStaffEquipmentIds = new Set(
+        staffAssignments
+          .filter((a: any) => (a.status || 'active') === 'active')
+          .map((a: any) => a.equipmentId?.toString?.())
+          .filter(Boolean),
+      );
+
+      const availableEquipment = flaggedEquipment
+        .filter((e: any) => {
+          const id = e._id.toString();
+          return !activeEventEquipmentIds.has(id) && !activeStaffEquipmentIds.has(id);
+        })
+        .map((e: any) => ({
+          equipmentId: e._id.toString(),
+          equipmentName: e.name || 'ציוד',
+          barcode: e.barcode || null,
+          category: e.category || null,
+          quantity: 1,
+          status: 'warehouse',
+        }));
+
+      return {
+        eventAssignments: mappedEventAssignments,
+        staffAssignments: mappedStaffAssignments,
+        availableEquipment,
+      };
+    }),
   },
 
   Mutation: {
     // MCR Events
     createMCREvent: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_MANAGE);
       const mcrEvent = new MCREvent({
-        ...args.input,
+        ...mapEventInput(args.input),
         createdBy: context.user.userId
       });
       
       const savedEvent = await mcrEvent.save();
       
       pubsub.publish(MCR_EVENT_CREATED, { mcrEventCreated: savedEvent });
+      logMcrAction({
+        userId: context.user.userId,
+        userName: context.user.displayName,
+        action: 'create',
+        resourceType: 'MCREvent',
+        resourceId: savedEvent.id,
+      }).catch(() => undefined);
       
       return savedEvent;
     }),
 
     updateMCREvent: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_MANAGE);
+      if (!mongoose.Types.ObjectId.isValid(args.id)) {
+        throw new Error('Invalid MCR event ID');
+      }
       const mcrEvent = await MCREvent.findById(args.id);
       
       if (!mcrEvent) {
@@ -234,18 +614,33 @@ const resolvers = {
       }
       
       if (mcrEvent.createdBy.toString() !== context.user!.userId && !context.user!.has(Permission.MCR_ADMIN)) {
-        throw new AuthenticationError('Not authorized to update this event');
+        // Allow MCR_MANAGE users to update any event — explicit override for
+        // operational use where the original creator may not be on shift.
+        if (!context.user!.has(Permission.MCR_MANAGE)) {
+          throw new AuthenticationError('Not authorized to update this event');
+        }
       }
       
-      Object.assign(mcrEvent, args.input);
+      Object.assign(mcrEvent, mapEventInput(args.input));
       const savedEvent = await mcrEvent.save();
       
       pubsub.publish(MCR_EVENT_UPDATED, { mcrEventUpdated: savedEvent });
+      logMcrAction({
+        userId: context.user.userId,
+        userName: context.user.displayName,
+        action: 'update',
+        resourceType: 'MCREvent',
+        resourceId: savedEvent.id,
+      }).catch(() => undefined);
       
       return savedEvent;
     }),
 
     deleteMCREvent: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_MANAGE);
+      if (!mongoose.Types.ObjectId.isValid(args.id)) {
+        throw new Error('Invalid MCR event ID');
+      }
       const mcrEvent = await MCREvent.findById(args.id);
       
       if (!mcrEvent) {
@@ -265,7 +660,7 @@ const resolvers = {
 
     // Bulletin Posts
     createMCRBulletinPost: withAuth(async (_: any, args: any, context: any) => {
-      // Get MCR department ID
+      requirePermission(context, Permission.MCR_MANAGE);
       const db = await context.mongoDb;
       const departmentsCollection = db.collection('departments');
       const mcrDepartment = await departmentsCollection.findOne({ name: 'MCR' });
@@ -273,7 +668,6 @@ const resolvers = {
         throw new UserInputError('MCR department not found');
       }
       
-      // If untilNewPost is true, deactivate other "until new post" posts
       if (args.input.untilNewPost) {
         await BulletinPost.deactivateUntilNewPosts(mcrDepartment._id);
       }
@@ -292,6 +686,10 @@ const resolvers = {
     }),
 
     updateMCRBulletinPost: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_MANAGE);
+      if (!mongoose.Types.ObjectId.isValid(args.id)) {
+        throw new Error('Invalid bulletin post ID');
+      }
       const bulletinPost = await BulletinPost.findById(args.id);
       
       if (!bulletinPost) {
@@ -311,6 +709,10 @@ const resolvers = {
     }),
 
     deleteMCRBulletinPost: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_MANAGE);
+      if (!mongoose.Types.ObjectId.isValid(args.id)) {
+        throw new Error('Invalid bulletin post ID');
+      }
       const bulletinPost = await BulletinPost.findById(args.id);
       
       if (!bulletinPost) {
@@ -330,6 +732,7 @@ const resolvers = {
 
     // Activity Rows
     createActivityRow: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_MANAGE);
       const activityRow = new ActivityRow({
         ...args.input,
         createdBy: context.user.userId
@@ -343,6 +746,10 @@ const resolvers = {
     }),
 
     updateActivityRow: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_MANAGE);
+      if (!mongoose.Types.ObjectId.isValid(args.id)) {
+        throw new Error('Invalid activity row ID');
+      }
       const activityRow = await ActivityRow.findById(args.id);
       
       if (!activityRow) {
@@ -359,7 +766,83 @@ const resolvers = {
       return savedRow;
     }),
 
+    /**
+     * Batch save for the operational schedule. Accepts a list of rows for a
+     * given date — existing rows (by id) are updated, brand-new rows are
+     * inserted. Returns the full saved set for the day so the client can
+     * replace its local state in one go.
+     */
+    saveActivityRows: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_MANAGE);
+      const startOfDay = new Date(args.date);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(args.date);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const rows = Array.isArray(args.rows) ? args.rows : [];
+      const savedIds: string[] = [];
+
+      for (const row of rows) {
+        const payload: any = {
+          date: startOfDay,
+          activityName: row.activityName,
+          time: row.time,
+          endTime: row.endTime,
+          source: row.source,
+          equipment: row.equipment,
+          backup: row.backup,
+          routing: row.routing,
+          channel: row.channel,
+          broadcastType: row.broadcastType,
+          notes: row.notes,
+          status: row.status,
+          isHidden: row.isHidden ?? false,
+          isManual: row.isManual ?? !row.broadcastEventId,
+          broadcastEventId: row.broadcastEventId,
+          updatedBy: context.user.userId,
+        };
+
+        if (row.id && mongoose.Types.ObjectId.isValid(row.id)) {
+          const existing = await ActivityRow.findById(row.id);
+          if (existing) {
+            Object.assign(existing, payload);
+            const s = await existing.save();
+            savedIds.push(s.id);
+            continue;
+          }
+        }
+
+        const created = await ActivityRow.create({
+          ...payload,
+          createdBy: context.user.userId,
+        });
+        savedIds.push(created.id);
+      }
+
+      const finalRows = await ActivityRow.find({
+        date: { $gte: startOfDay, $lte: endOfDay },
+      }).sort({ time: 1 });
+
+      // Best-effort publish. Subscriptions are still global so consumers will
+      // dedupe on the client.
+      finalRows.forEach((r) => pubsub.publish(ACTIVITY_ROW_UPDATED, { activityRowUpdated: r }));
+
+      logMcrAction({
+        userId: context.user.userId,
+        userName: context.user.displayName,
+        action: 'bulk-save',
+        resourceType: 'ActivityRow',
+        metadata: { date: startOfDay.toISOString(), count: savedIds.length },
+      }).catch(() => undefined);
+
+      return finalRows;
+    }),
+
     deleteActivityRow: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_ADMIN);
+      if (!mongoose.Types.ObjectId.isValid(args.id)) {
+        throw new Error('Invalid activity row ID');
+      }
       const activityRow = await ActivityRow.findById(args.id);
       
       if (!activityRow) {
@@ -374,6 +857,10 @@ const resolvers = {
     }),
 
     hideActivityRow: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_MANAGE);
+      if (!mongoose.Types.ObjectId.isValid(args.id)) {
+        throw new Error('Invalid activity row ID');
+      }
       const activityRow = await ActivityRow.findById(args.id);
       
       if (!activityRow) {
@@ -389,53 +876,374 @@ const resolvers = {
       
       return savedRow;
     }),
+
+    // ===== Daily Checks =====
+    createMCRDailyCheckTemplate: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_ADMIN);
+      const created = await MCRDailyCheckTemplate.create({
+        name: args.input.name,
+        description: args.input.description,
+        order: args.input.order ?? (await MCRDailyCheckTemplate.countDocuments()) + 1,
+        isActive: true,
+        isDefault: false,
+        createdBy: context.user.userId,
+      });
+      pubsub.publish(MCR_DAILY_CHECK_TEMPLATE_CHANGED, { mcrDailyCheckTemplateChanged: created });
+      return created;
+    }),
+
+    updateMCRDailyCheckTemplate: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_ADMIN);
+      if (!mongoose.Types.ObjectId.isValid(args.id)) {
+        throw new UserInputError('Invalid template ID');
+      }
+      const tmpl = await MCRDailyCheckTemplate.findById(args.id);
+      if (!tmpl) throw new UserInputError('Daily check template not found');
+      Object.assign(tmpl, args.input);
+      const saved = await tmpl.save();
+      pubsub.publish(MCR_DAILY_CHECK_TEMPLATE_CHANGED, { mcrDailyCheckTemplateChanged: saved });
+      return saved;
+    }),
+
+    deactivateMCRDailyCheckTemplate: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_ADMIN);
+      if (!mongoose.Types.ObjectId.isValid(args.id)) {
+        throw new UserInputError('Invalid template ID');
+      }
+      const tmpl = await MCRDailyCheckTemplate.findById(args.id);
+      if (!tmpl) throw new UserInputError('Daily check template not found');
+      tmpl.isActive = false;
+      const saved = await tmpl.save();
+      pubsub.publish(MCR_DAILY_CHECK_TEMPLATE_CHANGED, { mcrDailyCheckTemplateChanged: saved });
+      return saved;
+    }),
+
+    setMCRDailyCheckCompleted: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_MANAGE);
+      if (!mongoose.Types.ObjectId.isValid(args.templateId)) {
+        throw new UserInputError('Invalid template ID');
+      }
+      const startOfDay = new Date(args.date);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(args.date);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      let entry = await MCRDailyCheckEntry.findOne({
+        date: { $gte: startOfDay, $lte: endOfDay },
+        templateId: args.templateId,
+      });
+
+      if (!entry) {
+        entry = new MCRDailyCheckEntry({
+          date: startOfDay,
+          templateId: args.templateId,
+        });
+      }
+
+      entry.isCompleted = !!args.completed;
+      if (entry.isCompleted) {
+        entry.completedBy = new mongoose.Types.ObjectId(context.user.userId) as any;
+        entry.completedAt = new Date();
+      } else {
+        entry.completedBy = undefined as any;
+        entry.completedAt = undefined as any;
+      }
+      if (typeof args.notes === 'string') entry.notes = args.notes;
+
+      const saved = await entry.save();
+      (saved as any).__template = await MCRDailyCheckTemplate.findById(saved.templateId);
+      pubsub.publish(MCR_DAILY_CHECK_ENTRY_UPDATED, { mcrDailyCheckEntryUpdated: saved });
+      return saved;
+    }),
+
+    // ===== External Exchange =====
+    createMCRExchangeGroup: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_MANAGE);
+      const linkedIds: mongoose.Types.ObjectId[] = [];
+      if (args.input.linkedMcrEventId) {
+        if (!mongoose.Types.ObjectId.isValid(args.input.linkedMcrEventId)) {
+          throw new UserInputError('Invalid MCR event ID');
+        }
+        linkedIds.push(new mongoose.Types.ObjectId(args.input.linkedMcrEventId));
+      }
+      const group = await MCRExchangeGroup.create({
+        name: args.input.name,
+        description: args.input.description,
+        status: 'DRAFT',
+        linkedMcrEventIds: linkedIds,
+        createdBy: context.user.userId,
+      });
+
+      if (args.input.linkedMcrEventId) {
+        const updatedEvent = await MCREvent.findOneAndUpdate(
+          { _id: args.input.linkedMcrEventId },
+          { $addToSet: { exchangeGroupIds: group.id } },
+          { new: true },
+        );
+        if (updatedEvent) {
+          pubsub.publish(MCR_EVENT_UPDATED, { mcrEventUpdated: updatedEvent });
+        }
+      }
+
+      pubsub.publish(MCR_EXCHANGE_GROUP_UPDATED, { mcrExchangeGroupUpdated: group });
+      return group;
+    }),
+
+    updateMCRExchangeGroup: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_MANAGE);
+      if (!mongoose.Types.ObjectId.isValid(args.id)) {
+        throw new UserInputError('Invalid exchange group ID');
+      }
+      const group = await MCRExchangeGroup.findById(args.id);
+      if (!group) throw new UserInputError('Exchange group not found');
+      Object.assign(group, args.input);
+      const saved = await group.save();
+      pubsub.publish(MCR_EXCHANGE_GROUP_UPDATED, { mcrExchangeGroupUpdated: saved });
+      return saved;
+    }),
+
+    closeMCRExchangeGroup: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_MANAGE);
+      if (!mongoose.Types.ObjectId.isValid(args.id)) {
+        throw new UserInputError('Invalid exchange group ID');
+      }
+      const group = await MCRExchangeGroup.findById(args.id);
+      if (!group) throw new UserInputError('Exchange group not found');
+      group.status = 'CLOSED';
+      const saved = await group.save();
+      pubsub.publish(MCR_EXCHANGE_GROUP_UPDATED, { mcrExchangeGroupUpdated: saved });
+      return saved;
+    }),
+
+    linkMCRExchangeGroupToEvent: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_MANAGE);
+      if (
+        !mongoose.Types.ObjectId.isValid(args.groupId) ||
+        !mongoose.Types.ObjectId.isValid(args.mcrEventId)
+      ) {
+        throw new UserInputError('Invalid IDs');
+      }
+      const group = await MCRExchangeGroup.findById(args.groupId);
+      if (!group) throw new UserInputError('Exchange group not found');
+      const eventId = new mongoose.Types.ObjectId(args.mcrEventId);
+      if (!group.linkedMcrEventIds.find((id) => id.toString() === eventId.toString())) {
+        group.linkedMcrEventIds.push(eventId);
+      }
+      const saved = await group.save();
+
+      const updatedEvent = await MCREvent.findOneAndUpdate(
+        { _id: eventId },
+        { $addToSet: { exchangeGroupIds: saved.id } },
+        { new: true },
+      );
+      if (updatedEvent) {
+        pubsub.publish(MCR_EVENT_UPDATED, { mcrEventUpdated: updatedEvent });
+      }
+      pubsub.publish(MCR_EXCHANGE_GROUP_UPDATED, { mcrExchangeGroupUpdated: saved });
+
+      return saved;
+    }),
+
+    unlinkMCRExchangeGroupFromEvent: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_MANAGE);
+      if (
+        !mongoose.Types.ObjectId.isValid(args.groupId) ||
+        !mongoose.Types.ObjectId.isValid(args.mcrEventId)
+      ) {
+        throw new UserInputError('Invalid IDs');
+      }
+      const group = await MCRExchangeGroup.findById(args.groupId);
+      if (!group) throw new UserInputError('Exchange group not found');
+      group.linkedMcrEventIds = group.linkedMcrEventIds.filter(
+        (id) => id.toString() !== args.mcrEventId,
+      );
+      const saved = await group.save();
+
+      const updatedEvent = await MCREvent.findOneAndUpdate(
+        { _id: args.mcrEventId },
+        { $pull: { exchangeGroupIds: saved.id } },
+        { new: true },
+      );
+      if (updatedEvent) {
+        pubsub.publish(MCR_EVENT_UPDATED, { mcrEventUpdated: updatedEvent });
+      }
+      pubsub.publish(MCR_EXCHANGE_GROUP_UPDATED, { mcrExchangeGroupUpdated: saved });
+
+      return saved;
+    }),
+
+    acceptMCRExchangeUpload: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_MANAGE);
+      if (!mongoose.Types.ObjectId.isValid(args.groupId)) {
+        throw new UserInputError('Invalid exchange group ID');
+      }
+      const group = await MCRExchangeGroup.findById(args.groupId);
+      if (!group) throw new UserInputError('Exchange group not found');
+      const upload = group.pendingUploads.find(
+        (u: any) => u._id?.toString() === args.uploadId,
+      );
+      if (!upload) throw new UserInputError('Upload not found');
+      upload.isAccepted = true;
+      upload.acceptedAt = new Date();
+      upload.acceptedBy = new mongoose.Types.ObjectId(context.user.userId) as any;
+      const saved = await group.save();
+      pubsub.publish(MCR_EXCHANGE_GROUP_UPDATED, { mcrExchangeGroupUpdated: saved });
+      return saved;
+    }),
+
+    addMCRExchangeUpload: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_MANAGE);
+      if (!mongoose.Types.ObjectId.isValid(args.groupId)) {
+        throw new UserInputError('Invalid exchange group ID');
+      }
+      const group = await MCRExchangeGroup.findById(args.groupId);
+      if (!group) throw new UserInputError('Exchange group not found');
+      group.pendingUploads.push({
+        fileName: args.fileName,
+        uploadedByName: args.uploadedByName || context.user.displayName,
+        synopsisTitle: args.synopsisTitle,
+        isAccepted: false,
+      } as any);
+      group.synopsisCount = (group.synopsisCount || 0) + 1;
+      const saved = await group.save();
+      pubsub.publish(MCR_EXCHANGE_GROUP_UPDATED, { mcrExchangeGroupUpdated: saved });
+      return saved;
+    }),
+
+    // ===== Document parsing =====
+    parseMCRDocument: withAuth(async (_: any, args: any, context: any) => {
+      requirePermission(context, Permission.MCR_VIEW);
+      const input = args.input;
+      const text = typeof input?.content === 'string' ? input.content : '';
+      const lookFor: ('FEED' | 'PLATFORM')[] =
+        Array.isArray(input?.lookFor) && input.lookFor.length > 0
+          ? input.lookFor
+          : ['FEED', 'PLATFORM'];
+      const { feeds, platforms } = parseMcrDocument(text, lookFor);
+      return {
+        feeds,
+        platforms,
+        itemCount: feeds.length + platforms.length,
+      };
+    }),
   },
 
   Subscription: {
-    // MCR Events
     mcrEventCreated: {
-      subscribe: withAuth(() => pubsub.asyncIterator([MCR_EVENT_CREATED]))
+      subscribe: (_: any, __: any, context: any) => {
+        requireAuth(context);
+        requirePermission(context, Permission.MCR_VIEW);
+        return pubsub.asyncIterator([MCR_EVENT_CREATED]);
+      }
     },
     mcrEventUpdated: {
-      subscribe: withAuth(() => pubsub.asyncIterator([MCR_EVENT_UPDATED]))
+      subscribe: (_: any, __: any, context: any) => {
+        requireAuth(context);
+        requirePermission(context, Permission.MCR_VIEW);
+        return pubsub.asyncIterator([MCR_EVENT_UPDATED]);
+      }
     },
     mcrEventDeleted: {
-      subscribe: withAuth(() => pubsub.asyncIterator([MCR_EVENT_DELETED]))
+      subscribe: (_: any, __: any, context: any) => {
+        requireAuth(context);
+        requirePermission(context, Permission.MCR_VIEW);
+        return pubsub.asyncIterator([MCR_EVENT_DELETED]);
+      }
     },
 
-    // Bulletin Posts
     mcrBulletinPostCreated: {
-      subscribe: withAuth(() => pubsub.asyncIterator([BULLETIN_POST_CREATED]))
+      subscribe: (_: any, __: any, context: any) => {
+        requireAuth(context);
+        requirePermission(context, Permission.MCR_VIEW);
+        return pubsub.asyncIterator([BULLETIN_POST_CREATED]);
+      }
     },
     mcrBulletinPostUpdated: {
-      subscribe: withAuth(() => pubsub.asyncIterator([BULLETIN_POST_UPDATED]))
+      subscribe: (_: any, __: any, context: any) => {
+        requireAuth(context);
+        requirePermission(context, Permission.MCR_VIEW);
+        return pubsub.asyncIterator([BULLETIN_POST_UPDATED]);
+      }
     },
     mcrBulletinPostDeleted: {
-      subscribe: withAuth(() => pubsub.asyncIterator([BULLETIN_POST_DELETED]))
+      subscribe: (_: any, __: any, context: any) => {
+        requireAuth(context);
+        requirePermission(context, Permission.MCR_VIEW);
+        return pubsub.asyncIterator([BULLETIN_POST_DELETED]);
+      }
     },
 
-    // Activity Rows
     activityRowCreated: {
-      subscribe: withAuth(() => pubsub.asyncIterator([ACTIVITY_ROW_CREATED]))
+      subscribe: (_: any, __: any, context: any) => {
+        requireAuth(context);
+        requirePermission(context, Permission.MCR_VIEW);
+        return pubsub.asyncIterator([ACTIVITY_ROW_CREATED]);
+      }
     },
     activityRowUpdated: {
-      subscribe: withAuth(() => pubsub.asyncIterator([ACTIVITY_ROW_UPDATED]))
+      subscribe: (_: any, __: any, context: any) => {
+        requireAuth(context);
+        requirePermission(context, Permission.MCR_VIEW);
+        return pubsub.asyncIterator([ACTIVITY_ROW_UPDATED]);
+      }
     },
     activityRowDeleted: {
-      subscribe: withAuth(() => pubsub.asyncIterator([ACTIVITY_ROW_DELETED]))
+      subscribe: (_: any, __: any, context: any) => {
+        requireAuth(context);
+        requirePermission(context, Permission.MCR_VIEW);
+        return pubsub.asyncIterator([ACTIVITY_ROW_DELETED]);
+      }
+    },
+
+    mcrDailyCheckEntryUpdated: {
+      subscribe: (_: any, __: any, context: any) => {
+        requireAuth(context);
+        requirePermission(context, Permission.MCR_VIEW);
+        return pubsub.asyncIterator([MCR_DAILY_CHECK_ENTRY_UPDATED]);
+      },
+    },
+    mcrDailyCheckTemplateChanged: {
+      subscribe: (_: any, __: any, context: any) => {
+        requireAuth(context);
+        requirePermission(context, Permission.MCR_VIEW);
+        return pubsub.asyncIterator([MCR_DAILY_CHECK_TEMPLATE_CHANGED]);
+      },
+    },
+    mcrExchangeGroupUpdated: {
+      subscribe: (_: any, __: any, context: any) => {
+        requireAuth(context);
+        requirePermission(context, Permission.MCR_VIEW);
+        return pubsub.asyncIterator([MCR_EXCHANGE_GROUP_UPDATED]);
+      },
     },
   },
 
   // Field resolvers
   MCREvent: {
     createdBy: async (parent: IMCREvent, _: any, context: any) => {
-      if (parent.createdBy && typeof parent.createdBy === 'object') {
+      if (parent.createdBy && typeof parent.createdBy === 'object' && (parent.createdBy as any).email) {
         return parent.createdBy;
       }
       const db = await context.mongoDb;
       const usersCollection = db.collection('users');
       return await usersCollection.findOne({ _id: parent.createdBy });
-    }
+    },
+    feeds: (parent: IMCREvent) =>
+      (parent.feeds || []).map((f: any) => ({
+        id: f._id ? f._id.toString() : undefined,
+        ...(f.toObject ? f.toObject() : f),
+      })),
+    contacts: (parent: IMCREvent) =>
+      (parent.contacts || []).map((c: any) => ({
+        id: c._id ? c._id.toString() : undefined,
+        ...(c.toObject ? c.toObject() : c),
+      })),
+    outputPlatforms: (parent: IMCREvent) =>
+      (parent.outputPlatforms || []).map((p: any) => ({
+        id: p._id ? p._id.toString() : undefined,
+        ...(p.toObject ? p.toObject() : p),
+      })),
+    preparationStatus: (parent: IMCREvent) => parent.preparationStatus || 'NOT_STARTED',
   },
 
   MCRBulletinPost: {
@@ -506,7 +1314,47 @@ const resolvers = {
         return [];
       }
     }
-  }
+  },
+
+  MCRDailyCheckEntry: {
+    template: async (parent: any, _: any, context: any) => {
+      if (parent.__template) return parent.__template;
+      if (parent.templateId && typeof parent.templateId === 'object' && (parent.templateId as any).name) {
+        return parent.templateId;
+      }
+      return await MCRDailyCheckTemplate.findById(parent.templateId);
+    },
+    completedBy: async (parent: IMCRDailyCheckEntry, _: any, context: any) => {
+      if (!parent.completedBy) return null;
+      if (parent.completedBy && typeof parent.completedBy === 'object' && (parent.completedBy as any).email) {
+        return parent.completedBy;
+      }
+      const db = await context.mongoDb;
+      const usersCollection = db.collection('users');
+      return await usersCollection.findOne({ _id: parent.completedBy });
+    },
+  },
+
+  MCRExchangeGroup: {
+    createdBy: async (parent: IMCRExchangeGroup, _: any, context: any) => {
+      if (!parent.createdBy) return null;
+      if (parent.createdBy && typeof parent.createdBy === 'object' && (parent.createdBy as any).email) {
+        return parent.createdBy;
+      }
+      const db = await context.mongoDb;
+      const usersCollection = db.collection('users');
+      return await usersCollection.findOne({ _id: parent.createdBy });
+    },
+    linkedMcrEventIds: (parent: IMCRExchangeGroup) =>
+      (parent.linkedMcrEventIds || []).map((id: any) => id.toString()),
+    pendingUploads: (parent: IMCRExchangeGroup) =>
+      (parent.pendingUploads || []).map((u: any) => ({
+        id: u._id ? u._id.toString() : undefined,
+        ...(u.toObject ? u.toObject() : u),
+      })),
+  },
+
+  MCREventExchangeGroup: {},
 };
 
 export const mcrResolvers = resolvers;

@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { Modal, Form, Input, InputNumber, Button, Space, App, Alert, Tag, Card } from 'antd';
 import { ScanOutlined, InboxOutlined } from '@ant-design/icons';
-import { useMutation, useQuery } from '@apollo/client';
+import { useLazyQuery, useMutation } from '@apollo/client';
 import { GET_WAREHOUSE_EQUIPMENT, GET_INTERNAL_EQUIPMENT_ASSIGNMENTS } from '../../../graphql/queries';
 import { ASSIGN_EQUIPMENT_TO_WORKER } from '../../../graphql/mutations';
 import WorkerPicker, { WorkerPickerType } from './WorkerPicker';
@@ -18,6 +18,18 @@ interface Equipment {
   isQuantityBased: boolean;
 }
 
+const createScannedEquipmentFallback = (barcode: string): Equipment => ({
+  id: '',
+  name: barcode,
+  category: '',
+  barcode,
+  quantityAvailable: 999,
+  quantityTotal: 999,
+  quantityAssigned: 0,
+  isDisabled: false,
+  isQuantityBased: false,
+});
+
 interface Props {
   visible: boolean;
   onClose: () => void;
@@ -32,20 +44,9 @@ const InternalAssignmentDispatchModal: React.FC<Props> = ({ visible, onClose, on
 
   const workerType = (Form.useWatch('workerType', form) as WorkerPickerType) || 'internal';
 
-  // Equipment cache — used to resolve scanned/typed barcodes locally so the
-  // operator gets instant feedback without a server round-trip per scan.
-  const { data: equipmentData } = useQuery(GET_WAREHOUSE_EQUIPMENT, {
-    skip: !visible,
-    fetchPolicy: 'cache-and-network',
+  const [lookupEquipment, { loading: lookingUpEquipment }] = useLazyQuery(GET_WAREHOUSE_EQUIPMENT, {
+    fetchPolicy: 'network-only',
   });
-
-  const equipmentByBarcode = useMemo(() => {
-    const map = new Map<string, Equipment>();
-    (equipmentData?.warehouseEquipment || []).forEach((e: Equipment) => {
-      if (e.barcode) map.set(e.barcode.toLowerCase(), e);
-    });
-    return map;
-  }, [equipmentData]);
 
   const [dispatchMutation, { loading: submitting }] = useMutation(ASSIGN_EQUIPMENT_TO_WORKER, {
     refetchQueries: [
@@ -56,13 +57,29 @@ const InternalAssignmentDispatchModal: React.FC<Props> = ({ visible, onClose, on
     awaitRefetchQueries: true,
   });
 
-  const handleScan = () => {
+  const handleScan = async () => {
     const barcode = scanInput.trim();
     if (!barcode) return;
-    const eq = equipmentByBarcode.get(barcode.toLowerCase());
+
+    let eq: Equipment | undefined;
+    try {
+      const result = await lookupEquipment({
+        variables: {
+          filter: { searchText: barcode },
+          limit: 20,
+          offset: 0,
+        },
+      });
+      eq = (result.data?.warehouseEquipment || []).find(
+        (item: Equipment) => item.barcode?.toLowerCase() === barcode.toLowerCase(),
+      );
+    } catch {
+      // The mutation can resolve by barcode directly, so a lookup failure should
+      // not block dispatching valid equipment that exists outside this page cache.
+    }
+
     if (!eq) {
-      message.error(`ברקוד "${barcode}" לא נמצא במערכת`);
-      return;
+      eq = createScannedEquipmentFallback(barcode);
     }
     if (eq.isDisabled) {
       message.error(`הציוד "${eq.name}" מושבת ואינו זמין להקצאה`);
@@ -104,7 +121,8 @@ const InternalAssignmentDispatchModal: React.FC<Props> = ({ visible, onClose, on
       await dispatchMutation({
         variables: {
           input: {
-            equipmentId: selectedEquipment.id,
+            equipmentId: selectedEquipment.id || null,
+            barcode: selectedEquipment.barcode,
             quantityAssigned: quantity,
             assignedToUserId: values.workerType === 'internal' ? values.assignedToUserId : null,
             assignedToExternalName:
@@ -157,7 +175,7 @@ const InternalAssignmentDispatchModal: React.FC<Props> = ({ visible, onClose, on
           allowClear
           autoFocus
         />
-        <Button type="primary" onClick={handleScan}>
+        <Button type="primary" onClick={handleScan} loading={lookingUpEquipment}>
           סרוק
         </Button>
       </div>
@@ -168,13 +186,15 @@ const InternalAssignmentDispatchModal: React.FC<Props> = ({ visible, onClose, on
             <div>
               <strong className="text-base">{selectedEquipment.name}</strong>
               <div className="mt-1">
-                <Tag color="blue">{selectedEquipment.category}</Tag>
+                {selectedEquipment.category && <Tag color="blue">{selectedEquipment.category}</Tag>}
                 <code className="text-xs bg-gray-100 px-2 py-1 rounded ml-2">
                   {selectedEquipment.barcode}
                 </code>
               </div>
               <div className="text-xs text-gray-500 mt-1">
-                זמין: {selectedEquipment.quantityAvailable}/{selectedEquipment.quantityTotal}
+                {selectedEquipment.id
+                  ? `זמין: ${selectedEquipment.quantityAvailable}/${selectedEquipment.quantityTotal}`
+                  : 'האימות הסופי יתבצע מול מסד הנתונים בעת ההקצאה'}
               </div>
             </div>
             <Button size="small" onClick={() => setSelectedEquipment(null)}>
@@ -223,7 +243,7 @@ const InternalAssignmentDispatchModal: React.FC<Props> = ({ visible, onClose, on
         <Form.Item className="text-left">
           <Space>
             <Button onClick={handleClose}>ביטול</Button>
-            <Button type="primary" htmlType="submit" loading={submitting} disabled={!selectedEquipment}>
+            <Button type="primary" htmlType="submit" loading={submitting} disabled={!selectedEquipment || lookingUpEquipment}>
               הקצה ציוד
             </Button>
           </Space>

@@ -39,6 +39,8 @@ const roleTemplateSchema = new Schema<IRoleTemplate>(
 roleTemplateSchema.index({ isActive: 1 });
 roleTemplateSchema.index({ allowedForDeptAdmins: 1, isActive: 1 });
 roleTemplateSchema.index({ departmentScope: 1, isActive: 1 });
+roleTemplateSchema.index({ baseSystemRole: 1, isActive: 1 });
+roleTemplateSchema.index({ createdBy: 1 });
 
 export const RoleTemplate = mongoose.model<IRoleTemplate>(
   'RoleTemplate',

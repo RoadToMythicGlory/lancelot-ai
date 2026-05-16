@@ -174,13 +174,20 @@ const webhookDeliverySchema = new Schema<IWebhookDelivery>({
 apiKeySchema.index({ organizationId: 1 });
 apiKeySchema.index({ keyPrefix: 1 });
 apiKeySchema.index({ keyHash: 1 });
+apiKeySchema.index({ organizationId: 1, isActive: 1 });
+apiKeySchema.index({ expiresAt: 1 });
+apiKeySchema.index({ createdBy: 1 });
 
 webhookSchema.index({ organizationId: 1 });
 webhookSchema.index({ events: 1, isActive: 1 });
+webhookSchema.index({ organizationId: 1, isActive: 1 });
+webhookSchema.index({ consecutiveFailures: 1 });
 
 webhookDeliverySchema.index({ webhookId: 1, createdAt: -1 });
 webhookDeliverySchema.index({ organizationId: 1, createdAt: -1 });
 webhookDeliverySchema.index({ status: 1, nextRetryAt: 1 });
+webhookDeliverySchema.index({ webhookId: 1, status: 1 });
+webhookDeliverySchema.index({ event: 1, createdAt: -1 });
 // TTL - auto-delete deliveries after 30 days
 webhookDeliverySchema.index({ createdAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 });
 

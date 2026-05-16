@@ -6,6 +6,9 @@ import { Permission } from '../rbac';
 import mongoose from 'mongoose';
 import { ObjectId } from 'mongodb';
 
+// Hard cap on the assignment list query.
+const MAX_ASSIGNMENT_LIST = 1000;
+
 let mongooseConnected = false;
 
 async function ensureMongoConnection() {
@@ -105,6 +108,7 @@ export const internalAssignmentsResolvers = {
 
       const docs = await InternalEquipmentAssignment.find(query)
         .sort({ assignedAt: -1 })
+        .limit(MAX_ASSIGNMENT_LIST)
         .exec();
 
       return docs.map(mapAssignmentToGql);
@@ -208,6 +212,10 @@ export const internalAssignmentsResolvers = {
       const user = requirePermission(context, Permission.WAREHOUSE_MANAGE);
       await ensureMongoConnection();
 
+      if (!mongoose.Types.ObjectId.isValid(assignmentId)) {
+        throw new Error('Invalid assignment ID');
+      }
+
       const assignment = await InternalEquipmentAssignment.findById(assignmentId).exec();
       if (!assignment) {
         throw new Error('הקצאה פנימית לא נמצאה');
@@ -259,6 +267,10 @@ export const internalAssignmentsResolvers = {
     ) => {
       const user = requirePermission(context, Permission.WAREHOUSE_MANAGE);
       await ensureMongoConnection();
+
+      if (!input?.assignmentId || !mongoose.Types.ObjectId.isValid(input.assignmentId)) {
+        throw new Error('Invalid assignment ID');
+      }
 
       const source = await InternalEquipmentAssignment.findById(input.assignmentId).exec();
       if (!source) {
@@ -386,6 +398,7 @@ export const internalAssignmentsResolvers = {
           imageUrl: eq.imageUrl || null,
           storage: eq.storage || null,
           isQuantityBased: eq.isQuantityBased || false,
+          isSharedEngineeringEquipment: eq.isSharedEngineeringEquipment || false,
           isDisabled: eq.isDisabled || false,
           disabledAt: eq.disabledAt?.toISOString() || null,
           disabledReason: eq.disabledReason || null,

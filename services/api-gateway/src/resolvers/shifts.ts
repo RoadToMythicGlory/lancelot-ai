@@ -1,8 +1,10 @@
 import { ObjectId } from 'mongodb';
+import { withFilter } from 'graphql-subscriptions';
 import { connectMongoDB } from '../config/mongodb';
 import { expandMCRDepartments } from '../utils/departments';
 import { requireAuth, requirePermission } from '../middleware/auth';
 import { Permission } from '../rbac';
+import { validateVacationRequest } from '../services/shift.service';
 
 // Department roles configuration - defines number of roles per department
 const DEPARTMENT_ROLES: { [key: string]: number } = {
@@ -76,7 +78,7 @@ export const shiftsResolvers = {
     // All shifts (admin only)
     shifts: async (_: any, args: any, context: any) => {
       checkAuthentication(context);
-      
+
       const db = await getDB();
       const query: any = {
         date: {
@@ -84,16 +86,28 @@ export const shiftsResolvers = {
           $lte: new Date(args.endDate)
         }
       };
-      
+
       if (args.department) query.department = args.department;
       if (args.userId) query['assignedWorkers.userId'] = args.userId;
-      
-      return await db.collection('shifts').find(query).toArray();
+
+      const limit = Math.min(Math.max(Number(args.limit) || 500, 1), 1000);
+      const offset = Math.max(Number(args.offset) || 0, 0);
+
+      return await db.collection('shifts')
+        .find(query)
+        .sort({ date: 1 })
+        .skip(offset)
+        .limit(limit)
+        .toArray();
     },
 
     shift: async (_: any, args: any, context: any) => {
       checkAuthentication(context);
-      
+
+      if (!ObjectId.isValid(args.id)) {
+        throw new Error('Invalid shift ID');
+      }
+
       const db = await getDB();
       return await db.collection('shifts').findOne({ _id: new ObjectId(args.id) });
     },
@@ -250,20 +264,24 @@ export const shiftsResolvers = {
     shiftTemplates: async (_: any, args: any, context: any) => {
       checkAuthentication(context);
       checkAdminPermission(context);
-      
+
       const db = await getDB();
       const query: any = {};
-      
+
       if (args.department) query.department = args.department;
       if (args.active !== undefined) query.active = args.active;
-      
-      return await db.collection('shift_templates').find(query).toArray();
+
+      return await db.collection('shift_templates').find(query).limit(500).toArray();
     },
 
     shiftTemplate: async (_: any, args: any, context: any) => {
       checkAuthentication(context);
       checkAdminPermission(context);
-      
+
+      if (!ObjectId.isValid(args.id)) {
+        throw new Error('Invalid shift template ID');
+      }
+
       const db = await getDB();
       return await db.collection('shift_templates').findOne({ _id: new ObjectId(args.id) });
     },
@@ -272,10 +290,10 @@ export const shiftsResolvers = {
     shiftSwapRequests: async (_: any, args: any, context: any) => {
       checkAuthentication(context);
       checkAdminPermission(context);
-      
+
       const db = await getDB();
       const query: any = {};
-      
+
       if (args.status) query.status = args.status;
       if (args.userId) {
         query.$or = [
@@ -283,13 +301,14 @@ export const shiftsResolvers = {
           { targetUserId: args.userId }
         ];
       }
-      
-      return await db.collection('shift_swap_requests').find(query).toArray();
+
+      const limit = Math.min(Math.max(Number(args.limit) || 200, 1), 500);
+      return await db.collection('shift_swap_requests').find(query).sort({ createdAt: -1 }).limit(limit).toArray();
     },
 
     myShiftSwapRequests: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
-      
+      checkAuthentication(context);
+
       const db = await getDB();
       return await db.collection('shift_swap_requests')
         .find({
@@ -298,51 +317,54 @@ export const shiftsResolvers = {
             { targetUserId: context.user.userId }
           ]
         })
+        .sort({ createdAt: -1 })
+        .limit(200)
         .toArray();
     },
 
     incomingShiftSwapRequests: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
-      
+      checkAuthentication(context);
+
       const db = await getDB();
       const query: any = {
         targetUserId: context.user.userId
       };
-      
+
       if (args.status) {
         query.status = args.status;
       }
-      
+
       console.log('🔍 Incoming swap requests query:', query);
       console.log('🔍 Current user ID:', context.user.userId);
-      
-      const requests = await db.collection('shift_swap_requests').find(query).toArray();
+
+      const requests = await db.collection('shift_swap_requests').find(query).sort({ createdAt: -1 }).limit(200).toArray();
       console.log(`📊 Found ${requests.length} incoming swap requests`);
-      
+
       if (requests.length > 0) {
         console.log('📊 Sample request:', JSON.stringify(requests[0], null, 2));
       }
-      
+
       return requests;
     },
 
     // Vacation Requests queries
     vacationRequests: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
-      
+
       const db = await getDB();
       const query: any = {};
-      
+
       if (args.status) query.status = args.status;
       if (args.userId) query.userId = args.userId;
-      
+
       // Always ensure userId exists
       if (!query.userId) {
         query.userId = { $exists: true, $ne: null };
       }
-      
-      const requests = await db.collection('vacation_requests').find(query).toArray();
+
+      const limit = Math.min(Math.max(Number(args.limit) || 200, 1), 500);
+      const requests = await db.collection('vacation_requests').find(query).sort({ createdAt: -1 }).limit(limit).toArray();
       
       console.log(`📊 Vacation requests query:`, query);
       console.log(`📊 Found ${requests.length} vacation requests`);
@@ -363,36 +385,38 @@ export const shiftsResolvers = {
     },
 
     myVacationRequests: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
-      
+      checkAuthentication(context);
+
       const db = await getDB();
       return await db.collection('vacation_requests')
         .find({ userId: context.user.userId })
+        .sort({ createdAt: -1 })
+        .limit(200)
         .toArray();
     },
 
     // Availability Constraints queries
     availabilityConstraints: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
-      
+      checkAuthentication(context);
+
       const db = await getDB();
       const weekStart = getWeekStartDate(new Date(args.weekStartDate));
       const query: any = { weekStartDate: weekStart };
-      
+
       if (args.userId) {
         checkAdminPermission(context);
         query.userId = args.userId;
       }
-      
-      return await db.collection('availability_constraints').find(query).toArray();
+
+      return await db.collection('availability_constraints').find(query).limit(500).toArray();
     },
 
     myAvailabilityConstraints: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
-      
+      checkAuthentication(context);
+
       const db = await getDB();
       const weekStart = getWeekStartDate(new Date(args.weekStartDate));
-      
+
       const constraint = await db.collection('availability_constraints').findOne({
         userId: context.user.userId,
         weekStartDate: weekStart
@@ -409,36 +433,36 @@ export const shiftsResolvers = {
 
     // Employee Settings queries
     employeeSettings: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
-      
+      checkAuthentication(context);
+
       const db = await getDB();
-      
+
       // Users can view their own settings, admins can view anyone's
       if (args.userId !== context.user.userId) {
         checkAdminPermission(context);
       }
-      
+
       return await db.collection('employee_settings').findOne({ userId: args.userId });
     },
 
     myEmployeeSettings: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
-      
+      checkAuthentication(context);
+
       const db = await getDB();
       return await db.collection('employee_settings').findOne({ userId: context.user.userId });
     },
 
     allEmployeeSettings: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
-      
+
       const db = await getDB();
-      return await db.collection('employee_settings').find({}).toArray();
+      return await db.collection('employee_settings').find({}).limit(500).toArray();
     },
 
     // Statistics queries
     shiftAssignmentStats: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
       
       const db = await getDB();
@@ -559,9 +583,10 @@ export const shiftsResolvers = {
         weekOffset
       });
       
+      const limit = Math.min(Math.max(Number(args.limit) || 500, 1), 1000);
       const shifts = await db.collection('shifts').find({
         date: { $gte: weekStart, $lte: weekEnd }
-      }).toArray();
+      }).sort({ date: 1 }).limit(limit).toArray();
       
       console.log(`Found ${shifts.length} shifts in date range`);
       
@@ -719,7 +744,8 @@ export const shiftsResolvers = {
       checkAuthentication(context);
       
       const db = await getDB();
-      const templates = await db.collection('shiftTemplates').find({}).toArray();
+      const limit = Math.min(Math.max(Number(args.limit) || 200, 1), 500);
+      const templates = await db.collection('shiftTemplates').find({}).sort({ createdAt: -1 }).limit(limit).toArray();
       
       // Transform for compatibility with frontend
       return templates.map((template: any) => ({
@@ -739,7 +765,7 @@ export const shiftsResolvers = {
       const templates = await db.collection('shiftRoleTemplates').find({ 
         departmentId,
         isActive: true 
-      }).toArray();
+      }).sort({ createdAt: -1 }).limit(500).toArray();
       
       return templates.map((template: any) => ({
         ...template,
@@ -749,7 +775,11 @@ export const shiftsResolvers = {
 
     shiftRoleTemplate: async (_: any, { id }: { id: string }, context: any) => {
       checkAuthentication(context);
-      
+
+      if (!ObjectId.isValid(id)) {
+        throw new Error('Invalid shift role template ID');
+      }
+
       const db = await getDB();
       const template = await db.collection('shiftRoleTemplates').findOne({ 
         _id: new ObjectId(id) 
@@ -765,7 +795,8 @@ export const shiftsResolvers = {
 
     getSpecialRequests: async (_: any, args: any, context: any) => {
       checkAuthentication(context);
-      
+      checkAdminPermission(context);
+
       const db = await getDB();
       const currentUser = context.user;
       
@@ -792,7 +823,7 @@ export const shiftsResolvers = {
       }
       
       // Get vacation requests
-      const vacationRequests = await db.collection('vacation_requests').find(query).toArray();
+      const vacationRequests = await db.collection('vacation_requests').find(query).sort({ createdAt: -1 }).limit(500).toArray();
       console.log('Vacation requests found:', vacationRequests.length);
       console.log('Query used:', query);
       if (vacationRequests.length > 0) {
@@ -800,13 +831,13 @@ export const shiftsResolvers = {
       }
       
       // Get shift swap requests
-      const shiftSwapRequests = await db.collection('shift_swap_requests').find(query).toArray();
+      const shiftSwapRequests = await db.collection('shift_swap_requests').find(query).sort({ createdAt: -1 }).limit(500).toArray();
       console.log('Shift swap requests found:', shiftSwapRequests.length);
       
       // Get other special requests if they exist
       let specialRequests: any[] = [];
       try {
-        specialRequests = await db.collection('specialRequests').find(query).toArray();
+        specialRequests = await db.collection('specialRequests').find(query).sort({ createdAt: -1 }).limit(500).toArray();
       } catch (error) {
         // Collection might not exist
       }
@@ -905,7 +936,8 @@ export const shiftsResolvers = {
 
     getAllShifts: async (_: any, args: any, context: any) => {
       checkAuthentication(context);
-      
+      checkAdminPermission(context);
+
       const db = await getDB();
       const query: any = {};
       
@@ -916,7 +948,9 @@ export const shiftsResolvers = {
         };
       }
       
-      const shifts = await db.collection('shifts').find(query).toArray();
+      const limit = Math.min(Math.max(Number(args.limit) || 500, 1), 1000);
+      const offset = Math.max(Number(args.offset) || 0, 0);
+      const shifts = await db.collection('shifts').find(query).sort({ date: 1 }).skip(offset).limit(limit).toArray();
       
       // Populate user data for assigned workers
       const userIds = new Set<string>();
@@ -943,9 +977,12 @@ export const shiftsResolvers = {
 
     getVacationRequests: async (_: any, args: any, context: any) => {
       checkAuthentication(context);
-      
+      checkAdminPermission(context);
+
       const db = await getDB();
-      const requests = await db.collection('vacation_requests').find({}).toArray();
+      const limit = Math.min(Math.max(Number(args.limit) || 200, 1), 500);
+      const offset = Math.max(Number(args.offset) || 0, 0);
+      const requests = await db.collection('vacation_requests').find({}).sort({ createdAt: -1 }).skip(offset).limit(limit).toArray();
       
       // Populate user data
       const userIds = [...new Set(requests.map((r: any) => r.userId))];
@@ -967,7 +1004,9 @@ export const shiftsResolvers = {
       checkAuthentication(context);
       
       const db = await getDB();
-      const users = await db.collection('users').find({}).toArray();
+      const limit = Math.min(Math.max(Number(args.limit) || 200, 1), 500);
+      const offset = Math.max(Number(args.offset) || 0, 0);
+      const users = await db.collection('users').find({}).sort({ firstName: 1 }).skip(offset).limit(limit).toArray();
       
       return users.map((user: any) => ({
         ...user,
@@ -978,6 +1017,7 @@ export const shiftsResolvers = {
 
     // Department Shift Configuration
     departmentShiftConfig: async (_: any, { departmentId }: { departmentId: string }, context: any) => {
+      checkAuthentication(context);
       try {
         const db = await connectMongoDB();
         const config = await db.collection('department_shift_configs').findOne({ departmentId });
@@ -1112,6 +1152,7 @@ export const shiftsResolvers = {
     },
 
     myDepartmentShiftConfig: async (_: any, __: any, context: any) => {
+      checkAuthentication(context);
       console.log('🔍 Shifts resolver - checking auth context:', {
         hasUser: !!context.user,
         userId: context.user?.userId,
@@ -1119,9 +1160,11 @@ export const shiftsResolvers = {
         role: context.user?.role,
         systemRole: context.user?.systemRole
       });
-      
-      if (!context.user || !context.user.userId) throw new Error('Not authenticated');
-      
+
+      if (!ObjectId.isValid(context.user.userId)) {
+        throw new Error('Invalid user ID');
+      }
+
       // Since we're using MongoDB for users, let's get the user from there
       const db = await connectMongoDB();
       const user = await db.collection('users').findOne({ _id: new ObjectId(context.user.userId) });
@@ -1137,9 +1180,11 @@ export const shiftsResolvers = {
     },
 
     allDepartmentShiftConfigs: async (_: any, __: any, context: any) => {
+      checkAuthentication(context);
+      checkAdminPermission(context);
       try {
         const db = await connectMongoDB();
-        const configs = await db.collection('department_shift_configs').find({}).toArray();
+        const configs = await db.collection('department_shift_configs').find({}).sort({ departmentName: 1 }).limit(500).toArray();
         
         return configs.map((config: any) => ({ 
           ...config, 
@@ -1206,7 +1251,9 @@ export const shiftsResolvers = {
         }
         
         console.log('Employees query:', JSON.stringify(query, null, 2));
-        const users = await db.collection('users').find(query).toArray();
+        const limit = Math.min(Math.max(Number(args.limit) || 200, 1), 500);
+        const offset = Math.max(Number(args.offset) || 0, 0);
+        const users = await db.collection('users').find(query).sort({ firstName: 1 }).skip(offset).limit(limit).toArray();
         console.log(`Found ${users.length} users for employees query`);
         if (users.length > 0) {
           console.log('Sample user:', JSON.stringify(users[0], null, 2));
@@ -1231,7 +1278,11 @@ export const shiftsResolvers = {
     
     employee: async (_: any, args: any, context: any) => {
       checkAuthentication(context);
-      
+
+      if (!ObjectId.isValid(args.id)) {
+        throw new Error('Invalid employee ID');
+      }
+
       // Users can view their own profile, admins can view anyone's
       if (args.id !== context.user.userId) {
         checkAdminPermission(context);
@@ -1257,7 +1308,8 @@ export const shiftsResolvers = {
         checkAuthentication(context);
         
         const db = await getDB();
-        const specialDays = await db.collection('specialDays').find({}).toArray();
+        const limit = Math.min(Math.max(Number(args.limit) || 200, 1), 500);
+        const specialDays = await db.collection('specialDays').find({}).sort({ date: 1 }).limit(limit).toArray();
         
         return specialDays.map((day: any) => ({
           ...day,
@@ -1273,7 +1325,7 @@ export const shiftsResolvers = {
   Mutation: {
     // Shifts mutations
     createShift: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
       
       console.log('🔍 createShift called with:', args.input);
@@ -1299,9 +1351,13 @@ export const shiftsResolvers = {
 
     updateShift: async (_: any, args: any, context: any) => {
       try {
-        if (!context.user) throw new Error('Not authenticated');
+        checkAuthentication(context);
         checkAdminPermission(context);
-        
+
+        if (!ObjectId.isValid(args.id)) {
+          throw new Error('Invalid shift ID');
+        }
+
         console.log('updateShift mutation called with:', {
           id: args.id,
           input: args.input
@@ -1380,18 +1436,29 @@ export const shiftsResolvers = {
     },
 
     deleteShift: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
-      
+
+      if (!ObjectId.isValid(args.id)) {
+        throw new Error('Invalid shift ID');
+      }
+
       const db = await getDB();
       const result = await db.collection('shifts').deleteOne({ _id: new ObjectId(args.id) });
       return result.deletedCount > 0;
     },
 
     assignUserToShift: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
-      
+
+      if (!ObjectId.isValid(args.input.shiftId)) {
+        throw new Error('Invalid shift ID');
+      }
+      if (!ObjectId.isValid(args.input.userId)) {
+        throw new Error('Invalid user ID');
+      }
+
       console.log('🔍 assignUserToShift called with:', {
         shiftId: args.input.shiftId,
         userId: args.input.userId,
@@ -1463,9 +1530,13 @@ export const shiftsResolvers = {
     },
 
     removeUserFromShift: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
-      
+
+      if (!ObjectId.isValid(args.shiftId)) {
+        throw new Error('Invalid shift ID');
+      }
+
       const db = await getDB();
       const result = await db.collection('shifts').findOneAndUpdate(
         { _id: new ObjectId(args.shiftId) },
@@ -1491,7 +1562,7 @@ export const shiftsResolvers = {
 
     // Shift Templates mutations
     createShiftTemplate: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
       
       const db = await getDB();
@@ -1507,9 +1578,13 @@ export const shiftsResolvers = {
     },
 
     updateShiftTemplate: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
-      
+
+      if (!ObjectId.isValid(args.input.id)) {
+        throw new Error('Invalid shift template ID');
+      }
+
       const db = await getDB();
       const result = await db.collection('shift_templates').findOneAndUpdate(
         { _id: new ObjectId(args.input.id) },
@@ -1524,18 +1599,26 @@ export const shiftsResolvers = {
     },
 
     deleteShiftTemplate: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
-      
+
+      if (!ObjectId.isValid(args.id)) {
+        throw new Error('Invalid shift template ID');
+      }
+
       const db = await getDB();
       const result = await db.collection('shift_templates').deleteOne({ _id: new ObjectId(args.id) });
       return result.deletedCount > 0;
     },
 
     generateShiftsFromTemplate: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
-      
+
+      if (!ObjectId.isValid(args.templateId)) {
+        throw new Error('Invalid shift template ID');
+      }
+
       const db = await getDB();
       const template = await db.collection('shift_templates').findOne({ _id: new ObjectId(args.templateId) });
       
@@ -1589,7 +1672,7 @@ export const shiftsResolvers = {
 
     // Shift Role Template mutations
     createShiftRoleTemplate: async (_: any, { input }: { input: any }, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
       
       const db = await getDB();
@@ -1628,9 +1711,13 @@ export const shiftsResolvers = {
     },
 
     updateShiftRoleTemplate: async (_: any, { id, input }: { id: string, input: any }, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
-      
+
+      if (!ObjectId.isValid(id)) {
+        throw new Error('Invalid shift role template ID');
+      }
+
       const db = await getDB();
       
       // Validate that all roles exist in the department
@@ -1671,9 +1758,13 @@ export const shiftsResolvers = {
     },
 
     deleteShiftRoleTemplate: async (_: any, { id }: { id: string }, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
-      
+
+      if (!ObjectId.isValid(id)) {
+        throw new Error('Invalid shift role template ID');
+      }
+
       const db = await getDB();
       const result = await db.collection('shiftRoleTemplates').deleteOne({ 
         _id: new ObjectId(id) 
@@ -1683,9 +1774,13 @@ export const shiftsResolvers = {
     },
 
     applyShiftRoleTemplate: async (_: any, { templateId, weekStartDate }: { templateId: string, weekStartDate: string }, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
-      
+
+      if (!ObjectId.isValid(templateId)) {
+        throw new Error('Invalid shift role template ID');
+      }
+
       const db = await getDB();
       
       // Get the template
@@ -1784,8 +1879,12 @@ export const shiftsResolvers = {
 
     // Shift Swap Requests mutations
     createShiftSwapRequest: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
-      
+      checkAuthentication(context);
+
+      if (!ObjectId.isValid(args.input.shiftId)) {
+        throw new Error('Invalid shift ID');
+      }
+
       const db = await getDB();
       
       // Verify the shift exists and user is assigned to it
@@ -1810,8 +1909,12 @@ export const shiftsResolvers = {
     },
 
     cancelShiftSwapRequest: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
-      
+      checkAuthentication(context);
+
+      if (!ObjectId.isValid(args.id)) {
+        throw new Error('Invalid shift swap request ID');
+      }
+
       const db = await getDB();
       const request = await db.collection('shift_swap_requests').findOne({ _id: new ObjectId(args.id) });
       
@@ -1839,8 +1942,12 @@ export const shiftsResolvers = {
     },
 
     respondToShiftSwapRequest: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
-      
+      checkAuthentication(context);
+
+      if (!ObjectId.isValid(args.id)) {
+        throw new Error('Invalid shift swap request ID');
+      }
+
       const db = await getDB();
       const request = await db.collection('shift_swap_requests').findOne({ _id: new ObjectId(args.id) });
       
@@ -1881,9 +1988,13 @@ export const shiftsResolvers = {
     },
 
     approveShiftSwapRequest: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
-      
+
+      if (!ObjectId.isValid(args.input.requestId)) {
+        throw new Error('Invalid shift swap request ID');
+      }
+
       const db = await getDB();
       const request = await db.collection('shift_swap_requests').findOne({ _id: new ObjectId(args.input.requestId) });
       
@@ -1954,8 +2065,8 @@ export const shiftsResolvers = {
 
     // Vacation Requests
     createVacationRequest: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
-      
+      checkAuthentication(context);
+
       console.log('🔍 CreateVacationRequest called with:', {
         contextUser: context.user.userId,
         contextUserEmail: context.user.email,
@@ -1971,6 +2082,9 @@ export const shiftsResolvers = {
       // If admin is creating request for another user
       if (args.input.userId) {
         checkAdminPermission(context);
+        if (!ObjectId.isValid(args.input.userId)) {
+          throw new Error('Invalid user ID');
+        }
         targetUserId = args.input.userId;
         
         // Verify the target user exists
@@ -1982,18 +2096,15 @@ export const shiftsResolvers = {
         console.log('✅ Found target user:', targetUser.displayName, targetUser.email);
       }
       
-      // Check for overlapping vacation requests
-      const existingRequest = await db.collection('vacation_requests').findOne({
+      // Delegate validation to the shift service so the rules live in one
+      // place (overlap, range, max-length warnings).
+      const validation = await validateVacationRequest({
         userId: targetUserId,
-        status: { $in: ['pending', 'approved'] },
-        $or: [
-          { startDate: { $lte: new Date(args.input.endDate), $gte: new Date(args.input.startDate) } },
-          { endDate: { $lte: new Date(args.input.endDate), $gte: new Date(args.input.startDate) } }
-        ]
+        startDate: args.input.startDate,
+        endDate: args.input.endDate,
       });
-      
-      if (existingRequest) {
-        throw new Error('This user already has a vacation request for this period');
+      if (!validation.ok) {
+        throw new Error(validation.errors.join('; '));
       }
       
       const vacationRequest = {
@@ -2029,8 +2140,12 @@ export const shiftsResolvers = {
     },
 
     updateVacationRequest: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
-      
+      checkAuthentication(context);
+
+      if (!ObjectId.isValid(args.id)) {
+        throw new Error('Invalid vacation request ID');
+      }
+
       const db = await getDB();
       
       // Check if user owns the request or is admin
@@ -2067,8 +2182,12 @@ export const shiftsResolvers = {
     },
 
     deleteVacationRequest: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
-      
+      checkAuthentication(context);
+
+      if (!ObjectId.isValid(args.id)) {
+        throw new Error('Invalid vacation request ID');
+      }
+
       const db = await getDB();
       
       // Check if user owns the request or is admin
@@ -2095,8 +2214,12 @@ export const shiftsResolvers = {
     },
 
     cancelVacationRequest: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
-      
+      checkAuthentication(context);
+
+      if (!ObjectId.isValid(args.id)) {
+        throw new Error('Invalid vacation request ID');
+      }
+
       const db = await getDB();
       const request = await db.collection('vacation_requests').findOne({ _id: new ObjectId(args.id) });
       
@@ -2124,9 +2247,13 @@ export const shiftsResolvers = {
     },
     
     approveVacationRequest: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
-      
+
+      if (!ObjectId.isValid(args.input.requestId)) {
+        throw new Error('Invalid vacation request ID');
+      }
+
       const db = await getDB();
       const request = await db.collection('vacation_requests').findOne({ _id: new ObjectId(args.input.requestId) });
       
@@ -2168,8 +2295,8 @@ export const shiftsResolvers = {
 
     // Availability Constraints
     submitAvailabilityConstraints: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
-      
+      checkAuthentication(context);
+
       try {
         const db = await getDB();
         const weekStart = getWeekStartDate(new Date(args.input.weekStartDate));
@@ -2217,8 +2344,8 @@ export const shiftsResolvers = {
 
     // Employee Settings
     updateEmployeeSettings: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
-      
+      checkAuthentication(context);
+
       const db = await getDB();
       
       // Check if user is updating their own settings or is an admin
@@ -2252,8 +2379,9 @@ export const shiftsResolvers = {
 
     // Department Shift Configuration
     createDepartmentShiftConfig: async (_: any, { input }: { input: any }, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
-      
+      checkAuthentication(context);
+      checkAdminPermission(context);
+
       // Check if user is department admin
       const user = await context.db.query(
         'SELECT system_role, department FROM users WHERE id = $1',
@@ -2299,6 +2427,7 @@ export const shiftsResolvers = {
     },
 
     updateDepartmentShiftConfig: async (_: any, { departmentId, input }: { departmentId: string, input: any }, context: any) => {
+      checkAuthentication(context);
       console.log('\n🚀 ====== updateDepartmentShiftConfig MUTATION CALLED ======');
       console.log('📦 Department ID:', departmentId);
       console.log('📦 Input:', JSON.stringify(input, null, 2));
@@ -2309,11 +2438,6 @@ export const shiftsResolvers = {
         systemRole: context.user.systemRole,
         permissions: context.user.permissions
       } : 'NO USER IN CONTEXT');
-      
-      if (!context.user) {
-        console.error('❌ No user in context - throwing Not authenticated');
-        throw new Error('Not authenticated');
-      }
       
       // Use systemRole from JWT context first
       const userRole = context.user.systemRole;
@@ -2415,8 +2539,9 @@ export const shiftsResolvers = {
     },
 
     deleteDepartmentShiftConfig: async (_: any, { departmentId }: { departmentId: string }, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
-      
+      checkAuthentication(context);
+      checkAdminPermission(context);
+
       // Only system/IT admins can delete configurations
       const user = await context.db.query(
         'SELECT system_role FROM users WHERE id = $1',
@@ -2443,8 +2568,8 @@ export const shiftsResolvers = {
     
     // Create Special Request
     createSpecialRequest: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
-      
+      checkAuthentication(context);
+
       const db = await getDB();
       const specialRequest = {
         userId: context.user.userId,
@@ -2463,9 +2588,13 @@ export const shiftsResolvers = {
     
     // Approve/Reject Special Request
     handleSpecialRequest: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
-      
+
+      if (!ObjectId.isValid(args.requestId)) {
+        throw new Error('Invalid special request ID');
+      }
+
       const db = await getDB();
       const status = args.approved ? 'approved' : 'rejected';
       
@@ -2497,7 +2626,7 @@ export const shiftsResolvers = {
     
     // Send notification
     sendNotification: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
       
       const db = await getDB();
@@ -2525,7 +2654,7 @@ export const shiftsResolvers = {
     
     // Generate report
     generateShiftReport: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
       
       const db = await getDB();
@@ -2678,7 +2807,7 @@ export const shiftsResolvers = {
     
     // Employee management
     createEmployee: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
       
       const db = await getDB();
@@ -2713,7 +2842,7 @@ export const shiftsResolvers = {
     
     // Update special days
     updateSpecialDays: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
       
       const db = await getDB();
@@ -2735,9 +2864,13 @@ export const shiftsResolvers = {
     },
     
     deleteSpecialDay: async (_: any, args: any, context: any) => {
-      if (!context.user) throw new Error('Not authenticated');
+      checkAuthentication(context);
       checkAdminPermission(context);
-      
+
+      if (!ObjectId.isValid(args.id)) {
+        throw new Error('Invalid special day ID');
+      }
+
       const db = await getDB();
       const result = await db.collection('specialDays').deleteOne({ _id: new ObjectId(args.id) });
       
@@ -2745,23 +2878,65 @@ export const shiftsResolvers = {
     }
   },
 
-  // Add Subscription resolvers
+  // Add Subscription resolvers.
+  //
+  // NOTE: there are no `pubsub.publish('SHIFT_UPDATED', ...)` callers in the
+  // codebase yet, so these subscriptions are effectively placeholders. The
+  // filter wrappers below ensure that *if* a publish path is added, the
+  // schema-declared `userId` argument is actually honored — events with a
+  // `userId` (or `payload.shiftUpdated.assignedTo`) that does not match the
+  // requested user are dropped before they leave the WS bus.
   Subscription: {
     shiftUpdated: {
-      subscribe: (_: any, args: any, context: any) => {
-        // This is a placeholder - implement with your pubsub system
-        return context.pubsub.asyncIterator(['SHIFT_UPDATED']);
-      }
+      subscribe: withFilter(
+        (_: any, _args: any, context: any) => {
+          checkAuthentication(context);
+          return context.pubsub.asyncIterator(['SHIFT_UPDATED']);
+        },
+        (payload: any, args: any, context: any) => {
+          const requested = args?.userId || context?.user?.userId;
+          if (!requested) return false;
+          const candidate =
+            payload?.shiftUpdated?.userId ||
+            payload?.shiftUpdated?.assignedTo ||
+            payload?.shiftUpdated?.employeeId;
+          return !candidate || String(candidate) === String(requested);
+        }
+      )
     },
     shiftSwapRequestUpdated: {
-      subscribe: (_: any, args: any, context: any) => {
-        return context.pubsub.asyncIterator(['SHIFT_SWAP_REQUEST_UPDATED']);
-      }
+      subscribe: withFilter(
+        (_: any, _args: any, context: any) => {
+          checkAuthentication(context);
+          return context.pubsub.asyncIterator(['SHIFT_SWAP_REQUEST_UPDATED']);
+        },
+        (payload: any, args: any, context: any) => {
+          const requested = args?.userId || context?.user?.userId;
+          if (!requested) return false;
+          const swap = payload?.shiftSwapRequestUpdated;
+          if (!swap) return false;
+          return [swap.requesterId, swap.targetUserId, swap.userId, swap.requesterUserId]
+            .filter(Boolean)
+            .map(String)
+            .includes(String(requested));
+        }
+      )
     },
     vacationRequestUpdated: {
-      subscribe: (_: any, args: any, context: any) => {
-        return context.pubsub.asyncIterator(['VACATION_REQUEST_UPDATED']);
-      }
+      subscribe: withFilter(
+        (_: any, _args: any, context: any) => {
+          checkAuthentication(context);
+          return context.pubsub.asyncIterator(['VACATION_REQUEST_UPDATED']);
+        },
+        (payload: any, args: any, context: any) => {
+          const requested = args?.userId || context?.user?.userId;
+          if (!requested) return false;
+          const candidate =
+            payload?.vacationRequestUpdated?.userId ||
+            payload?.vacationRequestUpdated?.requesterId;
+          return !candidate || String(candidate) === String(requested);
+        }
+      )
     }
   },
 

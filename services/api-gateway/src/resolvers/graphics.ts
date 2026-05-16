@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { Context } from '../types';
 import { GraphicsProject, GraphicsExport } from '../models/graphics.models';
 import { mxfExportService } from '../services/mxfExportService';
@@ -6,6 +7,9 @@ import { Permission } from '../rbac';
 import fs from 'fs/promises';
 import path from 'path';
 
+// Hard cap on graphics list queries.
+const MAX_GRAPHICS_LIST = 500;
+
 export const graphicsResolvers = {
   Query: {
     graphicsProjects: async (_: any, __: any, context: Context) => {
@@ -13,12 +17,17 @@ export const graphicsResolvers = {
       
       return GraphicsProject.find({ createdBy: context.user!.userId })
         .sort({ updatedAt: -1 })
+        .limit(MAX_GRAPHICS_LIST)
         .populate('createdBy', 'displayName email');
     },
 
     graphicsProject: async (_: any, { id }: any, context: Context) => {
       requireAuth(context);
-      
+
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        throw new Error('Invalid graphics project ID');
+      }
+
       const project = await GraphicsProject.findById(id).populate('createdBy', 'displayName email');
       
       if (!project) {
@@ -39,6 +48,7 @@ export const graphicsResolvers = {
       
       return GraphicsExport.find({ createdBy: context.user!.userId })
         .sort({ createdAt: -1 })
+        .limit(MAX_GRAPHICS_LIST)
         .populate('projectId', 'name')
         .populate('createdBy', 'displayName email');
     },
@@ -103,6 +113,10 @@ export const graphicsResolvers = {
     updateGraphicsProject: async (_: any, { id, input }: any, context: Context) => {
       requireAuth(context);
 
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        throw new Error('Invalid graphics project ID');
+      }
+
       const project = await GraphicsProject.findById(id);
       
       if (!project) {
@@ -128,6 +142,10 @@ export const graphicsResolvers = {
     deleteGraphicsProject: async (_: any, { id }: any, context: Context) => {
       requireAuth(context);
 
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        throw new Error('Invalid graphics project ID');
+      }
+
       const project = await GraphicsProject.findById(id);
       
       if (!project) {
@@ -148,7 +166,11 @@ export const graphicsResolvers = {
 
       try {
         const { projectId, options } = input;
-        
+
+        if (!mongoose.Types.ObjectId.isValid(projectId)) {
+          throw new Error('Invalid graphics project ID');
+        }
+
         const project = await GraphicsProject.findById(projectId);
         if (!project) {
           throw new Error('Project not found');
@@ -216,6 +238,10 @@ export const graphicsResolvers = {
       requireAuth(context);
 
       try {
+        if (!mongoose.Types.ObjectId.isValid(input.projectId)) {
+          throw new Error('Invalid graphics project ID');
+        }
+
         const project = await GraphicsProject.findById(input.projectId);
         if (!project) {
           throw new Error('Project not found');
@@ -245,6 +271,10 @@ export const graphicsResolvers = {
 
     duplicateGraphicsProject: async (_: any, { id }: any, context: Context) => {
       requireAuth(context);
+
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        throw new Error('Invalid graphics project ID');
+      }
 
       const originalProject = await GraphicsProject.findById(id);
       

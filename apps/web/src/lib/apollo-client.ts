@@ -137,33 +137,25 @@ if (typeof window !== 'undefined') {
 const authLink = setContext((operation, { headers }) => {
   // Get the authentication token from local storage if it exists
   const token = typeof window !== 'undefined' ? localStorage.getItem('auth-token') : null;
-  
-  console.log('[Apollo Client] Setting auth header for', operation.operationName, ':', {
-    hasToken: !!token,
-    tokenLength: token?.length,
-    tokenPreview: token ? token.substring(0, 20) + '...' : 'NO TOKEN',
-    headers: headers
-  });
-  
-  // Log to sessionStorage for debugging
-  if (typeof window !== 'undefined' && operation.operationName) {
-    const logs = JSON.parse(sessionStorage.getItem('apolloRequestLogs') || '[]');
-    logs.push({
-      timestamp: new Date().toISOString(),
-      operation: operation.operationName,
-      hasToken: !!token,
-      tokenPreview: token ? token.substring(0, 50) + '...' : null
-    });
-    // Keep only last 20 logs
-    if (logs.length > 20) logs.shift();
-    sessionStorage.setItem('apolloRequestLogs', JSON.stringify(logs));
+
+  // Verbose per-request logging is helpful in dev but expensive in
+  // production (and hits sessionStorage on every operation). Gate it.
+  if (process.env.NODE_ENV !== 'production') {
+    if (typeof window !== 'undefined' && operation.operationName) {
+      const logs = JSON.parse(sessionStorage.getItem('apolloRequestLogs') || '[]');
+      logs.push({
+        timestamp: new Date().toISOString(),
+        operation: operation.operationName,
+        hasToken: !!token,
+      });
+      if (logs.length > 20) logs.shift();
+      sessionStorage.setItem('apolloRequestLogs', JSON.stringify(logs));
+    }
   }
-  
-  // Do NOT fall back to user.id – that is not a valid JWT and
-  // causes "jwt malformed" errors on the server. We only send the
-  // header if we really have a JWT in localStorage.
-  
-  // Return the headers to the context so httpLink can read them
+
+  // Do NOT fall back to user.id – that is not a valid JWT and causes
+  // "jwt malformed" errors on the server. Only send the header if we
+  // really have a JWT in localStorage.
   return {
     headers: {
       ...headers,
@@ -194,6 +186,9 @@ const client = new ApolloClient({
   link: splitLink,
   cache: new InMemoryCache({
     addTypename: true,
+    // Identify a few entities by composite keys so list queries can dedupe
+    // their items into the cache without colliding when the backend uses
+    // string ids.
     typePolicies: {
       User: {
         fields: {
@@ -215,43 +210,60 @@ const client = new ApolloClient({
       },
       Query: {
         fields: {
+          // List fields with paginated args use the args as cache keys so we
+          // don't collapse different filters into the same cache slot. The
+          // merge function still prefers incoming so refresh wins.
           myShifts: {
-            merge(existing = [], incoming) {
-              return incoming;
-            }
+            merge(_existing = [], incoming) { return incoming; },
           },
           myTickets: {
-            merge(existing = [], incoming) {
-              return incoming;
-            }
+            merge(_existing = [], incoming) { return incoming; },
           },
           bulletinPosts: {
-            merge(existing = [], incoming) {
-              return incoming;
-            }
+            keyArgs: ['departmentId'],
+            merge(_existing = [], incoming) { return incoming; },
           },
           broadcastEvents: {
-            merge(existing = [], incoming) {
-              return incoming;
-            }
-          }
+            keyArgs: ['startDate', 'endDate', 'filter'],
+            merge(_existing = [], incoming) { return incoming; },
+          },
+          warehouseEquipment: {
+            keyArgs: ['filter'],
+            merge(_existing = [], incoming) { return incoming; },
+          },
+          equipmentSets: {
+            keyArgs: false,
+            merge(_existing = [], incoming) { return incoming; },
+          },
         }
       }
     }
   }),
   defaultOptions: {
+    // `cache-first` for watch queries: the client will read from cache when
+    // available and skip the network. Queries that need freshness can opt in
+    // to `cache-and-network` per-call. This prevents the previous behavior
+    // where every page navigation triggered a full network refetch.
     watchQuery: {
-      fetchPolicy: 'cache-and-network',
+      fetchPolicy: 'cache-first',
+      nextFetchPolicy: 'cache-first',
       errorPolicy: 'all',
     },
+    // One-off queries default to cache-first too — opt in to network-only
+    // explicitly when the answer must be fresh (e.g. polling).
     query: {
-      fetchPolicy: 'network-only',
+      fetchPolicy: 'cache-first',
       errorPolicy: 'all',
     },
     mutate: {
       errorPolicy: 'all',
     },
   },
+  // Enable query deduplication so two components requesting the same query
+  // simultaneously share a single in-flight network request. This is the
+  // default (`true`), but we set it explicitly so future Apollo upgrades
+  // can't silently change the behavior.
+  queryDeduplication: true,
   connectToDevTools: process.env.NODE_ENV === 'development',
 });
 

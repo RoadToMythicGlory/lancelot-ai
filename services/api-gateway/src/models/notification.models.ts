@@ -191,6 +191,12 @@ notificationSchema.index({ recipientId: 1, isRead: 1, createdAt: -1 });
 notificationSchema.index({ organizationId: 1, recipientId: 1, createdAt: -1 });
 notificationSchema.index({ recipientId: 1, type: 1 });
 notificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+notificationSchema.index({ recipientId: 1, isDismissed: 1, createdAt: -1 });
+notificationSchema.index({ recipientId: 1, priority: 1, createdAt: -1 });
+notificationSchema.index({ resource: 1, resourceId: 1 });
+notificationSchema.index({ senderId: 1, createdAt: -1 });
+notificationSchema.index({ organizationId: 1, type: 1, createdAt: -1 });
+notificationSchema.index({ createdAt: -1 });
 
 notificationPreferenceSchema.index({ userId: 1 }, { unique: true });
 notificationPreferenceSchema.index({ organizationId: 1 });

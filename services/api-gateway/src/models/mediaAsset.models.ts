@@ -147,9 +147,16 @@ mediaAssetSchema.index({ tags: 1 });
 mediaAssetSchema.index({ title: 'text', description: 'text', tags: 'text' });
 mediaAssetSchema.index({ licenseExpiresAt: 1 });
 mediaAssetSchema.index({ linkedBroadcastEvents: 1 });
+mediaAssetSchema.index({ linkedMCREvents: 1 });
+mediaAssetSchema.index({ parentAssetId: 1 });
+mediaAssetSchema.index({ uploadedBy: 1, createdAt: -1 });
+mediaAssetSchema.index({ organizationId: 1, type: 1, status: 1 });
+mediaAssetSchema.index({ organizationId: 1, category: 1 });
+mediaAssetSchema.index({ rightsHolder: 1 });
 
 mediaFolderSchema.index({ organizationId: 1, parentFolderId: 1 });
 mediaFolderSchema.index({ path: 1 });
+mediaFolderSchema.index({ createdBy: 1 });
 
 export const MediaAsset = mongoose.model<IMediaAsset>('MediaAsset', mediaAssetSchema);
 export const MediaFolder = mongoose.model<IMediaFolder>('MediaFolder', mediaFolderSchema);

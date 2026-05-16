@@ -51,6 +51,10 @@ const equipmentSetSchema = new Schema<IEquipmentSet>(
 );
 
 equipmentSetSchema.index({ name: 1 });
+equipmentSetSchema.index({ isActive: 1 });
+equipmentSetSchema.index({ isActive: 1, name: 1 });
+equipmentSetSchema.index({ 'items.equipmentId': 1 });
+equipmentSetSchema.index({ createdBy: 1 });
 
 export const EquipmentSet = mongoose.model<IEquipmentSet>(
   'EquipmentSet',

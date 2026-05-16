@@ -100,7 +100,10 @@ const VizrtConfigSchema = new Schema<IVizrtConfig>({
 
 // Indexes
 VizrtTemplateSchema.index({ category: 1, name: 1 });
+VizrtTemplateSchema.index({ category: 1 });
 VizrtConfigSchema.index({ isActive: 1 });
+VizrtConfigSchema.index({ name: 1 });
+VizrtConfigSchema.index({ mode: 1, isActive: 1 });
 
 export const VizrtTemplate = mongoose.model<IVizrtTemplate>('VizrtTemplate', VizrtTemplateSchema);
 export const VizrtConfig = mongoose.model<IVizrtConfig>('VizrtConfig', VizrtConfigSchema);

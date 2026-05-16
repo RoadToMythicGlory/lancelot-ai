@@ -45,6 +45,9 @@ const bulletinPostSchema = new Schema<IBulletinPost>({
 bulletinPostSchema.index({ departmentId: 1, isActive: 1 });
 bulletinPostSchema.index({ expiryDate: 1 });
 bulletinPostSchema.index({ createdBy: 1 });
+bulletinPostSchema.index({ departmentId: 1, isActive: 1, createdAt: -1 });
+bulletinPostSchema.index({ isActive: 1, expiryDate: 1 });
+bulletinPostSchema.index({ departmentId: 1, untilNewPost: 1, isActive: 1 });
 
 // Virtual to check if post is currently active
 bulletinPostSchema.virtual('isCurrentlyActive').get(function() {

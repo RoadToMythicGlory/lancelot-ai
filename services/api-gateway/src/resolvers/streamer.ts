@@ -1,4 +1,5 @@
 import { ObjectId } from 'mongodb';
+import mongoose from 'mongoose';
 import bcrypt from 'bcrypt';
 import { connectMongoDB } from '../config/mongodb';
 import { config } from '../config';
@@ -21,6 +22,20 @@ async function requireStreamerAuth(context: any) {
   return context.user;
 }
 
+function isStreamerAdmin(user: any): boolean {
+  return ['SYSTEM_ADMIN', 'IT_ADMIN'].includes(user?.systemRole);
+}
+
+function assertValidObjectId(id: string, resourceName: string) {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new Error(`Invalid ${resourceName} ID`);
+  }
+}
+
+function clampLimit(value: any, defaultValue = 200, max = 1000): number {
+  return Math.min(Math.max(Number(value) || defaultValue, 1), max);
+}
+
 function toItem(doc: any) {
   if (!doc) return null;
   const obj = doc.toObject ? doc.toObject() : doc;
@@ -38,13 +53,21 @@ export const streamerResolvers = {
       const user = await requireStreamerAuth(context);
       const query: any = { userId: user.userId };
       if (status) query.status = status;
-      const items = await StreamEvent.find(query).sort({ scheduledDate: -1 }).skip(offset).limit(limit);
+      const boundedLimit = clampLimit(limit, 50, 500);
+      const boundedOffset = Math.max(Number(offset) || 0, 0);
+      const items = await StreamEvent.find(query).sort({ scheduledDate: -1 }).skip(boundedOffset).limit(boundedLimit);
       return toItems(items);
     },
 
     streamerEvent: async (_: any, { id }: any, context: any) => {
-      await requireStreamerAuth(context);
-      return toItem(await StreamEvent.findById(id));
+      const user = await requireStreamerAuth(context);
+      assertValidObjectId(id, 'stream event');
+      const doc = await StreamEvent.findById(id);
+      if (!doc) return null;
+      if (doc.userId?.toString() !== user.userId && !isStreamerAdmin(user)) {
+        throw new Error('Not authorized to view this stream event');
+      }
+      return toItem(doc);
     },
 
     // ---- Podcast Episodes ----
@@ -53,29 +76,44 @@ export const streamerResolvers = {
       const query: any = { userId: user.userId };
       if (status) query.status = status;
       if (showId) query.showId = showId;
-      const items = await PodcastEpisode.find(query).sort({ createdAt: -1 }).skip(offset).limit(limit);
+      const boundedLimit = clampLimit(limit, 50, 500);
+      const boundedOffset = Math.max(Number(offset) || 0, 0);
+      const items = await PodcastEpisode.find(query).sort({ createdAt: -1 }).skip(boundedOffset).limit(boundedLimit);
       return toItems(items);
     },
 
     podcastEpisode: async (_: any, { id }: any, context: any) => {
-      await requireStreamerAuth(context);
-      return toItem(await PodcastEpisode.findById(id));
+      const user = await requireStreamerAuth(context);
+      assertValidObjectId(id, 'podcast episode');
+      const doc = await PodcastEpisode.findById(id);
+      if (!doc) return null;
+      if (doc.userId?.toString() !== user.userId && !isStreamerAdmin(user)) {
+        throw new Error('Not authorized to view this podcast episode');
+      }
+      return toItem(doc);
     },
 
     // ---- Podcast Shows ----
-    podcastShows: async (_: any, __: any, context: any) => {
+    podcastShows: async (_: any, args: any, context: any) => {
       const user = await requireStreamerAuth(context);
-      const items = await PodcastShow.find({ userId: user.userId }).sort({ createdAt: -1 });
+      const limit = clampLimit(args?.limit, 200, 500);
+      const items = await PodcastShow.find({ userId: user.userId }).sort({ createdAt: -1 }).limit(limit);
       return toItems(items);
     },
 
     podcastShow: async (_: any, { id }: any, context: any) => {
-      await requireStreamerAuth(context);
-      return toItem(await PodcastShow.findById(id));
+      const user = await requireStreamerAuth(context);
+      assertValidObjectId(id, 'podcast show');
+      const doc = await PodcastShow.findById(id);
+      if (!doc) return null;
+      if (doc.userId?.toString() !== user.userId && !isStreamerAdmin(user)) {
+        throw new Error('Not authorized to view this podcast show');
+      }
+      return toItem(doc);
     },
 
     // ---- Guest Contacts ----
-    guestContacts: async (_: any, { status, searchTerm }: any, context: any) => {
+    guestContacts: async (_: any, { status, searchTerm, limit, offset }: any, context: any) => {
       const user = await requireStreamerAuth(context);
       const query: any = { userId: user.userId };
       if (status) query.status = status;
@@ -85,13 +123,21 @@ export const streamerResolvers = {
           { topicsExpertise: { $regex: searchTerm, $options: 'i' } },
         ];
       }
-      const items = await GuestContact.find(query).sort({ createdAt: -1 });
+      const boundedLimit = clampLimit(limit, 200, 500);
+      const boundedOffset = Math.max(Number(offset) || 0, 0);
+      const items = await GuestContact.find(query).sort({ createdAt: -1 }).skip(boundedOffset).limit(boundedLimit);
       return toItems(items);
     },
 
     guestContact: async (_: any, { id }: any, context: any) => {
-      await requireStreamerAuth(context);
-      return toItem(await GuestContact.findById(id));
+      const user = await requireStreamerAuth(context);
+      assertValidObjectId(id, 'guest contact');
+      const doc = await GuestContact.findById(id);
+      if (!doc) return null;
+      if (doc.userId?.toString() !== user.userId && !isStreamerAdmin(user)) {
+        throw new Error('Not authorized to view this guest contact');
+      }
+      return toItem(doc);
     },
 
     // ---- Clips ----
@@ -100,32 +146,45 @@ export const streamerResolvers = {
       const query: any = { userId: user.userId };
       if (status) query.status = status;
       if (sourceType) query.sourceType = sourceType;
-      const items = await Clip.find(query).sort({ createdAt: -1 }).limit(limit);
+      const boundedLimit = clampLimit(limit, 50, 500);
+      const items = await Clip.find(query).sort({ createdAt: -1 }).limit(boundedLimit);
       return toItems(items);
     },
 
     streamerClip: async (_: any, { id }: any, context: any) => {
-      await requireStreamerAuth(context);
-      return toItem(await Clip.findById(id));
+      const user = await requireStreamerAuth(context);
+      assertValidObjectId(id, 'clip');
+      const doc = await Clip.findById(id);
+      if (!doc) return null;
+      if (doc.userId?.toString() !== user.userId && !isStreamerAdmin(user)) {
+        throw new Error('Not authorized to view this clip');
+      }
+      return toItem(doc);
     },
 
     // ---- Revenue ----
     revenueEntries: async (_: any, { limit = 200, offset = 0 }: any, context: any) => {
       const user = await requireStreamerAuth(context);
-      const items = await RevenueEntry.find({ userId: user.userId }).sort({ date: -1 }).skip(offset).limit(limit);
+      const boundedLimit = clampLimit(limit, 200, 500);
+      const boundedOffset = Math.max(Number(offset) || 0, 0);
+      const items = await RevenueEntry.find({ userId: user.userId }).sort({ date: -1 }).skip(boundedOffset).limit(boundedLimit);
       return toItems(items);
     },
 
     // ---- Activity ----
     streamerActivities: async (_: any, { limit = 20 }: any, context: any) => {
       const user = await requireStreamerAuth(context);
-      const items = await StreamerActivity.find({ userId: user.userId }).sort({ createdAt: -1 }).limit(limit);
+      const boundedLimit = clampLimit(limit, 20, 500);
+      const items = await StreamerActivity.find({ userId: user.userId }).sort({ createdAt: -1 }).limit(boundedLimit);
       return toItems(items);
     },
 
     // ---- Profile ----
     streamerMe: async (_: any, __: any, context: any) => {
       const user = await requireStreamerAuth(context);
+      if (!ObjectId.isValid(user.userId)) {
+        throw new Error('Invalid user ID');
+      }
       const db = await connectMongoDB();
       const dbUser = await db.collection('users').findOne({ _id: new ObjectId(user.userId) });
       if (!dbUser) return null;
@@ -143,15 +202,22 @@ export const streamerResolvers = {
     },
 
     updateStreamEvent: async (_: any, { id, input }: any, context: any) => {
-      await requireStreamerAuth(context);
-      const doc = await StreamEvent.findByIdAndUpdate(id, { $set: input }, { new: true });
+      const user = await requireStreamerAuth(context);
+      assertValidObjectId(id, 'stream event');
+      const filter: any = { _id: id };
+      if (!isStreamerAdmin(user)) filter.userId = user.userId;
+      const doc = await StreamEvent.findOneAndUpdate(filter, { $set: input }, { new: true });
       if (!doc) throw new Error('Stream event not found');
       return toItem(doc);
     },
 
     deleteStreamEvent: async (_: any, { id }: any, context: any) => {
-      await requireStreamerAuth(context);
-      await StreamEvent.findByIdAndDelete(id);
+      const user = await requireStreamerAuth(context);
+      assertValidObjectId(id, 'stream event');
+      const filter: any = { _id: id };
+      if (!isStreamerAdmin(user)) filter.userId = user.userId;
+      const result = await StreamEvent.findOneAndDelete(filter);
+      if (!result) throw new Error('Stream event not found');
       return true;
     },
 
@@ -164,15 +230,22 @@ export const streamerResolvers = {
     },
 
     updatePodcastEpisode: async (_: any, { id, input }: any, context: any) => {
-      await requireStreamerAuth(context);
-      const doc = await PodcastEpisode.findByIdAndUpdate(id, { $set: input }, { new: true });
+      const user = await requireStreamerAuth(context);
+      assertValidObjectId(id, 'podcast episode');
+      const filter: any = { _id: id };
+      if (!isStreamerAdmin(user)) filter.userId = user.userId;
+      const doc = await PodcastEpisode.findOneAndUpdate(filter, { $set: input }, { new: true });
       if (!doc) throw new Error('Podcast episode not found');
       return toItem(doc);
     },
 
     deletePodcastEpisode: async (_: any, { id }: any, context: any) => {
-      await requireStreamerAuth(context);
-      await PodcastEpisode.findByIdAndDelete(id);
+      const user = await requireStreamerAuth(context);
+      assertValidObjectId(id, 'podcast episode');
+      const filter: any = { _id: id };
+      if (!isStreamerAdmin(user)) filter.userId = user.userId;
+      const result = await PodcastEpisode.findOneAndDelete(filter);
+      if (!result) throw new Error('Podcast episode not found');
       return true;
     },
 
@@ -184,15 +257,22 @@ export const streamerResolvers = {
     },
 
     updatePodcastShow: async (_: any, { id, input }: any, context: any) => {
-      await requireStreamerAuth(context);
-      const doc = await PodcastShow.findByIdAndUpdate(id, { $set: input }, { new: true });
+      const user = await requireStreamerAuth(context);
+      assertValidObjectId(id, 'podcast show');
+      const filter: any = { _id: id };
+      if (!isStreamerAdmin(user)) filter.userId = user.userId;
+      const doc = await PodcastShow.findOneAndUpdate(filter, { $set: input }, { new: true });
       if (!doc) throw new Error('Podcast show not found');
       return toItem(doc);
     },
 
     deletePodcastShow: async (_: any, { id }: any, context: any) => {
-      await requireStreamerAuth(context);
-      await PodcastShow.findByIdAndDelete(id);
+      const user = await requireStreamerAuth(context);
+      assertValidObjectId(id, 'podcast show');
+      const filter: any = { _id: id };
+      if (!isStreamerAdmin(user)) filter.userId = user.userId;
+      const result = await PodcastShow.findOneAndDelete(filter);
+      if (!result) throw new Error('Podcast show not found');
       return true;
     },
 
@@ -205,15 +285,22 @@ export const streamerResolvers = {
     },
 
     updateGuestContact: async (_: any, { id, input }: any, context: any) => {
-      await requireStreamerAuth(context);
-      const doc = await GuestContact.findByIdAndUpdate(id, { $set: input }, { new: true });
+      const user = await requireStreamerAuth(context);
+      assertValidObjectId(id, 'guest contact');
+      const filter: any = { _id: id };
+      if (!isStreamerAdmin(user)) filter.userId = user.userId;
+      const doc = await GuestContact.findOneAndUpdate(filter, { $set: input }, { new: true });
       if (!doc) throw new Error('Guest contact not found');
       return toItem(doc);
     },
 
     deleteGuestContact: async (_: any, { id }: any, context: any) => {
-      await requireStreamerAuth(context);
-      await GuestContact.findByIdAndDelete(id);
+      const user = await requireStreamerAuth(context);
+      assertValidObjectId(id, 'guest contact');
+      const filter: any = { _id: id };
+      if (!isStreamerAdmin(user)) filter.userId = user.userId;
+      const result = await GuestContact.findOneAndDelete(filter);
+      if (!result) throw new Error('Guest contact not found');
       return true;
     },
 
@@ -226,15 +313,22 @@ export const streamerResolvers = {
     },
 
     updateClip: async (_: any, { id, input }: any, context: any) => {
-      await requireStreamerAuth(context);
-      const doc = await Clip.findByIdAndUpdate(id, { $set: input }, { new: true });
+      const user = await requireStreamerAuth(context);
+      assertValidObjectId(id, 'clip');
+      const filter: any = { _id: id };
+      if (!isStreamerAdmin(user)) filter.userId = user.userId;
+      const doc = await Clip.findOneAndUpdate(filter, { $set: input }, { new: true });
       if (!doc) throw new Error('Clip not found');
       return toItem(doc);
     },
 
     deleteClip: async (_: any, { id }: any, context: any) => {
-      await requireStreamerAuth(context);
-      await Clip.findByIdAndDelete(id);
+      const user = await requireStreamerAuth(context);
+      assertValidObjectId(id, 'clip');
+      const filter: any = { _id: id };
+      if (!isStreamerAdmin(user)) filter.userId = user.userId;
+      const result = await Clip.findOneAndDelete(filter);
+      if (!result) throw new Error('Clip not found');
       return true;
     },
 
@@ -246,8 +340,12 @@ export const streamerResolvers = {
     },
 
     deleteRevenueEntry: async (_: any, { id }: any, context: any) => {
-      await requireStreamerAuth(context);
-      await RevenueEntry.findByIdAndDelete(id);
+      const user = await requireStreamerAuth(context);
+      assertValidObjectId(id, 'revenue entry');
+      const filter: any = { _id: id };
+      if (!isStreamerAdmin(user)) filter.userId = user.userId;
+      const result = await RevenueEntry.findOneAndDelete(filter);
+      if (!result) throw new Error('Revenue entry not found');
       return true;
     },
 

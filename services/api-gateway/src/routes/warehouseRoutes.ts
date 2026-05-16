@@ -1,9 +1,10 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { createHash } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
-import { writeFileSync, mkdirSync, existsSync } from 'fs';
+import { writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs';
 import { join } from 'path';
+import mongoose from 'mongoose';
 import { jwtService } from '../services/jwtService';
 import { PARSER_VERSION } from '../services/warehousePdfParser';
 import { submitParsePdfJob } from '../services/warehousePdfParser/parsePdfJob';
@@ -12,14 +13,28 @@ import { Equipment } from '../models/equipment.models';
 import { BroadcastEvent } from '../models/broadcast.models';
 import { WarehousePdfImport } from '../models/warehousePdfImport.models';
 import { WarehouseParserUnknownItem } from '../models/warehouseParserUnknownItem.models';
+import { Permission, computePermissions, hasPermission } from '../rbac';
+import { connectMongoDB } from '../config/mongodb';
+import { ObjectId } from 'mongodb';
+import { createLogger } from '../utils/logger';
+import { uploadLimiter } from '../middleware/rateLimiter';
+
+const logger = createLogger('warehouseRoutes');
 
 const router = Router();
 
+const MAX_PDF_BYTES = 10 * 1024 * 1024;
+
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: MAX_PDF_BYTES, files: 1 },
   fileFilter: (_req, file, cb) => {
-    if (file.mimetype === 'application/pdf') {
+    // Strict allowlist — both MIME and extension. Multer's `mimetype` comes from
+    // the client and is not trustworthy on its own; combining the two gives a
+    // small but real defense against trivially renamed payloads.
+    const isPdfMime = file.mimetype === 'application/pdf';
+    const isPdfExt = /\.pdf$/i.test(file.originalname || '');
+    if (isPdfMime && isPdfExt) {
       cb(null, true);
     } else {
       cb(new Error('Only PDF files are accepted'));
@@ -29,18 +44,110 @@ const upload = multer({
 
 const UPLOADS_DIR = join(__dirname, '../../uploads/pdf-imports');
 
-function extractUser(req: Request): { userId: string; displayName: string } | null {
+interface UploadAuthUser {
+  userId: string;
+  displayName: string;
+  permissions: string[];
+  systemRole: string;
+  departments: any[];
+}
+
+/**
+ * Express middleware that validates the bearer token and loads live user
+ * permissions from the database, then enforces a required permission for the
+ * route. Used to gate file-upload endpoints behind real RBAC instead of just
+ * "anyone with a JWT can hit this".
+ */
+function requireUploadPermission(permission: Permission) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ success: false, error: 'Authentication required' });
+      }
+      const token = authHeader.substring(7);
+      const payload = jwtService.verify(token);
+
+      if (!payload.userId || !ObjectId.isValid(payload.userId)) {
+        return res.status(401).json({ success: false, error: 'Invalid token' });
+      }
+
+      const mongoDb = await connectMongoDB();
+      const userDoc = await mongoDb.collection('users').findOne({ _id: new ObjectId(payload.userId) });
+      if (!userDoc || userDoc.isActive === false) {
+        return res.status(401).json({ success: false, error: 'User not found or inactive' });
+      }
+
+      const computed = computePermissions({
+        systemRole: userDoc.systemRole,
+        departments: userDoc.departments,
+        permissions: userDoc.permissions,
+      });
+
+      if (!hasPermission(computed, permission)) {
+        logger.warn('Upload permission denied', { userId: payload.userId, permission });
+        return res.status(403).json({ success: false, error: 'Permission denied' });
+      }
+
+      (req as any).authUser = {
+        userId: userDoc._id.toString(),
+        displayName:
+          userDoc.displayName ||
+          `${userDoc.firstName || ''} ${userDoc.lastName || ''}`.trim() ||
+          userDoc.email,
+        permissions: userDoc.permissions || [],
+        systemRole: userDoc.systemRole || 'DEPARTMENT_USER',
+        departments: userDoc.departments || [],
+      } satisfies UploadAuthUser;
+
+      next();
+    } catch (error: any) {
+      logger.warn('Upload auth failed', { error: error.message });
+      return res.status(401).json({ success: false, error: 'Authentication failed' });
+    }
+  };
+}
+
+/**
+ * Multer error handler. Without this, multer surfaces raw errors (file too
+ * large, unexpected field, etc.) that bubble up to a generic 500 response.
+ */
+function handleMulterError(err: any, _req: Request, res: Response, next: NextFunction) {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ success: false, error: `File exceeds maximum size of ${MAX_PDF_BYTES} bytes` });
+    }
+    return res.status(400).json({ success: false, error: err.message });
+  }
+  if (err) {
+    return res.status(400).json({ success: false, error: err.message || 'Upload failed' });
+  }
+  next();
+}
+
+function extractUser(req: Request): UploadAuthUser | null {
+  return ((req as any).authUser as UploadAuthUser) || null;
+}
+
+/**
+ * Sanitize a filename for safe persistence on disk. Strips path separators and
+ * keeps only filename-safe characters; falls back to the importId if nothing
+ * is left.
+ */
+function sanitizeFilename(name: string | undefined, fallback: string): string {
+  if (!name) return `${fallback}.pdf`;
+  const base = name.split(/[\\/]/).pop() || name;
+  const safe = base.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 200);
+  return safe.toLowerCase().endsWith('.pdf') ? safe : `${safe}.pdf`;
+}
+
+function safelyDeleteFile(path: string): void {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
-    const token = authHeader.substring(7);
-    const payload = jwtService.verify(token);
-    return {
-      userId: payload.userId || '',
-      displayName: payload.displayName || `${payload.firstName || ''} ${payload.lastName || ''}`.trim(),
-    };
-  } catch {
-    return null;
+    if (existsSync(path)) {
+      unlinkSync(path);
+    }
+  } catch (err: any) {
+    logger.warn('Failed to clean up upload file', { path, error: err.message });
   }
 }
 
@@ -66,22 +173,47 @@ function ensureUploadsDir(): void {
  * Does NOT write to the database (except audit record).
  * Failed parses are also retained for debugging.
  */
-router.post('/import-equipment-pdf', upload.single('file'), async (req: Request, res: Response) => {
+router.post(
+  '/import-equipment-pdf',
+  uploadLimiter,
+  requireUploadPermission(Permission.WAREHOUSE_MANAGE),
+  (req: Request, res: Response, next: NextFunction) => {
+    upload.single('file')(req, res, (err: any) => {
+      if (err) return handleMulterError(err, req, res, next);
+      next();
+    });
+  },
+  async (req: Request, res: Response) => {
   const importId = uuidv4();
   const user = extractUser(req);
+  let pdfPath: string | null = null;
+  let parseSucceeded = false;
 
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, error: 'No PDF file uploaded' });
     }
 
+    // Defense in depth: re-check the file size and that the buffer starts with %PDF.
+    if (req.file.size > MAX_PDF_BYTES) {
+      return res.status(413).json({ success: false, error: 'File too large' });
+    }
+    if (!req.file.buffer || req.file.buffer.length < 4 || req.file.buffer.subarray(0, 4).toString('ascii') !== '%PDF') {
+      return res.status(400).json({ success: false, error: 'Uploaded file is not a valid PDF' });
+    }
+
     // Persist the PDF to disk for audit (before parsing, so failures are also retained)
     ensureUploadsDir();
-    const pdfPath = join(UPLOADS_DIR, `${importId}.pdf`);
+    pdfPath = join(UPLOADS_DIR, `${importId}.pdf`);
     writeFileSync(pdfPath, req.file.buffer);
 
-    // Fetch inventory for matching
-    const inventoryDocs = await Equipment.find({ isDisabled: false }).lean();
+    // Fetch inventory for matching. Project only the fields the parser needs to keep
+    // memory + bandwidth bounded even on large catalogs (the equipment collection
+    // can grow to thousands of rows). Indexed on `isDisabled`.
+    const inventoryDocs = await Equipment.find(
+      { isDisabled: false },
+      { _id: 1, name: 1, category: 1, quantityTotal: 1, quantityAvailable: 1 }
+    ).lean();
     const inventory = inventoryDocs.map((doc: any) => ({
       id: doc._id.toString(),
       name: doc.name,
@@ -113,9 +245,10 @@ router.post('/import-equipment-pdf', upload.single('file'), async (req: Request,
     );
 
     // Create a draft audit row
+    const safeFileName = sanitizeFilename(req.file.originalname, importId);
     await WarehousePdfImport.create({
       importId,
-      uploadedFileName: req.file.originalname || 'upload.pdf',
+      uploadedFileName: safeFileName,
       uploadedBy: user?.userId || 'anonymous',
       uploadedByName: user?.displayName || 'Unknown',
       uploadedAt: new Date(),
@@ -133,6 +266,14 @@ router.post('/import-equipment-pdf', upload.single('file'), async (req: Request,
       inventoryItemCount,
     });
 
+    parseSucceeded = true;
+    logger.info('PDF import parsed', {
+      importId,
+      userId: user?.userId,
+      itemCount: result.equipmentItems.length,
+      matched: result.equipmentItems.filter(i => i.status === 'matched').length,
+    });
+
     return res.json({
       success: true,
       importId,
@@ -142,20 +283,23 @@ router.post('/import-equipment-pdf', upload.single('file'), async (req: Request,
       ...result,
     });
   } catch (error: any) {
-    console.error('Error parsing equipment PDF:', error);
+    logger.error('Error parsing equipment PDF', {
+      importId,
+      userId: user?.userId,
+      error: error.message,
+    });
 
     // Save failed parse for debugging
     try {
       ensureUploadsDir();
-      if (req.file) {
-        const pdfPath = join(UPLOADS_DIR, `${importId}.pdf`);
+      if (req.file && pdfPath) {
         if (!existsSync(pdfPath)) {
           writeFileSync(pdfPath, req.file.buffer);
         }
       }
       await WarehousePdfImport.create({
         importId,
-        uploadedFileName: req.file?.originalname || 'upload.pdf',
+        uploadedFileName: sanitizeFilename(req.file?.originalname, importId),
         uploadedBy: user?.userId || 'anonymous',
         uploadedByName: user?.displayName || 'Unknown',
         uploadedAt: new Date(),
@@ -166,30 +310,56 @@ router.post('/import-equipment-pdf', upload.single('file'), async (req: Request,
         warnings: [],
         status: 'failed',
         errorMessage: error.message || 'Unknown parsing error',
-        rawPdfPath: req.file ? join(UPLOADS_DIR, `${importId}.pdf`) : undefined,
+        rawPdfPath: pdfPath || undefined,
       });
     } catch (auditErr: any) {
-      console.error('Failed to save failed-parse audit record:', auditErr);
+      logger.error('Failed to save failed-parse audit record', { error: auditErr.message });
     }
+
+    // Don't expose raw error details to clients in production.
+    const clientMessage = process.env.NODE_ENV === 'production'
+      ? 'Failed to parse PDF'
+      : (error.message || 'Failed to parse PDF');
 
     return res.status(500).json({
       success: false,
-      error: error.message || 'Failed to parse PDF',
+      error: clientMessage,
     });
+  } finally {
+    // If parsing never wrote an audit row and never finished, clean up the
+    // PDF on disk to avoid filling the uploads directory with orphan files.
+    if (!parseSucceeded && pdfPath) {
+      // Note: we still keep the file when there is a failed audit row so it
+      // can be debugged. Only clean up if there is no audit row (shouldn't
+      // happen, but defensive).
+      try {
+        const audit = await WarehousePdfImport.findOne({ importId }).lean();
+        if (!audit) safelyDeleteFile(pdfPath);
+      } catch {
+        // best-effort cleanup
+      }
+    }
   }
-});
+}
+);
 
 /**
  * POST /api/warehouse/import-equipment-pdf/check-duplicates
  * Lightweight pre-commit check: returns overlap info between
  * the parsed items and the event's existing equipment list.
  */
-router.post('/import-equipment-pdf/check-duplicates', async (req: Request, res: Response) => {
+router.post(
+  '/import-equipment-pdf/check-duplicates',
+  requireUploadPermission(Permission.WAREHOUSE_VIEW),
+  async (req: Request, res: Response) => {
   try {
     const { eventId, importContentHash } = req.body;
 
     if (!eventId) {
       return res.status(400).json({ success: false, error: 'eventId is required' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(eventId)) {
+      return res.status(400).json({ success: false, error: 'Invalid eventId' });
     }
 
     // Check for existing equipment on the event
@@ -227,10 +397,11 @@ router.post('/import-equipment-pdf/check-duplicates', async (req: Request, res: 
         : null,
     });
   } catch (error: any) {
-    console.error('Error checking duplicates:', error);
-    return res.status(500).json({ success: false, error: error.message });
+    logger.error('Error checking duplicates', { error: error.message });
+    return res.status(500).json({ success: false, error: 'Failed to check duplicates' });
   }
-});
+}
+);
 
 /**
  * POST /api/warehouse/import-equipment-pdf/commit
@@ -238,12 +409,18 @@ router.post('/import-equipment-pdf/check-duplicates', async (req: Request, res: 
  * Safety: only writes to metadata.departments.externalBroadcasts.customData.equipmentList.
  * Does NOT auto-allocate, create EquipmentAssignment rows, or modify Equipment quantities.
  */
-router.post('/import-equipment-pdf/commit', async (req: Request, res: Response) => {
+router.post(
+  '/import-equipment-pdf/commit',
+  requireUploadPermission(Permission.WAREHOUSE_MANAGE),
+  async (req: Request, res: Response) => {
   try {
-    const { importId, eventId, items, broadcastDetails, crew, notes } = req.body;
+    const { importId, eventId, items } = req.body;
 
     if (!eventId) {
       return res.status(400).json({ success: false, error: 'eventId is required' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(eventId)) {
+      return res.status(400).json({ success: false, error: 'Invalid eventId' });
     }
     if (!importId) {
       return res.status(400).json({ success: false, error: 'importId is required' });
@@ -454,25 +631,33 @@ router.post('/import-equipment-pdf/commit', async (req: Request, res: Response) 
       duplicateImportWarning,
     });
   } catch (error: any) {
-    console.error('Error committing equipment PDF import:', error);
+    logger.error('Error committing equipment PDF import', { error: error.message });
+    const clientMessage = process.env.NODE_ENV === 'production'
+      ? 'Failed to commit import'
+      : (error.message || 'Failed to commit import');
     return res.status(500).json({
       success: false,
-      error: error.message || 'Failed to commit import',
+      error: clientMessage,
     });
   }
-});
+}
+);
 
 /**
  * GET /api/warehouse/import-equipment-pdf/status/:jobId
  * Stub endpoint for future async job polling.
  * Today: always returns completed (parsing is synchronous).
  */
-router.get('/import-equipment-pdf/status/:jobId', async (_req: Request, res: Response) => {
+router.get(
+  '/import-equipment-pdf/status/:jobId',
+  requireUploadPermission(Permission.WAREHOUSE_VIEW),
+  async (_req: Request, res: Response) => {
   return res.json({
     success: true,
     status: 'completed',
     message: 'Parsing is currently synchronous. This endpoint is reserved for future async support.',
   });
-});
+}
+);
 
 export { router as warehouseRoutes };

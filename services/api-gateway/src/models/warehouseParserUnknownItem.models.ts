@@ -49,6 +49,11 @@ const warehouseParserUnknownItemSchema = new Schema<IWarehouseParserUnknownItem>
 warehouseParserUnknownItemSchema.index({ normalizedName: 1 });
 warehouseParserUnknownItemSchema.index({ canonicalKey: 1 });
 warehouseParserUnknownItemSchema.index({ seenCount: -1 });
+warehouseParserUnknownItemSchema.index({ importId: 1 });
+warehouseParserUnknownItemSchema.index({ eventId: 1 });
+warehouseParserUnknownItemSchema.index({ resolution: 1 });
+warehouseParserUnknownItemSchema.index({ resolution: 1, lastSeenAt: -1 });
+warehouseParserUnknownItemSchema.index({ canonicalKey: 1, resolution: 1 });
 
 export const WarehouseParserUnknownItem = mongoose.model<IWarehouseParserUnknownItem>(
   'WarehouseParserUnknownItem',

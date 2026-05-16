@@ -5,6 +5,7 @@ import { Button, Card, Radio, DatePicker, Space, Empty, Popconfirm, Typography }
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { MCRBulletinPost } from '../types';
 import RichTextEditor from './RichTextEditor';
+import { sanitizeMcrHtml } from '../utils/sanitizeHtml';
 import dayjs from 'dayjs';
 
 const { Text } = Typography;
@@ -115,7 +116,7 @@ export default function BulletinWidget() {
               <div className="pr-6">
                 <div
                   className="prose max-w-none prose-strong:text-inherit"
-                  dangerouslySetInnerHTML={{ __html: post.content }}
+                  dangerouslySetInnerHTML={{ __html: sanitizeMcrHtml(post.content) }}
                 />
                 <div className="mt-2 text-xs text-gray-500">
                   <Text type="secondary">נוצר על ידי: {post.createdBy}</Text>

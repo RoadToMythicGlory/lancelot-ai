@@ -171,7 +171,7 @@ const UpcomingEvents: React.FC<UpcomingEventsProps> = ({ onEventClick }) => {
       key={event.id}
       className="mb-4 hover:shadow-lg transition-shadow cursor-pointer"
       onClick={() => handleEventClick(event)}
-      bordered={false}
+      variant="borderless"
     >
       <Row gutter={16} align="middle">
         <Col span={4}>

@@ -152,7 +152,11 @@ type WarehouseEquipment {
   
   # Quantity-based items use pool tracking instead of per-unit barcodes
   isQuantityBased: Boolean!
-  
+
+  # Shared engineering equipment ("ציוד הנדסה שיתופי") — flagged inventory
+  # that MCR tracks separately whenever it is assigned to an event or staff.
+  isSharedEngineeringEquipment: Boolean!
+
   # Equipment state
   isDisabled: Boolean!
   disabledAt: DateTime
@@ -167,6 +171,14 @@ type WarehouseEquipment {
   updatedAt: DateTime!
 }
 
+type WarehouseEquipmentStats {
+  totalEquipment: Int!
+  totalAvailable: Int!
+  totalAssigned: Int!
+  totalMaintenance: Int!
+  totalDisabled: Int!
+}
+
 type StorageLocation {
   row: String
   shelf: String
@@ -178,6 +190,8 @@ input WarehouseEquipmentFilter {
   status: String
   available: Boolean
   location: String
+  searchText: String
+  isSharedEngineeringEquipment: Boolean
 }
 
 # Equipment Input Types
@@ -195,6 +209,7 @@ input CreateEquipmentInput {
   storage: StorageLocationInput
   quantityTotal: Int!
   isQuantityBased: Boolean
+  isSharedEngineeringEquipment: Boolean
 }
 
 input UpdateEquipmentInput {
@@ -217,6 +232,7 @@ input UpdateEquipmentInput {
   disabledReason: String
   suspensionStatus: String
   isQuantityBased: Boolean
+  isSharedEngineeringEquipment: Boolean
 }
 
 input StorageLocationInput {
@@ -923,7 +939,8 @@ type Query {
   departments: [Department!]!
   
   # Warehouse Equipment
-  warehouseEquipment(filter: WarehouseEquipmentFilter): [WarehouseEquipment!]!
+  warehouseEquipment(filter: WarehouseEquipmentFilter, limit: Int, offset: Int): [WarehouseEquipment!]!
+  warehouseEquipmentStats(filter: WarehouseEquipmentFilter): WarehouseEquipmentStats!
   
   # Equipment Assignments
   equipmentAssignmentsByEvent(broadcastEventId: ID!): [EquipmentAssignment!]!
@@ -1163,14 +1180,16 @@ type AuthPayload {
 
 # ===== SUBSCRIPTIONS =====
 type Subscription {
-  # Broadcast event updates
-  broadcastEventUpdated: BroadcastEvent!
-  
+  # Broadcast event updates. Pass `departmentId` to receive department-scoped
+  # updates only; omit it to subscribe to the global stream (still gated by
+  # BROADCAST_VIEW on the resolver).
+  broadcastEventUpdated(departmentId: ID): BroadcastEvent!
+
   # ===== SHIFTS SUBSCRIPTIONS =====
   shiftUpdated(userId: String): Shift!
   shiftSwapRequestUpdated(userId: String): ShiftSwapRequest!
   vacationRequestUpdated(userId: String): VacationRequest!
-} 
+}
 
 # ================== SHIFTS MANAGEMENT SYSTEM ==================
 
@@ -2002,6 +2021,51 @@ type BroadcastDetails {
   cameraCount: Int
 }
 
+enum MCRPreparationStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  READY
+}
+
+enum MCRPlatformStatus {
+  PENDING
+  CONFIRMED
+  LIVE
+  OFF
+}
+
+type MCRFeed {
+  id: ID!
+  name: String
+  satellite: String
+  frequency: String
+  symbolRate: String
+  polarization: String
+  fec: String
+  encryptionType: String
+  encryptionKey: String
+  bissKey: String
+  format: String
+  notes: String
+}
+
+type MCRContact {
+  id: ID!
+  fullName: String
+  role: String
+  phone: String
+  email: String
+  notes: String
+}
+
+type MCROutputPlatform {
+  id: ID!
+  name: String
+  outputType: String
+  status: MCRPlatformStatus
+  details: String
+}
+
 type MCREvent {
   id: ID!
   title: String!
@@ -2015,6 +2079,37 @@ type MCREvent {
   updatedAt: DateTime!
   # Link to broadcast planning if exists
   broadcastEventId: ID
+
+  # Operational preparation
+  preparationStatus: MCRPreparationStatus!
+  controlStudio: String
+  broadcastChannel: String
+  mcrStartTime: DateTime
+  mcrEndTime: DateTime
+  preparationNotes: String
+  sourceLabel: String
+  feeds: [MCRFeed!]!
+  contacts: [MCRContact!]!
+  outputPlatforms: [MCROutputPlatform!]!
+  exchangeGroupIds: [ID!]!
+  # Snapshot of shared engineering equipment ("ציוד הנדסה שיתופי") that is
+  # currently allocated to the linked broadcast event. Maintained server-side
+  # whenever an `EquipmentAssignment` is created / returned / transferred.
+  sharedEngineeringEquipment: [MCRSharedEngineeringEquipment!]!
+}
+
+type MCRSharedEngineeringEquipment {
+  assignmentId: ID!
+  equipmentId: ID!
+  equipmentName: String!
+  barcode: String
+  category: String
+  quantity: Int!
+  status: String!
+  assignedAt: DateTime
+  returnedAt: DateTime
+  assignedByName: String
+  notes: String
 }
 
 type MCRBulletinPost {
@@ -2065,6 +2160,38 @@ input BroadcastDetailsInput {
   cameraCount: Int
 }
 
+input MCRFeedInput {
+  id: ID
+  name: String
+  satellite: String
+  frequency: String
+  symbolRate: String
+  polarization: String
+  fec: String
+  encryptionType: String
+  encryptionKey: String
+  bissKey: String
+  format: String
+  notes: String
+}
+
+input MCRContactInput {
+  id: ID
+  fullName: String
+  role: String
+  phone: String
+  email: String
+  notes: String
+}
+
+input MCROutputPlatformInput {
+  id: ID
+  name: String
+  outputType: String
+  status: MCRPlatformStatus
+  details: String
+}
+
 input CreateMCREventInput {
   title: String!
   start: DateTime!
@@ -2073,6 +2200,16 @@ input CreateMCREventInput {
   isMCROnly: Boolean
   details: BroadcastDetailsInput
   broadcastEventId: ID
+  preparationStatus: MCRPreparationStatus
+  controlStudio: String
+  broadcastChannel: String
+  mcrStartTime: DateTime
+  mcrEndTime: DateTime
+  preparationNotes: String
+  sourceLabel: String
+  feeds: [MCRFeedInput!]
+  contacts: [MCRContactInput!]
+  outputPlatforms: [MCROutputPlatformInput!]
 }
 
 input UpdateMCREventInput {
@@ -2083,6 +2220,17 @@ input UpdateMCREventInput {
   isMCROnly: Boolean
   details: BroadcastDetailsInput
   broadcastEventId: ID
+  preparationStatus: MCRPreparationStatus
+  controlStudio: String
+  broadcastChannel: String
+  mcrStartTime: DateTime
+  mcrEndTime: DateTime
+  preparationNotes: String
+  sourceLabel: String
+  feeds: [MCRFeedInput!]
+  contacts: [MCRContactInput!]
+  outputPlatforms: [MCROutputPlatformInput!]
+  exchangeGroupIds: [ID!]
 }
 
 input CreateBulletinPostInput {
@@ -2128,6 +2276,140 @@ input UpdateActivityRowInput {
   isHidden: Boolean
 }
 
+# Daily Checks types
+type MCRDailyCheckTemplate {
+  id: ID!
+  name: String!
+  description: String
+  order: Int!
+  isActive: Boolean!
+  isDefault: Boolean!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type MCRDailyCheckEntry {
+  id: ID!
+  date: DateTime!
+  template: MCRDailyCheckTemplate!
+  isCompleted: Boolean!
+  completedBy: User
+  completedAt: DateTime
+  notes: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type MCRDailyCheckSummary {
+  date: DateTime!
+  total: Int!
+  completed: Int!
+  percentage: Int!
+  entries: [MCRDailyCheckEntry!]!
+}
+
+input CreateDailyCheckTemplateInput {
+  name: String!
+  description: String
+  order: Int
+}
+
+input UpdateDailyCheckTemplateInput {
+  name: String
+  description: String
+  order: Int
+  isActive: Boolean
+}
+
+# External exchange
+enum MCRExchangeStatus {
+  DRAFT
+  PUBLISHED
+  ACTIVE
+  REVIEW_PENDING
+  CLOSED
+}
+
+type MCRExchangeUpload {
+  id: ID!
+  fileName: String!
+  uploadedByName: String
+  uploadedByEmail: String
+  synopsisTitle: String
+  notes: String
+  isAccepted: Boolean!
+  acceptedAt: DateTime
+  createdAt: DateTime
+}
+
+type MCRExchangeGroup {
+  id: ID!
+  name: String!
+  description: String
+  status: MCRExchangeStatus!
+  takerCount: Int!
+  synopsisCount: Int!
+  pendingUploads: [MCRExchangeUpload!]!
+  linkedMcrEventIds: [ID!]!
+  createdBy: User
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+input CreateMCRExchangeGroupInput {
+  name: String!
+  description: String
+  linkedMcrEventId: ID
+}
+
+input UpdateMCRExchangeGroupInput {
+  name: String
+  description: String
+  status: MCRExchangeStatus
+  takerCount: Int
+  synopsisCount: Int
+}
+
+# Document parsing
+enum MCRDocumentItemKind {
+  FEED
+  PLATFORM
+}
+
+type MCRDocumentFeedSuggestion {
+  name: String
+  satellite: String
+  frequency: String
+  symbolRate: String
+  polarization: String
+  fec: String
+  encryptionType: String
+  encryptionKey: String
+  bissKey: String
+  format: String
+  notes: String
+}
+
+type MCRDocumentPlatformSuggestion {
+  name: String
+  outputType: String
+  status: MCRPlatformStatus
+  details: String
+}
+
+type MCRDocumentParseResult {
+  feeds: [MCRDocumentFeedSuggestion!]!
+  platforms: [MCRDocumentPlatformSuggestion!]!
+  itemCount: Int!
+}
+
+input MCRDocumentParseInput {
+  fileName: String!
+  fileType: String!
+  content: String!
+  lookFor: [MCRDocumentItemKind!]
+}
+
 # MCR Queries
 extend type Query {
   # MCR Events
@@ -2155,6 +2437,81 @@ extend type Query {
   
   activityRow(id: ID!): ActivityRow
   activityRowByBroadcastEvent(broadcastEventId: ID!, date: DateTime!): ActivityRow
+
+  # Daily Checks
+  mcrDailyCheckTemplates(activeOnly: Boolean): [MCRDailyCheckTemplate!]!
+  mcrDailyCheck(date: DateTime!): MCRDailyCheckSummary!
+
+  # External Exchange
+  mcrExchangeGroups(status: MCRExchangeStatus, mcrEventId: ID): [MCRExchangeGroup!]!
+  mcrExchangeGroup(id: ID!): MCRExchangeGroup
+
+  # Shared engineering equipment tracking ("ציוד הנדסה שיתופי").
+  # Returns every active allocation of equipment that is flagged as shared
+  # engineering, whether the allocation targets a broadcast event (shown to
+  # MCR via the linked shadow event) or a staff member (internal worker
+  # dispatch). Pass `status: "all"` to include returned / transferred /
+  # cancelled rows; defaults to active.
+  mcrSharedEngineeringEquipment(
+    status: String = "active"
+  ): MCRSharedEngineeringTracking!
+}
+
+type MCRSharedEngineeringTracking {
+  eventAssignments: [MCRSharedEngineeringEventAssignment!]!
+  staffAssignments: [MCRSharedEngineeringStaffAssignment!]!
+  availableEquipment: [MCRSharedEngineeringWarehouseEquipment!]!
+}
+
+type MCRSharedEngineeringWarehouseEquipment {
+  equipmentId: ID!
+  equipmentName: String!
+  barcode: String
+  category: String
+  quantity: Int!
+  status: String!
+}
+
+type MCRSharedEngineeringEventAssignment {
+  assignmentId: ID!
+  equipmentId: ID!
+  equipmentName: String!
+  barcode: String
+  category: String
+  quantity: Int!
+  status: String!
+  assignedAt: DateTime
+  returnedAt: DateTime
+  assignedByName: String
+  notes: String
+  # Linked broadcast event metadata
+  broadcastEventId: ID!
+  broadcastEventTitle: String
+  broadcastEventStart: DateTime
+  broadcastEventEnd: DateTime
+  # Linked MCR shadow event (when one exists for the broadcast)
+  mcrEventId: ID
+  mcrEventTitle: String
+  mcrEventStart: DateTime
+  mcrEventEnd: DateTime
+}
+
+type MCRSharedEngineeringStaffAssignment {
+  assignmentId: ID!
+  equipmentId: ID!
+  equipmentName: String!
+  barcode: String
+  category: String
+  quantity: Int!
+  status: String!
+  assignedToType: String!
+  assignedToUserId: ID
+  assignedToName: String!
+  assignedToPhone: String
+  assignedAt: DateTime
+  assignedByName: String
+  returnedAt: DateTime
+  notes: String
 }
 
 # MCR Mutations
@@ -2172,8 +2529,56 @@ extend type Mutation {
   # Activity Rows
   createActivityRow(input: CreateActivityRowInput!): ActivityRow!
   updateActivityRow(id: ID!, input: UpdateActivityRowInput!): ActivityRow!
+  saveActivityRows(date: DateTime!, rows: [SaveActivityRowInput!]!): [ActivityRow!]!
   deleteActivityRow(id: ID!): Boolean!
   hideActivityRow(id: ID!): ActivityRow!
+
+  # Daily Checks
+  createMCRDailyCheckTemplate(input: CreateDailyCheckTemplateInput!): MCRDailyCheckTemplate!
+  updateMCRDailyCheckTemplate(id: ID!, input: UpdateDailyCheckTemplateInput!): MCRDailyCheckTemplate!
+  deactivateMCRDailyCheckTemplate(id: ID!): MCRDailyCheckTemplate!
+  setMCRDailyCheckCompleted(
+    date: DateTime!
+    templateId: ID!
+    completed: Boolean!
+    notes: String
+  ): MCRDailyCheckEntry!
+
+  # External Exchange
+  createMCRExchangeGroup(input: CreateMCRExchangeGroupInput!): MCRExchangeGroup!
+  updateMCRExchangeGroup(id: ID!, input: UpdateMCRExchangeGroupInput!): MCRExchangeGroup!
+  closeMCRExchangeGroup(id: ID!): MCRExchangeGroup!
+  linkMCRExchangeGroupToEvent(groupId: ID!, mcrEventId: ID!): MCRExchangeGroup!
+  unlinkMCRExchangeGroupFromEvent(groupId: ID!, mcrEventId: ID!): MCRExchangeGroup!
+  acceptMCRExchangeUpload(groupId: ID!, uploadId: ID!): MCRExchangeGroup!
+  addMCRExchangeUpload(
+    groupId: ID!
+    fileName: String!
+    uploadedByName: String
+    synopsisTitle: String
+  ): MCRExchangeGroup!
+
+  # Document parsing
+  parseMCRDocument(input: MCRDocumentParseInput!): MCRDocumentParseResult!
+}
+
+input SaveActivityRowInput {
+  id: ID
+  date: DateTime!
+  activityName: String!
+  source: String
+  time: String!
+  endTime: String!
+  equipment: String
+  backup: String
+  routing: String
+  channel: String
+  broadcastType: BroadcastType
+  notes: String
+  status: ActivityStatus!
+  isHidden: Boolean
+  isManual: Boolean
+  broadcastEventId: ID
 }
 
 # MCR Subscriptions
@@ -2192,6 +2597,13 @@ extend type Subscription {
   activityRowCreated: ActivityRow!
   activityRowUpdated: ActivityRow!
   activityRowDeleted: ID!
+
+  # Real-time updates for daily check entries
+  mcrDailyCheckEntryUpdated: MCRDailyCheckEntry!
+  mcrDailyCheckTemplateChanged: MCRDailyCheckTemplate!
+
+  # Real-time updates for external exchange groups
+  mcrExchangeGroupUpdated: MCRExchangeGroup!
 }
 
 # ================== LANCELOT AI AGENT ==================
@@ -4077,4 +4489,228 @@ extend type Mutation {
   createRoleTemplate(input: CreateRoleTemplateInput!): RoleTemplate!
   updateRoleTemplate(id: ID!, input: UpdateRoleTemplateInput!): RoleTemplate!
   deleteRoleTemplate(id: ID!): Boolean!
+}
+
+# ==================== Flight Board ====================
+#
+# Flight Boards are saved live-operations dashboards. Each board is a grid of
+# panels (table / chart / KPI / timeline) configured by an admin. The list
+# of operational items shown inside the board is computed on demand by the
+# `flightBoardData` query, which aggregates rows across the existing event
+# entities (broadcasts, MCR events, etc.) into one normalized shape.
+
+enum FlightBoardItemType {
+  BROADCAST
+  STREAM
+  MCR
+  PODCAST
+  POST
+  PROJECT
+  EXTERNAL
+  MANUAL
+}
+
+enum FlightBoardPanelType {
+  TABLE
+  BAR_CHART
+  LINE_CHART
+  PIE_CHART
+  AREA_CHART
+  KPI
+  TIMELINE
+}
+
+enum FlightBoardPanelWidth {
+  QUARTER
+  THIRD
+  HALF
+  TWO_THIRDS
+  FULL
+}
+
+enum FlightBoardSortDirection {
+  ASC
+  DESC
+}
+
+enum FlightBoardChartMetric {
+  COUNT
+  PEAK_VIEWERS
+  AVG_VIEWERS
+  TOTAL_REVENUE
+  DURATION
+}
+
+enum FlightBoardVisibility {
+  ALL
+  ADMINS_ONLY
+}
+
+enum FlightBoardDateRangePreset {
+  TODAY
+  YESTERDAY
+  THIS_WEEK
+  THIS_MONTH
+  ALL
+  CUSTOM
+}
+
+type FlightBoardPanel {
+  id: ID!
+  panelKey: String!
+  title: String!
+  type: FlightBoardPanelType!
+  width: FlightBoardPanelWidth!
+  itemTypes: [FlightBoardItemType!]!
+  visibleColumns: [String!]!
+  chartGroupBy: String
+  chartMetric: FlightBoardChartMetric
+  sortField: String
+  sortDirection: FlightBoardSortDirection!
+  rowLimit: Int
+  order: Int!
+}
+
+type FlightBoard {
+  id: ID!
+  title: String!
+  description: String
+  refreshIntervalSec: Int!
+  visibility: FlightBoardVisibility!
+  isDefault: Boolean!
+  panels: [FlightBoardPanel!]!
+  createdBy: User
+  updatedBy: User
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type FlightBoardItem {
+  id: ID!
+  type: FlightBoardItemType!
+  title: String!
+  date: DateTime
+  startTime: DateTime
+  endTime: DateTime
+  channel: String
+  status: String
+  description: String
+  notes: String
+  raw: JSON
+  """Stable key in the form `${type}:${sourceId}` (or `MANUAL:${rowId}`).
+  Used by the overlay system to address rows for hide/edit/delete."""
+  itemKey: String!
+  """True when this row originated from the board's manual-row overlay."""
+  isManual: Boolean!
+  """Panel scope for manual rows; null/empty means visible across all
+  TABLE panels of the board."""
+  panelKey: String
+  """True when an admin override has modified one or more columns of a
+  source row on this board."""
+  hasOverride: Boolean!
+}
+
+type FlightBoardManualRow {
+  rowId: ID!
+  panelKey: String
+  values: JSON!
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+type FlightBoardItemOverride {
+  itemKey: String!
+  values: JSON!
+  updatedAt: DateTime
+}
+
+type FlightBoardOverlay {
+  hiddenItemKeys: [String!]!
+  manualRows: [FlightBoardManualRow!]!
+  itemOverrides: [FlightBoardItemOverride!]!
+}
+
+type FlightBoardData {
+  boardId: ID!
+  rangeStart: DateTime
+  rangeEnd: DateTime
+  rangePreset: FlightBoardDateRangePreset!
+  generatedAt: DateTime!
+  items: [FlightBoardItem!]!
+  overlay: FlightBoardOverlay!
+}
+
+input FlightBoardPanelInput {
+  panelKey: String
+  title: String!
+  type: FlightBoardPanelType!
+  width: FlightBoardPanelWidth!
+  itemTypes: [FlightBoardItemType!]
+  visibleColumns: [String!]
+  chartGroupBy: String
+  chartMetric: FlightBoardChartMetric
+  sortField: String
+  sortDirection: FlightBoardSortDirection
+  rowLimit: Int
+  order: Int
+}
+
+input CreateFlightBoardInput {
+  title: String!
+  description: String
+  refreshIntervalSec: Int
+  visibility: FlightBoardVisibility
+  isDefault: Boolean
+  panels: [FlightBoardPanelInput!]
+}
+
+input UpdateFlightBoardInput {
+  title: String
+  description: String
+  refreshIntervalSec: Int
+  visibility: FlightBoardVisibility
+  isDefault: Boolean
+  panels: [FlightBoardPanelInput!]
+}
+
+input FlightBoardDateRangeInput {
+  preset: FlightBoardDateRangePreset!
+  start: DateTime
+  end: DateTime
+}
+
+extend type Query {
+  flightBoards: [FlightBoard!]!
+  flightBoard(id: ID!): FlightBoard
+  flightBoardData(boardId: ID!, range: FlightBoardDateRangeInput!): FlightBoardData!
+}
+
+input FlightBoardManualRowInput {
+  panelKey: String
+  values: JSON
+}
+
+extend type Mutation {
+  createFlightBoard(input: CreateFlightBoardInput!): FlightBoard!
+  updateFlightBoard(id: ID!, input: UpdateFlightBoardInput!): FlightBoard!
+  deleteFlightBoard(id: ID!): Boolean!
+  setDefaultFlightBoard(id: ID!): FlightBoard!
+
+  """Add a board-only manual row. Optionally scoped to a single TABLE panel."""
+  addFlightBoardManualRow(boardId: ID!, input: FlightBoardManualRowInput!): FlightBoard!
+  """Replace the column values of an existing manual row."""
+  updateFlightBoardManualRow(boardId: ID!, rowId: ID!, values: JSON!): FlightBoard!
+  """Remove a manual row from the board overlay."""
+  deleteFlightBoardManualRow(boardId: ID!, rowId: ID!): FlightBoard!
+
+  """Hide a source row (`${type}:${id}`) from this board only."""
+  hideFlightBoardItem(boardId: ID!, itemKey: String!): FlightBoard!
+  """Restore a previously hidden source row."""
+  unhideFlightBoardItem(boardId: ID!, itemKey: String!): FlightBoard!
+
+  """Set per-column overrides for a source row on this board.
+  Pass `null` for a column key to clear that single override."""
+  setFlightBoardItemOverride(boardId: ID!, itemKey: String!, values: JSON!): FlightBoard!
+  """Drop all overrides for a source row on this board."""
+  clearFlightBoardItemOverride(boardId: ID!, itemKey: String!): FlightBoard!
 }

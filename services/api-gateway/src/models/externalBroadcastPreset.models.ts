@@ -63,6 +63,9 @@ const ExternalBroadcastPresetSchema = new Schema<IExternalBroadcastPreset>(
 );
 
 ExternalBroadcastPresetSchema.index({ name: 1 });
+ExternalBroadcastPresetSchema.index({ createdBy: 1 });
+ExternalBroadcastPresetSchema.index({ tags: 1 });
+ExternalBroadcastPresetSchema.index({ createdAt: -1 });
 
 export const ExternalBroadcastPreset = mongoose.model<IExternalBroadcastPreset>(
   'ExternalBroadcastPreset',

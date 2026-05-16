@@ -161,5 +161,11 @@ broadcastRightSchema.index({ contentType: 1, sport: 1, league: 1 });
 broadcastRightSchema.index({ rightsHolder: 1 });
 broadcastRightSchema.index({ territories: 1 });
 broadcastRightSchema.index({ title: 'text', rightsHolder: 'text' });
+broadcastRightSchema.index({ organizationId: 1, endDate: 1 });
+broadcastRightSchema.index({ organizationId: 1, contentType: 1 });
+broadcastRightSchema.index({ startDate: 1, endDate: 1 });
+broadcastRightSchema.index({ exclusivity: 1 });
+broadcastRightSchema.index({ createdBy: 1 });
+broadcastRightSchema.index({ status: 1, endDate: 1, expiryNotificationSent: 1 });
 
 export const BroadcastRightManaged = mongoose.model<IBroadcastRight>('BroadcastRightManaged', broadcastRightSchema);

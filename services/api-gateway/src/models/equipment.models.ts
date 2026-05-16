@@ -44,7 +44,13 @@ export interface IEquipment extends Document {
   // Quantity-based items (consumables, cables, etc.) are NOT scanned per-unit.
   // Only items where this is true expose the "Adjust Quantity" UI affordance.
   isQuantityBased: boolean;
-  
+
+  // Shared engineering equipment ("ציוד הנדסה שיתופי") — flagged inventory
+  // that MCR needs to track explicitly whenever it is dispatched, whether to a
+  // broadcast event or directly to a staff member. Surfaced on the dedicated
+  // MCR tab and embedded as a snapshot on the assigned event's metadata.
+  isSharedEngineeringEquipment: boolean;
+
   // Equipment state
   isDisabled: boolean;
   disabledAt?: Date;
@@ -228,7 +234,13 @@ const equipmentSchema = new Schema<IEquipment>({
     default: false,
     required: true
   },
-  
+
+  isSharedEngineeringEquipment: {
+    type: Boolean,
+    default: false,
+    required: true
+  },
+
   // Equipment state
   isDisabled: { 
     type: Boolean, 
@@ -262,6 +274,12 @@ const equipmentSchema = new Schema<IEquipment>({
 // Indexes for performance
 equipmentSchema.index({ category: 1, status: 1 });
 equipmentSchema.index({ name: 'text' });
+equipmentSchema.index({ status: 1 });
+equipmentSchema.index({ isDisabled: 1 });
+equipmentSchema.index({ isSharedEngineeringEquipment: 1 });
+equipmentSchema.index({ lastUsedAt: 1 });
+equipmentSchema.index({ createdAt: -1 });
+equipmentSchema.index({ trackerTagId: 1 });
 
 // Pre-save hook to ensure quantityAvailable is correct
 equipmentSchema.pre('save', function(next) {
@@ -463,7 +481,14 @@ const equipmentHistorySchema = new Schema<IEquipmentHistory>({
 // Indexes for performance
 equipmentAssignmentSchema.index({ status: 1, startDate: 1 });
 equipmentAssignmentSchema.index({ equipmentId: 1, status: 1 });
+equipmentAssignmentSchema.index({ eventId: 1, status: 1 });
+equipmentAssignmentSchema.index({ assignedAt: -1 });
+equipmentAssignmentSchema.index({ assignedBy: 1 });
+
 equipmentHistorySchema.index({ equipmentId: 1, date: -1 });
+equipmentHistorySchema.index({ eventId: 1, date: -1 });
+equipmentHistorySchema.index({ action: 1, date: -1 });
+equipmentHistorySchema.index({ performedBy: 1, date: -1 });
 
 // Export models
 export const EquipmentAssignment = mongoose.model<IEquipmentAssignment>('EquipmentAssignment', equipmentAssignmentSchema);

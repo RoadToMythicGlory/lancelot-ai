@@ -33,16 +33,26 @@ export const authResolvers = {
 
       let isValidPassword = false;
 
-      // Dev shortcut — only when explicitly opted in
-      if (process.env.ALLOW_DEV_PASSWORD === '1' && args.password === 'test123') {
-        logger.debug('Using development password shortcut');
+      // Dev shortcut — explicitly opted in AND not in production. Hard-blocked outside development
+      // to remove any possibility of "test123" working against a production database.
+      const devPasswordAllowed =
+        process.env.NODE_ENV !== 'production' &&
+        process.env.ALLOW_DEV_PASSWORD === '1';
+
+      if (devPasswordAllowed && args.password === 'test123') {
+        logger.warn('Using development password shortcut (NOT for production)');
         isValidPassword = true;
       } else if (user.password && user.password.startsWith('$2')) {
         isValidPassword = await bcrypt.compare(args.password, user.password);
         logger.debug('Bcrypt comparison result', { valid: isValidPassword });
-      } else {
+      } else if (process.env.NODE_ENV !== 'production') {
+        // Plain-text fallback only allowed in non-production for legacy seed accounts.
         isValidPassword = user.password === args.password;
-        logger.debug('Plain text comparison result', { valid: isValidPassword });
+        logger.debug('Plain text comparison result (dev only)', { valid: isValidPassword });
+      } else {
+        // Production: any user record without a bcrypt hash is treated as invalid.
+        logger.error('Login blocked: user record has no bcrypt hash in production', { email: args.email });
+        isValidPassword = false;
       }
 
       if (!isValidPassword) {

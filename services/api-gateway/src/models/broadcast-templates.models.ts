@@ -768,14 +768,32 @@ const satelliteBookingTemplateSchema = new Schema<ISatelliteBookingTemplate>({
 // Create indexes
 routingPageTemplateSchema.index({ name: 1 });
 routingPageTemplateSchema.index({ category: 1, controlType: 1 });
+routingPageTemplateSchema.index({ vendorType: 1 });
+routingPageTemplateSchema.index({ 'metadata.createdBy': 1 });
+routingPageTemplateSchema.index({ 'metadata.tags': 1 });
+
 broadcastEventTemplateSchema.index({ name: 1 });
 broadcastEventTemplateSchema.index({ eventType: 1 });
+broadcastEventTemplateSchema.index({ 'metadata.department': 1 });
+broadcastEventTemplateSchema.index({ 'metadata.lastUsed': -1 });
+broadcastEventTemplateSchema.index({ 'metadata.createdBy': 1 });
+
 mcrAutomationRuleSchema.index({ name: 1 });
 mcrAutomationRuleSchema.index({ isActive: 1 });
+mcrAutomationRuleSchema.index({ 'trigger.type': 1, isActive: 1 });
+mcrAutomationRuleSchema.index({ 'metadata.lastTriggered': -1 });
+
 vendorIntegrationConfigSchema.index({ vendor: 1 });
 vendorIntegrationConfigSchema.index({ 'metadata.isActive': 1 });
+vendorIntegrationConfigSchema.index({ vendor: 1, 'metadata.isActive': 1 });
+vendorIntegrationConfigSchema.index({ connectionType: 1 });
+
 equipmentBarcodeConfigSchema.index({ barcodeFormat: 1 });
+equipmentBarcodeConfigSchema.index({ 'prefixRules.prefix': 1 });
+
 satelliteBookingTemplateSchema.index({ provider: 1, satelliteName: 1 });
+satelliteBookingTemplateSchema.index({ 'metadata.isActive': 1 });
+satelliteBookingTemplateSchema.index({ 'technicalSpecs.band': 1 });
 
 // Export models
 export const RoutingPageTemplate = mongoose.model<IRoutingPageTemplate>('RoutingPageTemplate', routingPageTemplateSchema);

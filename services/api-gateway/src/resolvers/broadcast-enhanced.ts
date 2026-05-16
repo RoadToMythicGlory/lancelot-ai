@@ -6,6 +6,7 @@ import {
   SatelliteSchedule 
 } from '../models/broadcast.models';
 import { Equipment, EquipmentAssignment, EquipmentHistory } from '../models/equipment.models';
+import { syncSharedEngineeringSnapshotForEvent } from '../services/sharedEngineeringSnapshot';
 import mongoose from 'mongoose';
 import dayjs from 'dayjs';
 import tz from 'dayjs/plugin/timezone';
@@ -16,11 +17,21 @@ dayjs.tz.setDefault('Asia/Jerusalem');
 // Notifications removed - can be re-implemented later
 // import { createBroadcastPlanningNotification } from './notifications';
 import { pubsub } from '../utils/pubsub';
+import { requireAuth, requirePermission } from '../middleware/auth';
+import { Permission } from '../rbac';
+import type { Context } from '../types';
+import { createLogger } from '../utils/logger';
+import {
+  ensureShadowMcrEventForBroadcast,
+  syncShadowMcrEventFromBroadcast,
+  detachShadowMcrEventOnBroadcastDelete,
+} from '../services/mcrShadowEvent';
+
+const log = createLogger('broadcast-enhanced');
 
 // Stub notification function - replace with real implementation later
 const createBroadcastPlanningNotification = async (event: any, action: string) => {
-  // No-op for now - notifications will be rebuilt
-  console.log(`📢 Broadcast notification (${action}): ${event?.title || event?.id}`);
+  log.debug('Broadcast notification stub', { action, eventId: event?.id, title: event?.title });
 };
 
 interface BroadcastEventInput {
@@ -429,15 +440,14 @@ function mapDocumentToResult(doc: any): any {
 
 export const enhancedBroadcastResolvers = {
   Query: {
-    broadcastEvents: async (_: any, args: { startDate?: string; endDate?: string; filter?: any }) => {
+    broadcastEvents: async (_: any, args: { startDate?: string; endDate?: string; filter?: any; limit?: number; offset?: number }, context: Context) => {
       try {
+        requirePermission(context, Permission.BROADCAST_VIEW);
         await ensureMongoConnection();
-        
-        console.log('🔍 Enhanced broadcastEvents resolver called with args:', args);
-        
+
         // Build MongoDB query
         const query: any = {};
-        
+
         // Add date filters
         if (args.startDate || args.endDate) {
           query.startTime = {};
@@ -448,42 +458,50 @@ export const enhancedBroadcastResolvers = {
             query.startTime.$lte = new Date(args.endDate);
           }
         }
-        
+
         // Add additional filters
         if (args.filter) {
           if (args.filter.eventType) {
             query.eventType = args.filter.eventType;
           }
-          
+
           if (args.filter.departmentId) {
             query.departmentId = args.filter.departmentId;
           }
         }
-        
-        console.log('📊 MongoDB query:', JSON.stringify(query, null, 2));
-        
-        const events = await BroadcastEvent.find(query).sort({ startTime: 1 }).exec();
-        
-        console.log('📊 Raw MongoDB events[0]:', events[0] ? {
-          id: events[0]._id,
-          title: events[0].title,
-          metadata: events[0].metadata
-        } : 'No events');
-        
+
+        // Apply pagination defaults / hard cap to prevent loading the full collection.
+        const MAX_LIMIT = 500;
+        const limit = Math.min(Math.max(args.limit ?? 200, 1), MAX_LIMIT);
+        const offset = Math.max(args.offset ?? 0, 0);
+
+        // Debug-only: capture inputs without leaking the full event payload.
+        // Set LOG_LEVEL=debug to surface these in non-prod environments.
+        log.debug('broadcastEvents query', {
+          startDate: args.startDate,
+          endDate: args.endDate,
+          eventType: args.filter?.eventType,
+          departmentId: args.filter?.departmentId,
+          limit,
+          offset,
+        });
+
+        const events = await BroadcastEvent.find(query)
+          .sort({ startTime: 1 })
+          .skip(offset)
+          .limit(limit)
+          .exec();
+
         const mappedResults = events.map(mapDocumentToResult);
-        
-        console.log('📊 Mapped results[0]:', mappedResults[0] ? {
-          id: mappedResults[0].id,
-          title: mappedResults[0].title,
-          metadata: mappedResults[0].metadata
-        } : 'No results');
-        
-        console.log('✅ Enhanced resolver returning', mappedResults.length, 'events');
+
+        log.debug('broadcastEvents result', { count: mappedResults.length });
         return mappedResults;
-        
+
       } catch (error) {
-        console.error('❌ Enhanced Error fetching broadcast events:', error);
-        
+        log.error('Failed to fetch broadcast events', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+
         if (error instanceof Error) {
           if (error.message.includes('connection')) {
             throw new Error('Database connection error. Please check your network connection and try again.');
@@ -491,7 +509,7 @@ export const enhancedBroadcastResolvers = {
             throw new Error(`Failed to fetch broadcast events: ${error.message}`);
           }
         }
-        
+
         throw new Error('Unknown error occurred while fetching broadcast events');
       }
     },
@@ -517,22 +535,41 @@ export const enhancedBroadcastResolvers = {
     //   }
     // },
 
-    broadcastEvent: async (_: any, { id }: { id: string }) => {
+    broadcastEvent: async (_: any, { id }: { id: string }, context: Context) => {
       try {
+        const user = requirePermission(context, Permission.BROADCAST_VIEW);
         await ensureMongoConnection();
-        
+
         if (!id) {
           throw new Error('Event ID is required');
         }
-        
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+          throw new Error('Invalid broadcast event ID');
+        }
+
         const event = await BroadcastEvent.findById(id).exec();
-        
+
         if (!event) {
           throw new Error(`Broadcast event with ID ${id} not found`);
         }
-        
+
+        // Department-scoped access: department users can only read events
+        // belonging to a department they are a member of (system admins
+        // and IT admins bypass this check via requirePermission's role
+        // hierarchy).
+        const eventDept = (event as any).departmentId;
+        if (
+          eventDept &&
+          user.systemRole !== 'SYSTEM_ADMIN' &&
+          user.systemRole !== 'IT_ADMIN' &&
+          !user.hasForDept(Permission.BROADCAST_VIEW, eventDept)
+        ) {
+          throw new Error('You do not have access to this broadcast event');
+        }
+
         return mapDocumentToResult(event);
-        
+
       } catch (error) {
         console.error('❌ Error fetching broadcast event:', error);
         throw error instanceof Error ? error : new Error('Failed to fetch broadcast event');
@@ -541,10 +578,11 @@ export const enhancedBroadcastResolvers = {
   },
 
   Mutation: {
-    createBroadcastEvent: async (_: any, { input }: { input: BroadcastEventInput }) => {
+    createBroadcastEvent: async (_: any, { input }: { input: BroadcastEventInput }, context: Context) => {
       try {
+        requirePermission(context, Permission.BROADCAST_MANAGE);
         await ensureMongoConnection();
-        
+
         // Validate input
         const validationErrors = validateInput(input);
         if (validationErrors.length > 0) {
@@ -594,7 +632,10 @@ export const enhancedBroadcastResolvers = {
         
         const created = mapDocumentToResult(savedEvent);
         console.log('✅ Successfully created broadcast event:', created.id);
-        
+
+        // Mirror into the MCR workspace.
+        await ensureShadowMcrEventForBroadcast(savedEvent, context?.user?.userId);
+
         // Send notification about new broadcast event
         try {
           await createBroadcastPlanningNotification(created, 'created');
@@ -628,18 +669,33 @@ export const enhancedBroadcastResolvers = {
       }
     },
 
-    updateBroadcastEvent: async (_: any, { id, input }: { id: string; input: Partial<BroadcastEventInput> }) => {
+    updateBroadcastEvent: async (_: any, { id, input }: { id: string; input: Partial<BroadcastEventInput> }, context: Context) => {
       try {
+        const user = requirePermission(context, Permission.BROADCAST_MANAGE);
         await ensureMongoConnection();
-        
+
         if (!id) {
           throw new Error('Event ID is required');
         }
-        
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+          throw new Error('Invalid broadcast event ID');
+        }
+
         // Check if event exists
         const existingEvent = await BroadcastEvent.findById(id).exec();
         if (!existingEvent) {
           throw new Error(`Broadcast event with ID ${id} not found`);
+        }
+
+        const existingDept = (existingEvent as any).departmentId;
+        if (
+          existingDept &&
+          user.systemRole !== 'SYSTEM_ADMIN' &&
+          user.systemRole !== 'IT_ADMIN' &&
+          !user.hasForDept(Permission.BROADCAST_MANAGE, existingDept)
+        ) {
+          throw new Error('You do not have permission to modify this broadcast event');
         }
         
         // Build update data
@@ -691,7 +747,10 @@ export const enhancedBroadcastResolvers = {
         
         const result = mapDocumentToResult(updatedEvent);
         console.log('✅ Successfully updated broadcast event:', result.id);
-        
+
+        // Sync the shadow MCR event's title/start/end.
+        await syncShadowMcrEventFromBroadcast(updatedEvent);
+
         // Send notification about updated broadcast event
         try {
           await createBroadcastPlanningNotification(result, 'updated');
@@ -719,18 +778,33 @@ export const enhancedBroadcastResolvers = {
       }
     },
 
-    deleteBroadcastEvent: async (_: any, { id }: { id: string }) => {
+    deleteBroadcastEvent: async (_: any, { id }: { id: string }, context: Context) => {
       try {
+        const user = requirePermission(context, Permission.BROADCAST_DELETE);
         await ensureMongoConnection();
-        
+
         if (!id) {
           throw new Error('Event ID is required');
         }
-        
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+          throw new Error('Invalid broadcast event ID');
+        }
+
         // Check if event exists and has dependencies
         const event = await BroadcastEvent.findById(id).exec();
         if (!event) {
           throw new Error(`Broadcast event with ID ${id} not found`);
+        }
+
+        const eventDept = (event as any).departmentId;
+        if (
+          eventDept &&
+          user.systemRole !== 'SYSTEM_ADMIN' &&
+          user.systemRole !== 'IT_ADMIN' &&
+          !user.hasForDept(Permission.BROADCAST_DELETE, eventDept)
+        ) {
+          throw new Error('You do not have permission to delete this broadcast event');
         }
         
         // Check for related data
@@ -744,7 +818,11 @@ export const enhancedBroadcastResolvers = {
         const result = await BroadcastEvent.findByIdAndDelete(id).exec();
         
         console.log('✅ Successfully deleted broadcast event:', id);
-        
+
+        if (result) {
+          await detachShadowMcrEventOnBroadcastDelete(id);
+        }
+
         // Send notification about deleted broadcast event
         try {
           await createBroadcastPlanningNotification({ id, title: event.title }, 'deleted');
@@ -769,21 +847,36 @@ export const enhancedBroadcastResolvers = {
       }
     },
 
-    updateBroadcastEventDepartmentData: async (_: any, { eventId, department, data }: { eventId: string; department: string; data: any }) => {
+    updateBroadcastEventDepartmentData: async (_: any, { eventId, department, data }: { eventId: string; department: string; data: any }, context: Context) => {
       try {
+        const user = requirePermission(context, Permission.BROADCAST_MANAGE);
         await ensureMongoConnection();
-        
+
         console.log('🔄 Updating department data for event:', eventId, 'department:', department);
         console.log('📦 Department data:', JSON.stringify(data, null, 2));
-        
+
         if (!eventId) {
           throw new Error('Event ID is required');
         }
-        
+
+        if (!mongoose.Types.ObjectId.isValid(eventId)) {
+          throw new Error('Invalid broadcast event ID');
+        }
+
         // Check if event exists
         const existingEvent = await BroadcastEvent.findById(eventId).exec();
         if (!existingEvent) {
           throw new Error(`Broadcast event with ID ${eventId} not found`);
+        }
+
+        const eventDept = (existingEvent as any).departmentId;
+        if (
+          eventDept &&
+          user.systemRole !== 'SYSTEM_ADMIN' &&
+          user.systemRole !== 'IT_ADMIN' &&
+          !user.hasForDept(Permission.BROADCAST_MANAGE, eventDept)
+        ) {
+          throw new Error('You do not have permission to update this broadcast event');
         }
         
         // Get existing metadata or create new
@@ -946,6 +1039,15 @@ export const enhancedBroadcastResolvers = {
           throw new Error('Failed to update broadcast event department data');
         }
         
+        // Mirror flagged shared engineering equipment into the broadcast
+        // metadata + linked MCR shadow event whenever the warehouse
+        // department was just synced. Best-effort.
+        if (department === 'warehouse') {
+          await syncSharedEngineeringSnapshotForEvent(eventId).catch((err) =>
+            console.error('Shared engineering snapshot sync (enhanced dept data) failed', err),
+          );
+        }
+
         const result = mapDocumentToResult(updatedEvent);
         console.log('✅ Successfully updated department data for event:', result.id);
         
@@ -962,10 +1064,11 @@ export const enhancedBroadcastResolvers = {
       }
     },
 
-    createBroadcastEventsFromExcel: async (_: any, { events }: { events: any[] }) => {
+    createBroadcastEventsFromExcel: async (_: any, { events }: { events: any[] }, context: Context) => {
       try {
+        requirePermission(context, Permission.BROADCAST_MANAGE);
         await ensureMongoConnection();
-        
+
         const createdEvents: any[] = [];
         const errors: string[] = [];
         
@@ -1031,7 +1134,9 @@ export const enhancedBroadcastResolvers = {
             
             createdEvents.push(mapDocumentToResult(savedEvent));
             console.log('✅ Created event:', savedEvent.title);
-            
+
+            await ensureShadowMcrEventForBroadcast(savedEvent, context?.user?.userId);
+
             // Send notification for the created event
             try {
               await createBroadcastPlanningNotification(mapDocumentToResult(savedEvent), 'created');
@@ -1066,10 +1171,11 @@ export const enhancedBroadcastResolvers = {
       }
     },
 
-    deleteBroadcastEventsByDateRange: async (_: any, { startDate, endDate }: { startDate: string; endDate: string }) => {
+    deleteBroadcastEventsByDateRange: async (_: any, { startDate, endDate }: { startDate: string; endDate: string }, context: Context) => {
       try {
+        requirePermission(context, Permission.BROADCAST_DELETE);
         await ensureMongoConnection();
-        
+
         const errors: string[] = [];
         
         console.log('🗑️ Deleting broadcast events between:', startDate, 'and', endDate);
@@ -1094,10 +1200,18 @@ export const enhancedBroadcastResolvers = {
           };
         }
         
+        // Collect ids first so we can detach their MCR shadows after the
+        // bulk delete completes.
+        const toDelete = await BroadcastEvent.find(query, { _id: 1 }).lean();
+
         // Delete the events
         const deleteResult = await BroadcastEvent.deleteMany(query);
         
         console.log('✅ Batch delete complete:', deleteResult.deletedCount, 'events deleted');
+
+        for (const doc of toDelete) {
+          await detachShadowMcrEventOnBroadcastDelete(doc._id.toString());
+        }
         
         return {
           success: deleteResult.acknowledged,
@@ -1114,10 +1228,11 @@ export const enhancedBroadcastResolvers = {
       }
     },
 
-    deleteImportedBroadcastEvents: async (_: any) => {
+    deleteImportedBroadcastEvents: async (_: any, __: any, context: Context) => {
       try {
+        requirePermission(context, Permission.BROADCAST_DELETE);
         await ensureMongoConnection();
-        
+
         const errors: string[] = [];
         
         console.log('🗑️ Deleting all imported broadcast events...');
@@ -1184,8 +1299,9 @@ export const enhancedBroadcastResolvers = {
     //   }
     // },
 
-    createBroadcastEventWithOverlapCheck: async (_: any, { input, forceCreate = false }: { input: BroadcastEventInput; forceCreate?: boolean }) => {
+    createBroadcastEventWithOverlapCheck: async (_: any, { input, forceCreate = false }: { input: BroadcastEventInput; forceCreate?: boolean }, context: Context) => {
       try {
+        requirePermission(context, Permission.BROADCAST_MANAGE);
         console.log('🚀 createBroadcastEventWithOverlapCheck called with:', { input, forceCreate });
         
         // First, check for overlaps
@@ -1298,7 +1414,9 @@ export const enhancedBroadcastResolvers = {
         
         const created = mapDocumentToResult(savedEvent);
         console.log('✅ Successfully created broadcast event with overlap check:', created.id);
-        
+
+        await ensureShadowMcrEventForBroadcast(savedEvent, context?.user?.userId);
+
         // Send notification for the created event
         try {
           console.log('🔔 About to send notification for event:', created.id, created.title);
@@ -1326,10 +1444,11 @@ export const enhancedBroadcastResolvers = {
       }
     },
 
-    createBroadcastEventsFromExcelWithOverlapCheck: async (_: any, { events, forceCreate = false }: { events: any[]; forceCreate?: boolean }) => {
+    createBroadcastEventsFromExcelWithOverlapCheck: async (_: any, { events, forceCreate = false }: { events: any[]; forceCreate?: boolean }, context: Context) => {
       try {
+        requirePermission(context, Permission.BROADCAST_MANAGE);
         await ensureMongoConnection();
-        
+
         console.log('📊 Creating broadcast events from Excel with overlap check:', events.length, 'events');
         
         // First, check for overlaps across all events
@@ -1476,7 +1595,9 @@ export const enhancedBroadcastResolvers = {
             
             createdEvents.push(mapDocumentToResult(savedEvent));
             console.log('✅ Created event:', savedEvent.title);
-            
+
+            await ensureShadowMcrEventForBroadcast(savedEvent, context?.user?.userId);
+
             // Send notification for the created event
             try {
               await createBroadcastPlanningNotification(mapDocumentToResult(savedEvent), 'created');
@@ -1520,8 +1641,13 @@ export const enhancedBroadcastResolvers = {
 
   Subscription: {
     broadcastEventUpdated: {
-      subscribe: (_: any, { departmentId }: { departmentId?: string }) => {
-        const topics = departmentId 
+      subscribe: (_: any, { departmentId }: { departmentId?: string }, context: Context) => {
+        // Subscriptions arrive over the WebSocket. The connection-level
+        // auth check already enforces a valid JWT (see index.ts WS context),
+        // but we still require BROADCAST_VIEW here so a logged-in user
+        // without that permission can't tap the firehose.
+        requirePermission(context, Permission.BROADCAST_VIEW);
+        const topics = departmentId
           ? [`BROADCAST_EVENT_UPDATED_${departmentId}`, 'BROADCAST_EVENT_UPDATED']
           : ['BROADCAST_EVENT_UPDATED'];
         return pubsub.asyncIterator(topics);

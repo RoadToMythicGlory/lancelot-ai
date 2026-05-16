@@ -42,5 +42,9 @@ const podcastShowSchema = new Schema<IPodcastShow>({
 }, { timestamps: true });
 
 podcastShowSchema.index({ organizationId: 1, userId: 1 });
+podcastShowSchema.index({ userId: 1, isActive: 1 });
+podcastShowSchema.index({ isActive: 1 });
+podcastShowSchema.index({ category: 1 });
+podcastShowSchema.index({ userId: 1, name: 1 });
 
 export const PodcastShow = mongoose.model<IPodcastShow>('PodcastShow', podcastShowSchema);

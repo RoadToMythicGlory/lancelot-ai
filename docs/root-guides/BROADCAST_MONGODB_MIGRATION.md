@@ -70,7 +70,7 @@ npm run migrate:broadcast
 
 1. **Check MongoDB data:**
 ```bash
-docker-compose exec mongodb mongosh -u LancelotERP_DB -p <MONGO_PASSWORD> --authenticationDatabase admin
+docker-compose exec mongodb mongosh -u "$MONGO_USERNAME" -p "$MONGO_PASSWORD" --authenticationDatabase admin
 use lancelot
 db.broadcastevents.countDocuments()
 db.eventstaffassignments.countDocuments()

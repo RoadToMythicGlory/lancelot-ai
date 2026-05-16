@@ -1,0 +1,777 @@
+/*
+ * Flight Board styles.
+ *
+ * Goals:
+ *  - Dark, control-room look that reads from across the room.
+ *  - No horizontal scrolling on the main board or table panels — wide
+ *    metadata fits via responsive columns, wrapping, and truncation.
+ *  - Adaptive density: panels expose data-density attributes (`comfortable`,
+ *    `compact`, `dense`, `ultra`) that the panel chooses based on row
+ *    count. Each density step shrinks fonts/padding via clamp() so panels
+ *    keep fitting more rows without overflowing.
+ */
+
+.flight-board-page {
+  background: radial-gradient(1200px 600px at 50% -50%, #1d2638 0%, #0b1220 60%);
+  color: #f8fafc;
+  min-height: 100vh;
+}
+
+/* Kiosk / full-screen mode.
+ * Promotes the page to a top-level overlay and hides the app shell
+ * (sidebar, top nav, etc.) so the board fills the viewport. Triggered by the
+ * "מסך מלא" button which also requests the browser Fullscreen API. */
+.flight-board-page.is-kiosk {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  width: 100vw;
+  height: 100vh;
+  overflow: auto;
+}
+
+/* Some browsers report fullscreen via the :fullscreen pseudo. Make sure the
+ * inner shell stretches to fill the viewport in either path. */
+.flight-board-page.is-kiosk .flight-board-shell,
+.flight-board-page:fullscreen .flight-board-shell,
+.flight-board-page:-webkit-full-screen .flight-board-shell {
+  min-height: 100vh;
+}
+
+/* When the page is the fullscreen element the browser already hides the rest
+ * of the document, but the kiosk class also hides app chrome for the
+ * non-Fullscreen-API fallback (e.g. when blocked by policy or when the user
+ * just wants to mute the sidebar without true fullscreen). */
+body:has(.flight-board-page.is-kiosk) [data-app-shell="sidebar"],
+body:has(.flight-board-page.is-kiosk) aside.app-sidebar,
+body:has(.flight-board-page.is-kiosk) header.app-header,
+body:has(.flight-board-page.is-kiosk) nav.app-topbar {
+  display: none !important;
+}
+
+.flight-board-shell {
+  max-width: 100%;
+  padding: clamp(16px, 1.6vw, 28px);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(12px, 1.2vw, 20px);
+}
+
+/* ---------------- Header ---------------- */
+
+.flight-board-header {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  grid-template-areas:
+    'title actions'
+    'controls controls';
+  align-items: center;
+  gap: clamp(10px, 1vw, 18px);
+  padding: clamp(12px, 1vw, 18px) clamp(16px, 1.4vw, 22px);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.85), rgba(15, 23, 42, 0.65));
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+.flight-board-header > .flight-board-title { grid-area: title; }
+.flight-board-header > .flight-board-controls { grid-area: controls; justify-self: stretch; }
+.flight-board-header > .flight-board-actions { grid-area: actions; }
+
+@media (max-width: 900px) {
+  .flight-board-header {
+    grid-template-columns: 1fr;
+    grid-template-areas: 'title' 'actions' 'controls';
+  }
+  .flight-board-header > .flight-board-actions { justify-self: start; }
+}
+
+.flight-board-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.flight-board-title h1 {
+  font-size: clamp(22px, 2.4vw, 36px);
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  margin: 0;
+  color: #f8fafc;
+}
+
+.flight-board-title .subtitle {
+  color: #94a3b8;
+  font-size: clamp(13px, 1.1vw, 16px);
+  font-weight: 600;
+}
+
+.flight-board-live-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: clamp(11px, 0.9vw, 13px);
+  color: #f87171;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.flight-board-live-dot::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #ef4444;
+  box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+  animation: flight-board-pulse 1.5s infinite;
+}
+
+@keyframes flight-board-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+  70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+.flight-board-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-start;
+  align-items: center;
+}
+
+.flight-board-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+/* ---------------- Selector & gallery ---------------- */
+
+.flight-board-selector {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.flight-board-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+  gap: clamp(12px, 1vw, 18px);
+}
+
+.flight-board-card {
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 16px;
+  padding: clamp(14px, 1vw, 20px);
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  color: #f1f5f9;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.flight-board-card:hover {
+  border-color: #38bdf8;
+  background: rgba(15, 23, 42, 0.85);
+  transform: translateY(-2px);
+}
+
+.flight-board-card-title {
+  font-weight: 700;
+  font-size: clamp(16px, 1.3vw, 20px);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.flight-board-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: clamp(11px, 0.95vw, 13px);
+  color: #94a3b8;
+}
+
+.flight-board-default-pill {
+  background: #38bdf8;
+  color: #0b1220;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+/* ---------------- Panel grid ---------------- */
+
+.flight-board-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: clamp(10px, 1vw, 18px);
+  align-items: stretch;
+}
+
+.flight-board-panel-cell {
+  min-width: 0;
+  display: flex;
+}
+
+.flight-board-panel {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.95), rgba(15, 23, 42, 0.75));
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.flight-board-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: clamp(8px, 0.7vw, 12px) clamp(12px, 1vw, 16px);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.flight-board-panel-header h3 {
+  margin: 0;
+  font-size: clamp(13px, 1.1vw, 16px);
+  font-weight: 700;
+  color: #e2e8f0;
+  letter-spacing: 0.3px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flight-board-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.flight-board-panel-body {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: clamp(8px, 0.7vw, 12px);
+}
+
+.flight-board-empty {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  font-weight: 600;
+  padding: 24px;
+}
+
+.flight-board-loading-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #38bdf8, transparent);
+  background-size: 200% 100%;
+  animation: flight-board-loading 1.5s infinite linear;
+}
+
+@keyframes flight-board-loading {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ---------------- Table panel ---------------- */
+
+.flight-board-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  color: #e2e8f0;
+}
+
+.flight-board-table th,
+.flight-board-table td {
+  padding: var(--fb-cell-padding, 8px 10px);
+  text-align: right;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  font-size: var(--fb-row-font, 14px);
+  line-height: 1.35;
+  vertical-align: middle;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.flight-board-table th {
+  position: sticky;
+  top: 0;
+  background: rgba(15, 23, 42, 0.95);
+  text-align: right;
+  font-weight: 700;
+  font-size: var(--fb-header-font, 13px);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #cbd5e1;
+  cursor: pointer;
+  user-select: none;
+  padding-bottom: 10px;
+  white-space: nowrap;
+}
+
+.flight-board-table tbody tr:hover {
+  background: rgba(56, 189, 248, 0.05);
+}
+
+.flight-board-table .fb-col-narrow {
+  width: 64px;
+}
+.flight-board-table .fb-col-time {
+  width: 76px;
+  white-space: nowrap;
+}
+.flight-board-table .fb-col-date {
+  width: 96px;
+  white-space: nowrap;
+}
+.flight-board-table .fb-col-channel {
+  width: 88px;
+  white-space: nowrap;
+}
+.flight-board-table .fb-col-status {
+  width: 110px;
+}
+
+.flight-board-type-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: var(--fb-pill-font, 11px);
+  letter-spacing: 0.6px;
+  border-radius: 6px;
+  padding: 2px 8px;
+  color: #0b1220;
+  min-width: 44px;
+}
+
+.flight-board-status-pill {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 600;
+  font-size: var(--fb-pill-font, 11px);
+  border-radius: 999px;
+  padding: 2px 10px;
+  background: rgba(148, 163, 184, 0.15);
+  color: #cbd5e1;
+  white-space: nowrap;
+}
+
+/* Density steps. The table panel sets data-density on the wrapper. */
+
+.flight-board-density-comfortable {
+  --fb-cell-padding: 12px 14px;
+  --fb-row-font: 16px;
+  --fb-header-font: 13px;
+  --fb-pill-font: 12px;
+}
+.flight-board-density-compact {
+  --fb-cell-padding: 8px 10px;
+  --fb-row-font: 14px;
+  --fb-header-font: 12px;
+  --fb-pill-font: 11px;
+}
+.flight-board-density-dense {
+  --fb-cell-padding: 5px 8px;
+  --fb-row-font: 12.5px;
+  --fb-header-font: 11px;
+  --fb-pill-font: 10px;
+}
+.flight-board-density-ultra {
+  --fb-cell-padding: 3px 6px;
+  --fb-row-font: 11.5px;
+  --fb-header-font: 10px;
+  --fb-pill-font: 9.5px;
+}
+
+/* ---------------- KPI panel ---------------- */
+
+.flight-board-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+  gap: clamp(10px, 1vw, 18px);
+  width: 100%;
+}
+
+.flight-board-kpi-card {
+  background: rgba(2, 6, 23, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 12px;
+  padding: clamp(12px, 1vw, 18px);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.flight-board-kpi-value {
+  font-size: clamp(28px, 3.4vw, 56px);
+  font-weight: 800;
+  line-height: 1;
+  color: #f8fafc;
+}
+
+.flight-board-kpi-label {
+  font-size: clamp(11px, 0.95vw, 14px);
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.flight-board-kpi-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* ---------------- Charts ---------------- */
+
+.flight-board-chart-host {
+  display: flex;
+  flex: 1;
+  min-height: 240px;
+  width: 100%;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+.flight-board-chart-svg {
+  width: 100%;
+  height: auto;
+  min-height: 240px;
+  display: block;
+}
+
+.flight-board-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.flight-board-chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: clamp(11px, 0.9vw, 13px);
+  color: #cbd5e1;
+}
+
+.flight-board-chart-legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+/* ---------------- Timeline ---------------- */
+
+.flight-board-timeline {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(min(180px, 100%), 1fr);
+  gap: clamp(8px, 0.8vw, 14px);
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scroll-snap-type: x proximity;
+}
+
+.flight-board-timeline-day {
+  background: rgba(2, 6, 23, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  scroll-snap-align: start;
+}
+
+.flight-board-timeline-day.is-today {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25);
+}
+
+.flight-board-timeline-day-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.flight-board-timeline-day-name {
+  font-weight: 700;
+  font-size: clamp(12px, 1vw, 14px);
+  color: #e2e8f0;
+}
+
+.flight-board-timeline-day-date {
+  font-size: clamp(10px, 0.85vw, 12px);
+  color: #94a3b8;
+}
+
+.flight-board-timeline-day-count {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.flight-board-timeline-item {
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 8px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: clamp(11px, 0.9vw, 13px);
+  border-left: 3px solid var(--fb-item-color, #94a3b8);
+}
+
+/* ---------------- Expanded panel ---------------- */
+
+.flight-board-panel.is-expanded {
+  position: fixed;
+  inset: clamp(12px, 1.5vw, 24px);
+  z-index: 90;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
+}
+
+.flight-board-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.65);
+  z-index: 80;
+  backdrop-filter: blur(2px);
+}
+
+/* ---------------- Builder ---------------- */
+
+.flight-board-builder-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.flight-board-builder-section {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  padding: 14px;
+  background: rgba(2, 6, 23, 0.4);
+}
+
+.flight-board-builder-section h4 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: #cbd5e1;
+  letter-spacing: 0.4px;
+}
+
+.flight-board-builder-panel-card {
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 10px;
+  padding: 12px;
+  background: rgba(15, 23, 42, 0.7);
+  margin-bottom: 10px;
+}
+
+/* Builder field rows — clear labels above each input so refresh interval,
+ * visibility, etc. don't look like mystery widgets. */
+.flight-board-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.flight-board-field > label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+  letter-spacing: 0.2px;
+}
+
+/* The Drawer / Modal surfaces are portaled outside `.flight-board-page` and
+ * intentionally use antd's default light palette so the builder forms stay
+ * readable. The dark control-room palette only applies to the page itself. */
+
+/* ---------------- Column order (drag-and-drop) ---------------- */
+
+.flight-board-column-order {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px dashed rgba(100, 116, 139, 0.45);
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.flight-board-column-order-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.flight-board-column-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 36px;
+  align-items: flex-start;
+}
+
+.flight-board-column-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px 4px 4px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 12px;
+  color: #1e293b;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+  user-select: none;
+  /* The whole chip is the drag handle. Disable native gestures so the
+   * browser doesn't intercept pointer-down for scrolling/text selection. */
+  touch-action: none;
+  cursor: grab;
+  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.flight-board-column-chip:hover {
+  border-color: #94a3b8;
+  background: #f1f5f9;
+}
+
+.flight-board-column-chip:active {
+  cursor: grabbing;
+  background: #e2e8f0;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.18);
+}
+
+.flight-board-column-chip-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  color: #64748b;
+  pointer-events: none; /* the chip handles drag — icon is decorative */
+}
+
+.flight-board-column-chip-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 0 4px;
+  font-weight: 500;
+}
+
+/* ---------------- Edit panel drawer ---------------- */
+
+.flight-board-edit-help {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+}
+
+.flight-board-edit-row-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.flight-board-edit-row {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.flight-board-edit-row-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.flight-board-edit-row-title {
+  font-weight: 600;
+  color: #1e293b;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flight-board-edit-row-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px 14px;
+}
+
+.flight-board-edit-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.flight-board-edit-cell-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  letter-spacing: 0.2px;
+}
+
+.flight-board-edit-cell-dirty {
+  color: #f59e0b;
+  font-weight: 700;
+  font-size: 16px;
+  margin-inline-start: 2px;
+  line-height: 0.5;
+}
+
+.flight-board-edit-hidden-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fafafa;
+}

@@ -19,9 +19,9 @@
 Update your environment variables to use MongoDB Atlas instead of local MongoDB:
 
 ```env
-MONGODB_URL=mongodb+srv://LancelotERP_DB:<MONGO_PASSWORD>@your-cluster.mongodb.net/lancelot?retryWrites=true&w=majority
-MONGO_USERNAME=LancelotERP_DB
-MONGO_PASSWORD=<MONGO_PASSWORD>
+MONGODB_URL=mongodb+srv://<USER>:<PASSWORD>@your-cluster.mongodb.net/lancelot?retryWrites=true&w=majority
+MONGO_USERNAME=<your-username>
+MONGO_PASSWORD=<your-password>
 ```
 
 ### 2. Build the Applications Locally
@@ -74,8 +74,8 @@ npm run build
      ```
      NODE_ENV=production
      MONGODB_URL=your_mongodb_atlas_url
-     MONGO_USERNAME=LancelotERP_DB
-     MONGO_PASSWORD=<MONGO_PASSWORD>
+     MONGO_USERNAME=<your-username>
+     MONGO_PASSWORD=<your-password>
      JWT_SECRET=your_production_jwt_secret
      CORS_ORIGIN=https://yourdomain.com
      ```

@@ -27,6 +27,10 @@ export enum Permission {
   MCR_MANAGE = 'MCR_MANAGE',
   MCR_ADMIN = 'MCR_ADMIN',
 
+  // Flight Board (live operations dashboards)
+  FLIGHT_BOARD_VIEW = 'FLIGHT_BOARD_VIEW',
+  FLIGHT_BOARD_MANAGE = 'FLIGHT_BOARD_MANAGE',
+
   // Vizrt
   VIZRT_VIEW = 'VIZRT_VIEW',
   VIZRT_OPERATE = 'VIZRT_OPERATE',

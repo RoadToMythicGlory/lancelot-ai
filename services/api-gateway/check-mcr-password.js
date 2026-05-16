@@ -1,67 +1,80 @@
+/**
+ * Diagnostic helper for checking the MCR admin user's bcrypt password hash
+ * against a list of guesses you provide via the environment.
+ *
+ * Required env: MONGODB_URI (full connection string)
+ * Optional env: CHECK_MCR_EMAIL (default: mcr@example.com)
+ *               CHECK_MCR_PASSWORDS (newline- or comma-separated list of
+ *                                    candidate passwords to test)
+ *
+ * No credentials are hardcoded here. The list of test passwords must be
+ * supplied at runtime so the repository never ships hashes/plaintext to grep.
+ */
+
 const { MongoClient } = require('mongodb');
 const bcrypt = require('bcrypt');
 
+function requireEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    console.error(`Missing required environment variable: ${name}`);
+    process.exit(1);
+  }
+  return value;
+}
+
+const MONGODB_URI = requireEnv('MONGODB_URI');
+const targetEmail = process.env.CHECK_MCR_EMAIL || 'mcr@example.com';
+const candidates = (process.env.CHECK_MCR_PASSWORDS || '')
+  .split(/[\n,]/)
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 async function checkMCRPassword() {
-  const client = new MongoClient('mongodb://localhost:27017');
-  
+  const client = new MongoClient(MONGODB_URI);
+
   try {
     await client.connect();
     console.log('Connected to MongoDB\n');
-    
-    // Check broadcast database
-    const broadcastDb = client.db('broadcast');
-    const broadcastUsers = broadcastDb.collection('users');
-    
-    const mcrUser = await broadcastUsers.findOne({ 
-      email: { $regex: /mcr@rge\.co\.il/i } 
-    });
-    
-    if (mcrUser) {
-      console.log('✅ Found MCR user in broadcast database:');
-      console.log('  Email:', mcrUser.email);
-      console.log('  ID:', mcrUser._id);
-      console.log('  Password exists:', !!mcrUser.password);
-      
-      if (mcrUser.password) {
-        console.log('  Password hash:', mcrUser.password);
-        
-        // Test some common passwords
-        const testPasswords = ['test123', 'Test123', 'password', 'Password', 'admin', 'Admin', 'mcr', 'MCR', '123456', 'MCR123456', 'WIz5xLRb0SR5^A0S', 'Wlz5xLRb0SR5^A0S'];
-        console.log('\n  Testing common passwords:');
-        
-        for (const testPwd of testPasswords) {
-          if (mcrUser.password.startsWith('$2')) {
-            const matches = await bcrypt.compare(testPwd, mcrUser.password);
-            if (matches) {
-              console.log(`  ✅ PASSWORD FOUND: "${testPwd}"`);
-              break;
-            }
+
+    for (const dbName of ['broadcast', 'lancelot']) {
+      const db = client.db(dbName);
+      const users = db.collection('users');
+
+      const user = await users.findOne({
+        email: { $regex: new RegExp(`^${targetEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+      });
+
+      if (!user) {
+        console.log(`No user matching ${targetEmail} in '${dbName}' database`);
+        continue;
+      }
+
+      console.log(`Found user in '${dbName}' database:`);
+      console.log(`  Email: ${user.email}`);
+      console.log(`  ID: ${user._id}`);
+      console.log(`  Password hash present: ${!!user.password}`);
+
+      if (user.password && user.password.startsWith('$2') && candidates.length > 0) {
+        console.log('  Testing supplied candidate passwords...');
+        let matched = false;
+        for (const candidate of candidates) {
+          if (await bcrypt.compare(candidate, user.password)) {
+            console.log('  ✅ A supplied candidate matched.');
+            matched = true;
+            break;
           }
         }
+        if (!matched) {
+          console.log('  ❌ No supplied candidate matched.');
+        }
+      } else if (candidates.length === 0) {
+        console.log('  Provide CHECK_MCR_PASSWORDS to test specific candidates.');
       }
     }
-    
-    // Also check lancelot database
-    console.log('\n\nChecking lancelot database...');
-    const lancelotDb = client.db('lancelot');
-    const lancelotUsers = lancelotDb.collection('users');
-    
-    const lancelotUser = await lancelotUsers.findOne({ 
-      email: { $regex: /mcr@rge\.co\.il/i } 
-    });
-    
-    if (lancelotUser) {
-      console.log('✅ Found user in lancelot database too!');
-      console.log('  Password exists:', !!lancelotUser.password);
-      if (lancelotUser.password) {
-        console.log('  Password hash:', lancelotUser.password);
-      }
-    } else {
-      console.log('❌ No user in lancelot database');
-    }
-    
   } catch (error) {
     console.error('Error:', error);
+    process.exitCode = 1;
   } finally {
     await client.close();
   }

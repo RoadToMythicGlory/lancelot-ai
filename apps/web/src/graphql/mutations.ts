@@ -440,6 +440,7 @@ export const CREATE_EQUIPMENT = gql`
         cell
       }
       isQuantityBased
+      isSharedEngineeringEquipment
       createdAt
       updatedAt
     }
@@ -473,6 +474,7 @@ export const UPDATE_EQUIPMENT = gql`
         cell
       }
       isQuantityBased
+      isSharedEngineeringEquipment
       suspensionStatus
       updatedAt
     }

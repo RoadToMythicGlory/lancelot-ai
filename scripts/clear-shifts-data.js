@@ -1,58 +1,73 @@
+/**
+ * Clears shifts (and optionally related collections) from the configured
+ * MongoDB instance. Credentials are read from the environment so we do not
+ * ship them in the repo.
+ *
+ * Required env: MONGODB_URI (full connection string)
+ * Optional env: MONGO_DATABASE (default: lancelot)
+ *
+ * Optional flags:
+ *   --include-templates      Also clear shiftTemplates
+ *   --include-vacations      Also clear vacationRequests
+ *   --include-swaps          Also clear shiftSwapRequests
+ *   --include-constraints    Also clear availabilityConstraints
+ */
+
 const { MongoClient } = require('mongodb');
 
+function requireEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    console.error(`Missing required environment variable: ${name}`);
+    process.exit(1);
+  }
+  return value;
+}
+
+const MONGODB_URI = requireEnv('MONGODB_URI');
+const DATABASE = process.env.MONGO_DATABASE || 'lancelot';
+
 async function clearShiftsData() {
-  // Use localhost with authentication
-  const uri = 'mongodb://LancelotERP_DB:<MONGO_PASSWORD>@localhost:27017/lancelot?authSource=admin';
-  const client = new MongoClient(uri);
+  const client = new MongoClient(MONGODB_URI);
 
   try {
     await client.connect();
     console.log('Connected to MongoDB');
 
-    const db = client.db('lancelot');
+    const db = client.db(DATABASE);
 
-    // Clear shifts collection
     const shiftsResult = await db.collection('shifts').deleteMany({});
-    console.log(`✅ Cleared ${shiftsResult.deletedCount} shifts`);
+    console.log(`Cleared ${shiftsResult.deletedCount} shifts`);
 
-    // Clear shift templates if you want
-    const confirmTemplates = process.argv.includes('--include-templates');
-    if (confirmTemplates) {
-      const templatesResult = await db.collection('shiftTemplates').deleteMany({});
-      console.log(`✅ Cleared ${templatesResult.deletedCount} shift templates`);
+    if (process.argv.includes('--include-templates')) {
+      const r = await db.collection('shiftTemplates').deleteMany({});
+      console.log(`Cleared ${r.deletedCount} shift templates`);
     }
 
-    // Clear vacation requests if you want
-    const confirmVacations = process.argv.includes('--include-vacations');
-    if (confirmVacations) {
-      const vacationsResult = await db.collection('vacationRequests').deleteMany({});
-      console.log(`✅ Cleared ${vacationsResult.deletedCount} vacation requests`);
+    if (process.argv.includes('--include-vacations')) {
+      const r = await db.collection('vacationRequests').deleteMany({});
+      console.log(`Cleared ${r.deletedCount} vacation requests`);
     }
 
-    // Clear shift swap requests if you want
-    const confirmSwaps = process.argv.includes('--include-swaps');
-    if (confirmSwaps) {
-      const swapsResult = await db.collection('shiftSwapRequests').deleteMany({});
-      console.log(`✅ Cleared ${swapsResult.deletedCount} shift swap requests`);
+    if (process.argv.includes('--include-swaps')) {
+      const r = await db.collection('shiftSwapRequests').deleteMany({});
+      console.log(`Cleared ${r.deletedCount} shift swap requests`);
     }
 
-    // Clear availability constraints if you want
-    const confirmConstraints = process.argv.includes('--include-constraints');
-    if (confirmConstraints) {
-      const constraintsResult = await db.collection('availabilityConstraints').deleteMany({});
-      console.log(`✅ Cleared ${constraintsResult.deletedCount} availability constraints`);
+    if (process.argv.includes('--include-constraints')) {
+      const r = await db.collection('availabilityConstraints').deleteMany({});
+      console.log(`Cleared ${r.deletedCount} availability constraints`);
     }
 
-    console.log('\n🎉 Shifts data cleared successfully!');
+    console.log('\nShifts data cleared successfully.');
     console.log('\nOptions:');
     console.log('  --include-templates    Also clear shift templates');
     console.log('  --include-vacations    Also clear vacation requests');
     console.log('  --include-swaps        Also clear shift swap requests');
     console.log('  --include-constraints  Also clear availability constraints');
-    console.log('\nTo clear everything, run: node scripts/clear-shifts-data.js --include-templates --include-vacations --include-swaps --include-constraints');
-
   } catch (error) {
     console.error('Error clearing shifts data:', error);
+    process.exitCode = 1;
   } finally {
     await client.close();
   }

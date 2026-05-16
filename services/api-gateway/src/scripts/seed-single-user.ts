@@ -17,8 +17,11 @@ const MONGO_URL = process.env.MONGODB_URL || (() => {
 })();
 
 async function run() {
-  const email = process.env.SEED_EMAIL || 'mcr@example.com';
-  const passwordPlain = process.env.SEED_PASSWORD || 'Sport2025!';
+  const email = process.env.SEED_EMAIL;
+  const passwordPlain = process.env.SEED_PASSWORD;
+  if (!email || !passwordPlain) {
+    throw new Error('SEED_EMAIL and SEED_PASSWORD must be provided as environment variables before seeding.');
+  }
   const firstName = process.env.SEED_FIRST_NAME || 'MCR';
   const lastName = process.env.SEED_LAST_NAME || 'Admin';
 

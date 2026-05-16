@@ -116,6 +116,11 @@ activityRowSchema.index({ date: 1, isHidden: 1 });
 activityRowSchema.index({ createdBy: 1 });
 activityRowSchema.index({ status: 1 });
 activityRowSchema.index({ broadcastEventId: 1 });
+activityRowSchema.index({ date: 1, status: 1 });
+activityRowSchema.index({ broadcastType: 1 });
+activityRowSchema.index({ isManual: 1, date: 1 });
+activityRowSchema.index({ channel: 1, date: 1 });
+activityRowSchema.index({ status: 1, date: -1 });
 
 const ActivityRow = model<IActivityRow>('ActivityRow', activityRowSchema);
 

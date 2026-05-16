@@ -74,6 +74,9 @@ const vendorSchema = new Schema<IVendor>({
 // Indexes for performance
 vendorSchema.index({ name: 'text', hebrewName: 'text' });
 vendorSchema.index({ category: 1, isActive: 1 });
+vendorSchema.index({ isActive: 1 });
+vendorSchema.index({ createdBy: 1 });
+vendorSchema.index({ createdAt: -1 });
 
 // Export the model
 export const Vendor = mongoose.model<IVendor>('Vendor', vendorSchema);

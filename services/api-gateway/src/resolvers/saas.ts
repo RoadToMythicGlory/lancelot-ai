@@ -1,4 +1,5 @@
 import { ObjectId } from 'mongodb';
+import mongoose from 'mongoose';
 import crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import { connectMongoDB } from '../config/mongodb';
@@ -11,9 +12,16 @@ import { MediaAsset, MediaFolder } from '../models/mediaAsset.models';
 import { BroadcastRightManaged } from '../models/rights.models';
 import { HelpArticle, SupportTicket, Changelog } from '../models/help.models';
 import { ApiKey, Webhook, WebhookDelivery } from '../models/apiKey.models';
+import { withFilter } from 'graphql-subscriptions';
 import { pubsub } from '../utils/pubsub';
 import { requireAuth as requireAuthMiddleware, requirePermission } from '../middleware/auth';
 import { Permission } from '../rbac';
+
+function assertValidObjectId(id: string, resourceName: string) {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new Error(`Invalid ${resourceName} ID`);
+  }
+}
 
 // ==================== HELPER FUNCTIONS ====================
 
@@ -83,11 +91,13 @@ export const saasResolvers = {
 
     organization: async (_: any, { id }: { id: string }, context: any) => {
       await requireAuth(context);
+      assertValidObjectId(id, 'organization');
       const org = await Organization.findById(id);
       return org ? { ...org.toObject(), id: org._id.toString() } : null;
     },
 
-    organizationBySlug: async (_: any, { slug }: { slug: string }) => {
+    organizationBySlug: async (_: any, { slug }: { slug: string }, context: any) => {
+      await requireAuth(context);
       const org = await Organization.findOne({ slug, isActive: true });
       return org ? { ...org.toObject(), id: org._id.toString() } : null;
     },
@@ -123,7 +133,7 @@ export const saasResolvers = {
     paymentMethods: async (_: any, __: any, context: any) => {
       const user = await requireAuth(context);
       if (!user.organizationId) return [];
-      const methods = await PaymentMethod.find({ organizationId: user.organizationId });
+      const methods = await PaymentMethod.find({ organizationId: user.organizationId }).sort({ createdAt: -1 }).limit(200);
       return methods.map(m => ({ ...m.toObject(), id: m._id.toString() }));
     },
 
@@ -196,17 +206,20 @@ export const saasResolvers = {
     },
 
     // ---- Workflows ----
-    workflowTemplates: async (_: any, { resourceType }: any, context: any) => {
+    workflowTemplates: async (_: any, { resourceType, limit = 200, offset = 0 }: any, context: any) => {
       const user = await requireAuth(context);
       const query: any = {};
       if (user.organizationId) query.organizationId = user.organizationId;
       if (resourceType) query.resourceType = resourceType;
-      const templates = await WorkflowTemplate.find(query).sort({ createdAt: -1 });
+      const boundedLimit = Math.min(Math.max(Number(limit) || 200, 1), 500);
+      const boundedOffset = Math.max(Number(offset) || 0, 0);
+      const templates = await WorkflowTemplate.find(query).sort({ createdAt: -1 }).skip(boundedOffset).limit(boundedLimit);
       return templates.map(t => ({ ...t.toObject(), id: t._id.toString() }));
     },
 
     workflowTemplate: async (_: any, { id }: any, context: any) => {
       await requireAuth(context);
+      assertValidObjectId(id, 'workflow template');
       const t = await WorkflowTemplate.findById(id);
       return t ? { ...t.toObject(), id: t._id.toString() } : null;
     },
@@ -217,12 +230,15 @@ export const saasResolvers = {
       if (user.organizationId) query.organizationId = user.organizationId;
       if (status) query.status = status.toLowerCase();
       if (resourceType) query.resourceType = resourceType;
-      const instances = await WorkflowInstance.find(query).sort({ createdAt: -1 }).skip(offset).limit(limit);
+      const boundedLimit = Math.min(Math.max(Number(limit) || 20, 1), 500);
+      const boundedOffset = Math.max(Number(offset) || 0, 0);
+      const instances = await WorkflowInstance.find(query).sort({ createdAt: -1 }).skip(boundedOffset).limit(boundedLimit);
       return instances.map(i => ({ ...i.toObject(), id: i._id.toString() }));
     },
 
     workflowInstance: async (_: any, { id }: any, context: any) => {
       await requireAuth(context);
+      assertValidObjectId(id, 'workflow instance');
       const i = await WorkflowInstance.findById(id);
       return i ? { ...i.toObject(), id: i._id.toString() } : null;
     },
@@ -233,7 +249,7 @@ export const saasResolvers = {
         status: { $in: ['in_progress', 'waiting'] },
         'stepHistory.assigneeId': user._id.toString(),
         'stepHistory.status': 'pending',
-      }).sort({ createdAt: -1 });
+      }).sort({ createdAt: -1 }).limit(500);
       return instances.map(i => ({ ...i.toObject(), id: i._id.toString() }));
     },
 
@@ -273,6 +289,7 @@ export const saasResolvers = {
 
     mediaAsset: async (_: any, { id }: any, context: any) => {
       await requireAuth(context);
+      assertValidObjectId(id, 'media asset');
       const asset = await MediaAsset.findById(id);
       return asset ? { ...asset.toObject(), id: asset._id.toString() } : null;
     },
@@ -286,7 +303,7 @@ export const saasResolvers = {
       } else {
         query.parentFolderId = { $exists: false };
       }
-      const folders = await MediaFolder.find(query).sort({ name: 1 });
+      const folders = await MediaFolder.find(query).sort({ name: 1 }).limit(500);
       return folders.map(f => ({ ...f.toObject(), id: f._id.toString() }));
     },
 
@@ -322,6 +339,7 @@ export const saasResolvers = {
 
     broadcastRight: async (_: any, { id }: any, context: any) => {
       await requireAuth(context);
+      assertValidObjectId(id, 'broadcast right');
       const right = await BroadcastRightManaged.findById(id);
       return right ? { ...right.toObject(), id: right._id.toString() } : null;
     },
@@ -335,7 +353,7 @@ export const saasResolvers = {
         status: { $ne: 'expired' },
       };
       if (user.organizationId) query.organizationId = user.organizationId;
-      const items = await BroadcastRightManaged.find(query).sort({ endDate: 1 });
+      const items = await BroadcastRightManaged.find(query).sort({ endDate: 1 }).limit(500);
       return items.map(i => ({ ...i.toObject(), id: i._id.toString() }));
     },
 
@@ -350,7 +368,7 @@ export const saasResolvers = {
           { tags: { $regex: searchTerm, $options: 'i' } },
         ];
       }
-      const articles = await HelpArticle.find(query).sort({ order: 1, createdAt: -1 });
+      const articles = await HelpArticle.find(query).sort({ order: 1, createdAt: -1 }).limit(500);
       return articles.map(a => ({ ...a.toObject(), id: a._id.toString() }));
     },
 
@@ -375,13 +393,14 @@ export const saasResolvers = {
 
     saasTicket: async (_: any, { id }: any, context: any) => {
       await requireAuth(context);
+      assertValidObjectId(id, 'support ticket');
       const ticket = await SupportTicket.findById(id);
       return ticket ? { ...ticket.toObject(), id: ticket._id.toString() } : null;
     },
 
     mySaasTickets: async (_: any, __: any, context: any) => {
       const user = await requireAuth(context);
-      const tickets = await SupportTicket.find({ createdBy: user._id.toString() }).sort({ createdAt: -1 });
+      const tickets = await SupportTicket.find({ createdBy: user._id.toString() }).sort({ createdAt: -1 }).limit(500);
       return tickets.map(t => ({ ...t.toObject(), id: t._id.toString() }));
     },
 
@@ -396,7 +415,7 @@ export const saasResolvers = {
       requireSystemAdmin(user);
       const query: any = {};
       if (user.organizationId) query.organizationId = user.organizationId;
-      const keys = await ApiKey.find(query).sort({ createdAt: -1 });
+      const keys = await ApiKey.find(query).sort({ createdAt: -1 }).limit(500);
       return keys.map(k => ({ ...k.toObject(), id: k._id.toString() }));
     },
 
@@ -405,13 +424,16 @@ export const saasResolvers = {
       requireSystemAdmin(user);
       const query: any = {};
       if (user.organizationId) query.organizationId = user.organizationId;
-      const hooks = await Webhook.find(query).sort({ createdAt: -1 });
+      const hooks = await Webhook.find(query).sort({ createdAt: -1 }).limit(500);
       return hooks.map(h => ({ ...h.toObject(), id: h._id.toString() }));
     },
 
     webhookDeliveries: async (_: any, { webhookId, limit = 50 }: any, context: any) => {
-      await requireAuth(context);
-      const deliveries = await WebhookDelivery.find({ webhookId }).sort({ createdAt: -1 }).limit(limit);
+      const user = await requireAuth(context);
+      requireSystemAdmin(user);
+      assertValidObjectId(webhookId, 'webhook');
+      const boundedLimit = Math.min(Math.max(Number(limit) || 50, 1), 500);
+      const deliveries = await WebhookDelivery.find({ webhookId }).sort({ createdAt: -1 }).limit(boundedLimit);
       return deliveries.map(d => ({ ...d.toObject(), id: d._id.toString() }));
     },
 
@@ -671,7 +693,9 @@ export const saasResolvers = {
     },
 
     cancelOrganizationInvite: async (_: any, { inviteId }: any, context: any) => {
-      await requireAuth(context);
+      const user = await requireAuth(context);
+      requireSystemAdmin(user);
+      assertValidObjectId(inviteId, 'invite');
       await OrganizationInvite.updateOne(
         { _id: new ObjectId(inviteId) },
         { $set: { status: 'cancelled' } }
@@ -745,9 +769,10 @@ export const saasResolvers = {
 
     // ---- Notifications ----
     markNotificationRead: async (_: any, { id }: any, context: any) => {
-      await requireAuth(context);
-      const notif = await Notification.findByIdAndUpdate(
-        id,
+      const user = await requireAuth(context);
+      assertValidObjectId(id, 'notification');
+      const notif = await Notification.findOneAndUpdate(
+        { _id: id, recipientId: user._id.toString() },
         { $set: { isRead: true, readAt: new Date() } },
         { new: true }
       );
@@ -765,8 +790,12 @@ export const saasResolvers = {
     },
 
     dismissNotification: async (_: any, { id }: any, context: any) => {
-      await requireAuth(context);
-      await Notification.findByIdAndUpdate(id, { $set: { isDismissed: true } });
+      const user = await requireAuth(context);
+      assertValidObjectId(id, 'notification');
+      await Notification.findOneAndUpdate(
+        { _id: id, recipientId: user._id.toString() },
+        { $set: { isDismissed: true } }
+      );
       return true;
     },
 
@@ -817,19 +846,24 @@ export const saasResolvers = {
     updateWorkflowTemplate: async (_: any, { id, input }: any, context: any) => {
       const user = await requireAuth(context);
       requireSystemAdmin(user);
+      assertValidObjectId(id, 'workflow template');
       const template = await WorkflowTemplate.findByIdAndUpdate(id, { $set: input }, { new: true });
       if (!template) throw new Error('Workflow template not found');
       return { ...template.toObject(), id: template._id.toString() };
     },
 
     deleteWorkflowTemplate: async (_: any, { id }: any, context: any) => {
-      await requireAuth(context);
+      const user = await requireAuth(context);
+      requireSystemAdmin(user);
+      assertValidObjectId(id, 'workflow template');
       await WorkflowTemplate.findByIdAndDelete(id);
       return true;
     },
 
     toggleWorkflowTemplate: async (_: any, { id, isActive }: any, context: any) => {
-      await requireAuth(context);
+      const user = await requireAuth(context);
+      requireSystemAdmin(user);
+      assertValidObjectId(id, 'workflow template');
       const template = await WorkflowTemplate.findByIdAndUpdate(id, { $set: { isActive } }, { new: true });
       if (!template) throw new Error('Workflow template not found');
       return { ...template.toObject(), id: template._id.toString() };
@@ -837,6 +871,7 @@ export const saasResolvers = {
 
     startWorkflow: async (_: any, { input }: any, context: any) => {
       const user = await requireAuth(context);
+      assertValidObjectId(input.templateId, 'workflow template');
       const template = await WorkflowTemplate.findById(input.templateId);
       if (!template) throw new Error('Workflow template not found');
 
@@ -864,6 +899,7 @@ export const saasResolvers = {
 
     processWorkflowAction: async (_: any, { input }: any, context: any) => {
       const user = await requireAuth(context);
+      assertValidObjectId(input.instanceId, 'workflow instance');
       const instance = await WorkflowInstance.findById(input.instanceId);
       if (!instance) throw new Error('Workflow instance not found');
 
@@ -892,6 +928,7 @@ export const saasResolvers = {
 
     cancelWorkflow: async (_: any, { id, reason }: any, context: any) => {
       await requireAuth(context);
+      assertValidObjectId(id, 'workflow instance');
       const instance = await WorkflowInstance.findByIdAndUpdate(
         id,
         { $set: { status: 'cancelled' } },
@@ -918,6 +955,7 @@ export const saasResolvers = {
 
     updateMediaAsset: async (_: any, { id, input }: any, context: any) => {
       const user = await requireAuth(context);
+      assertValidObjectId(id, 'media asset');
       const asset = await MediaAsset.findByIdAndUpdate(
         id,
         { $set: { ...input, lastModifiedBy: user._id.toString() } },
@@ -929,12 +967,14 @@ export const saasResolvers = {
 
     deleteMediaAsset: async (_: any, { id }: any, context: any) => {
       await requireAuth(context);
+      assertValidObjectId(id, 'media asset');
       await MediaAsset.findByIdAndUpdate(id, { $set: { status: 'deleted' } });
       return true;
     },
 
     archiveMediaAsset: async (_: any, { id }: any, context: any) => {
       await requireAuth(context);
+      assertValidObjectId(id, 'media asset');
       const asset = await MediaAsset.findByIdAndUpdate(
         id,
         { $set: { status: 'archived' } },
@@ -948,6 +988,7 @@ export const saasResolvers = {
       const user = await requireAuth(context);
       let path = `/${name}`;
       if (parentFolderId) {
+        assertValidObjectId(parentFolderId, 'parent folder');
         const parent = await MediaFolder.findById(parentFolderId);
         if (parent) path = `${parent.path}/${name}`;
       }
@@ -964,6 +1005,7 @@ export const saasResolvers = {
 
     deleteMediaFolder: async (_: any, { id }: any, context: any) => {
       await requireAuth(context);
+      assertValidObjectId(id, 'media folder');
       await MediaFolder.findByIdAndDelete(id);
       return true;
     },
@@ -994,6 +1036,7 @@ export const saasResolvers = {
 
     updateBroadcastRight: async (_: any, { id, input }: any, context: any) => {
       const user = await requireAuth(context);
+      assertValidObjectId(id, 'broadcast right');
       if (input.status) input.status = input.status.toLowerCase();
       const right = await BroadcastRightManaged.findByIdAndUpdate(id, { $set: input }, { new: true });
       if (!right) throw new Error('Broadcast right not found');
@@ -1002,6 +1045,7 @@ export const saasResolvers = {
 
     deleteBroadcastRight: async (_: any, { id }: any, context: any) => {
       await requireAuth(context);
+      assertValidObjectId(id, 'broadcast right');
       await BroadcastRightManaged.findByIdAndDelete(id);
       return true;
     },
@@ -1034,6 +1078,7 @@ export const saasResolvers = {
 
     addTicketMessage: async (_: any, { input }: any, context: any) => {
       const user = await requireAuth(context);
+      assertValidObjectId(input.ticketId, 'support ticket');
       const ticket = await SupportTicket.findByIdAndUpdate(
         input.ticketId,
         {
@@ -1056,6 +1101,7 @@ export const saasResolvers = {
 
     closeSupportTicket: async (_: any, { id, satisfactionRating, satisfactionComment }: any, context: any) => {
       await requireAuth(context);
+      assertValidObjectId(id, 'support ticket');
       const ticket = await SupportTicket.findByIdAndUpdate(
         id,
         {
@@ -1073,7 +1119,9 @@ export const saasResolvers = {
       return { ...ticket.toObject(), id: ticket._id.toString() };
     },
 
-    rateHelpArticle: async (_: any, { articleId, helpful }: any) => {
+    rateHelpArticle: async (_: any, { articleId, helpful }: any, context: any) => {
+      await requireAuth(context);
+      assertValidObjectId(articleId, 'help article');
       const update = helpful ? { $inc: { helpfulCount: 1 } } : { $inc: { notHelpfulCount: 1 } };
       const article = await HelpArticle.findByIdAndUpdate(articleId, update, { new: true });
       if (!article) throw new Error('Help article not found');
@@ -1117,6 +1165,7 @@ export const saasResolvers = {
     revokeApiKey: async (_: any, { id }: any, context: any) => {
       const user = await requireAuth(context);
       requireSystemAdmin(user);
+      assertValidObjectId(id, 'API key');
       await ApiKey.findByIdAndUpdate(id, { $set: { isActive: false } });
 
       await createAuditEntry({
@@ -1147,20 +1196,26 @@ export const saasResolvers = {
     },
 
     updateWebhook: async (_: any, { id, input }: any, context: any) => {
-      await requireAuth(context);
+      const user = await requireAuth(context);
+      requireSystemAdmin(user);
+      assertValidObjectId(id, 'webhook');
       const webhook = await Webhook.findByIdAndUpdate(id, { $set: input }, { new: true });
       if (!webhook) throw new Error('Webhook not found');
       return { ...webhook.toObject(), id: webhook._id.toString() };
     },
 
     deleteWebhook: async (_: any, { id }: any, context: any) => {
-      await requireAuth(context);
+      const user = await requireAuth(context);
+      requireSystemAdmin(user);
+      assertValidObjectId(id, 'webhook');
       await Webhook.findByIdAndDelete(id);
       return true;
     },
 
     testWebhook: async (_: any, { id }: any, context: any) => {
-      await requireAuth(context);
+      const user = await requireAuth(context);
+      requireSystemAdmin(user);
+      assertValidObjectId(id, 'webhook');
       const webhook = await Webhook.findById(id);
       if (!webhook) throw new Error('Webhook not found');
 
@@ -1178,17 +1233,42 @@ export const saasResolvers = {
   },
 
   Subscription: {
+    // Scoped to the authenticated recipient — even if other clients are
+    // listening on the same global topic, the resolver only forwards
+    // notifications whose recipientId matches the connected user. This avoids
+    // leaking another tenant's / user's notifications across the WS bus while
+    // we still publish to a single channel.
     notificationReceived: {
-      subscribe: () => pubsub.asyncIterator(['NOTIFICATION_RECEIVED']),
+      subscribe: withFilter(
+        (_: any, __: any, context: any) => {
+          requireAuthMiddleware(context);
+          return pubsub.asyncIterator(['NOTIFICATION_RECEIVED']);
+        },
+        (payload: any, _vars: any, context: any) => {
+          const recipientId = payload?.notificationReceived?.recipientId;
+          const userId = context?.user?.userId;
+          if (!recipientId || !userId) return false;
+          return String(recipientId) === String(userId);
+        }
+      ),
     },
     workflowUpdated: {
-      subscribe: () => pubsub.asyncIterator(['WORKFLOW_UPDATED']),
+      subscribe: (_: any, __: any, context: any) => {
+        requireAuthMiddleware(context);
+        return pubsub.asyncIterator(['WORKFLOW_UPDATED']);
+      },
     },
     liveStreamStatusChanged: {
-      subscribe: () => pubsub.asyncIterator(['LIVE_STREAM_STATUS_CHANGED']),
+      subscribe: (_: any, __: any, context: any) => {
+        requireAuthMiddleware(context);
+        return pubsub.asyncIterator(['LIVE_STREAM_STATUS_CHANGED']);
+      },
     },
     signalMonitorUpdated: {
-      subscribe: () => pubsub.asyncIterator(['SIGNAL_MONITOR_UPDATED']),
+      subscribe: (_: any, __: any, context: any) => {
+        requireAuthMiddleware(context);
+        return pubsub.asyncIterator(['SIGNAL_MONITOR_UPDATED']);
+      },
     },
   },
 };

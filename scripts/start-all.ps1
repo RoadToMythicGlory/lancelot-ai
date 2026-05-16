@@ -31,48 +31,15 @@ try {
     exit 1
 }
 
-# Create .env file if it doesn't exist
+# Require a populated .env file. We do NOT auto-generate one with credentials —
+# copy services/api-gateway/.env.example to .env and fill it in locally.
 if (!(Test-Path ".env")) {
-    Write-Host "[CREATING] .env file..." -ForegroundColor Yellow
-    
-    $envContent = @"
-# Environment
-NODE_ENV=development
-
-# MongoDB
-MONGODB_URL=mongodb://LancelotERP_DB:<MONGO_PASSWORD>@localhost:27017/lancelot?authSource=admin
-MONGO_PASSWORD=<MONGO_PASSWORD>
-MONGO_USERNAME=LancelotERP_DB
-
-
-# JWT
-JWT_SECRET=dev_jwt_secret_please_change_in_production
-JWT_EXPIRES_IN=7d
-
-# Application URLs
-NEXT_PUBLIC_API_URL=http://localhost:4000
-NEXT_PUBLIC_GRAPHQL_URL=http://localhost:4000/graphql
-NEXT_PUBLIC_WS_URL=ws://localhost:4000
-
-# Features
-ENABLE_EXCEL_IMPORT=true
-ENABLE_BARCODE_SCANNER=true
-ENABLE_VOICE_COMMANDS=true
-GRAPHQL_PLAYGROUND=true
-
-# Logging
-LOG_LEVEL=debug
-
-# Locale
-DEFAULT_LOCALE=he
-TIMEZONE=Asia/Jerusalem
-"@
-    
-    $envContent | Out-File -FilePath ".env" -Encoding UTF8
-    Write-Host "[OK] .env file created" -ForegroundColor Green
-} else {
-    Write-Host "[OK] .env file already exists" -ForegroundColor Green
+    Write-Host "[ERROR] No .env file found in the repository root." -ForegroundColor Red
+    Write-Host "Copy services/api-gateway/.env.example to .env and supply MongoDB / JWT" -ForegroundColor Yellow
+    Write-Host "credentials before running this script." -ForegroundColor Yellow
+    exit 1
 }
+Write-Host "[OK] .env file detected" -ForegroundColor Green
 
 # Install dependencies
 Write-Host "[INSTALLING] Dependencies..." -ForegroundColor Yellow
@@ -114,10 +81,7 @@ Write-Host "Web Application:    http://localhost:3000" -ForegroundColor Cyan
 Write-Host "GraphQL Playground: http://localhost:4000/graphql" -ForegroundColor Cyan
 Write-Host "MongoDB:            localhost:27017" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Database Login:" -ForegroundColor Yellow
-Write-Host "  Username: LancelotERP_DB"
-Write-Host "  Password: <MONGO_PASSWORD>"
-Write-Host "  Database: lancelot"
+Write-Host "Database Login: see your local .env file for credentials" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""

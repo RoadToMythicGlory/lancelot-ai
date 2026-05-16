@@ -1,24 +1,22 @@
 @echo off
 
-echo Setting up environment variables for Lancelot API Gateway...
+REM Helper that starts the Lancelot API Gateway in development mode.
+REM
+REM Credentials must come from your shell or a local `.env` file (loaded by
+REM dotenv at runtime). This script intentionally does NOT define defaults so
+REM secrets are never committed to git. See services/api-gateway/.env.example.
 
-:: MongoDB Configuration - actual container password
-set MONGO_PASSWORD=ShaySt@r!s@S3cUr1T1K1Ng!1
-set NODE_ENV=development
+if "%NODE_ENV%"=="" set NODE_ENV=development
 
-:: PostgreSQL Configuration - matches docker-compose.yml defaults
-set POSTGRES_PASSWORD=ShaySt@r!s@S3cUr1T1K1Ng!1
-set DB_PASSWORD=ShaySt@r!s@S3cUr1T1K1Ng!1
+if "%MONGO_PASSWORD%"=="" if "%MONGODB_URL%"=="" (
+    echo [ERROR] Set MONGO_PASSWORD ^(and MONGO_USERNAME^) or MONGODB_URL before running.
+    exit /b 1
+)
 
-:: JWT Configuration
-set JWT_SECRET=YourSecretKeyHere_PleaseChangeInProduction_MinLength32
+if "%JWT_SECRET%"=="" if not "%NODE_ENV%"=="development" (
+    echo [ERROR] JWT_SECRET must be set in non-development environments.
+    exit /b 1
+)
 
-echo.
-echo Environment variables set!
-echo MongoDB Password: %MONGO_PASSWORD%
-echo PostgreSQL Password: %POSTGRES_PASSWORD%
-echo.
 echo Starting API Gateway...
-echo.
-
-npm run dev 
+npm run dev

@@ -41,6 +41,7 @@ const IT_USER_PERMS: Permission[] = [
   Permission.INTEGRATIONS_VIEW,
   Permission.INTEGRATIONS_MANAGE,
   Permission.ORG_VIEW,
+  Permission.FLIGHT_BOARD_VIEW,
 ];
 
 const DEPARTMENT_ADMIN_PERMS: Permission[] = [
@@ -64,6 +65,8 @@ const DEPARTMENT_ADMIN_PERMS: Permission[] = [
   Permission.WORKFLOWS_VIEW,
   Permission.SETTINGS_VIEW,
   Permission.INTEGRATIONS_VIEW,
+  Permission.FLIGHT_BOARD_VIEW,
+  Permission.FLIGHT_BOARD_MANAGE,
 ];
 
 const DEPARTMENT_USER_PERMS: Permission[] = [
@@ -78,6 +81,7 @@ const DEPARTMENT_USER_PERMS: Permission[] = [
   Permission.MEDIA_VIEW,
   Permission.RIGHTS_VIEW,
   Permission.WORKFLOWS_VIEW,
+  Permission.FLIGHT_BOARD_VIEW,
 ];
 
 const ROLE_PERMISSIONS: Record<SystemRole, Permission[]> = {

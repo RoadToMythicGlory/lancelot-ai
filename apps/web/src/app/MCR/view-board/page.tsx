@@ -9,6 +9,7 @@ import { LeftOutlined, RightOutlined, LoadingOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { Permission } from '@/rbac';
+import { sanitizeMcrHtml } from '../utils/sanitizeHtml';
 
 const HEBREW_WEEKDAYS = ['יום ראשון', 'יום שני', 'יום שלישי', 'יום רביעי', 'יום חמישי', 'יום שישי', 'שבת'];
 
@@ -189,10 +190,10 @@ export default function ViewBoardPage() {
                 <td className="p-2 font-medium">{activity.activityName}</td>
                 <td className="p-2">{activity.time}</td>
                 <td className="p-2">{activity.endTime}</td>
-                <td className="p-2 text-white bg-neutral-700 [&_p]:text-inherit" dangerouslySetInnerHTML={{ __html: activity.source || '' }} />
-                <td className="p-2 text-white [&_p]:text-inherit" dangerouslySetInnerHTML={{ __html: activity.equipment || '' }} />
-                <td className="p-2 text-white bg-neutral-700 [&_p]:text-inherit" dangerouslySetInnerHTML={{ __html: activity.backup || '' }} />
-                <td className="p-2 text-white bg-neutral-700 [&_p]:text-inherit" dangerouslySetInnerHTML={{ __html: activity.routing || '' }} />
+                <td className="p-2 text-white bg-neutral-700 [&_p]:text-inherit" dangerouslySetInnerHTML={{ __html: sanitizeMcrHtml(activity.source || '') }} />
+                <td className="p-2 text-white [&_p]:text-inherit" dangerouslySetInnerHTML={{ __html: sanitizeMcrHtml(activity.equipment || '') }} />
+                <td className="p-2 text-white bg-neutral-700 [&_p]:text-inherit" dangerouslySetInnerHTML={{ __html: sanitizeMcrHtml(activity.backup || '') }} />
+                <td className="p-2 text-white bg-neutral-700 [&_p]:text-inherit" dangerouslySetInnerHTML={{ __html: sanitizeMcrHtml(activity.routing || '') }} />
                 <td className="p-2">{activity.channel || '-'}</td>
                 <td className="p-2">
                   {activity.broadcastType && (
@@ -207,7 +208,7 @@ export default function ViewBoardPage() {
                     </div>
                   )}
                 </td>
-                <td className="p-2 text-white [&_p]:text-inherit" dangerouslySetInnerHTML={{ __html: activity.notes || '' }} />
+                <td className="p-2 text-white [&_p]:text-inherit" dangerouslySetInnerHTML={{ __html: sanitizeMcrHtml(activity.notes || '') }} />
                 <td className="p-2 text-center">{getStatusIcon(activity.status)}</td>
               </tr>
             ))}

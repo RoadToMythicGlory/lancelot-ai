@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'
 import { useQuery, useMutation } from '@apollo/client'
-import { Card, Input, Tag, Button, Tabs, Modal, Form, Select, List, Empty, Spin, Badge, Timeline, Divider, Tooltip, message as antMessage } from 'antd'
+import { Card, Input, Tag, Button, Tabs, Modal, Form, Select, List, Empty, Spin, Badge, Timeline, Divider, Tooltip, App } from 'antd'
 import {
   QuestionMarkCircleIcon,
   BookOpenIcon,
@@ -65,6 +65,7 @@ const changeTypeLabels: Record<string, { label: string; color: string }> = {
 
 export default function HelpPage() {
   const { user, hasPermission } = useAuth()
+  const { message } = App.useApp()
   const [activeTab, setActiveTab] = useState('articles')
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<string | undefined>()
@@ -76,13 +77,13 @@ export default function HelpPage() {
     onCompleted: (data) => {
       const result = data?.reindexAIKnowledge
       if (result?.success) {
-        antMessage.success(result.message || `סיום: ${result.documentsIndexed} מסמכים נטענו ל-AI`)
+        message.success(result.message || `סיום: ${result.documentsIndexed} מסמכים נטענו ל-AI`)
       } else {
-        antMessage.warning(result?.message || 'הריענון הסתיים ללא שגיאות')
+        message.warning(result?.message || 'הריענון הסתיים ללא שגיאות')
       }
     },
     onError: (err) => {
-      antMessage.error(`ריענון נכשל: ${err.message}`)
+      message.error(`ריענון נכשל: ${err.message}`)
     },
   })
 

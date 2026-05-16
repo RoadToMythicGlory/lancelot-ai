@@ -4,12 +4,15 @@ services:
 
 
   # MongoDB - Broadcast Templates & Configs
+  #
+  # MONGO_USERNAME and MONGO_PASSWORD MUST be supplied via a local `.env` file
+  # (or the shell environment). Compose will fail fast if either is missing.
   mongodb:
     image: mongo:7
     container_name: broadcast-mongodb
     environment:
-      MONGO_INITDB_ROOT_USERNAME: LancelotERP_DB
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-<MONGO_PASSWORD>}
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME:?MONGO_USERNAME must be set in .env}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?MONGO_PASSWORD must be set in .env}
       MONGO_INITDB_DATABASE: lancelot
     ports:
       - "27017:27017"
@@ -33,7 +36,7 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 4000
-      MONGODB_URI: mongodb://LancelotERP_DB:${MONGO_PASSWORD:-<MONGO_PASSWORD>}@mongodb:27017/lancelot?authSource=admin
+      MONGODB_URI: mongodb://${MONGO_USERNAME:?MONGO_USERNAME must be set in .env}:${MONGO_PASSWORD:?MONGO_PASSWORD must be set in .env}@mongodb:27017/lancelot?authSource=admin
     ports:
       - "4000:4000"
     depends_on:
@@ -91,7 +94,7 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       LLM_PRIMARY_MODEL: ${LLM_PRIMARY_MODEL:-llama3.1:8b-instruct-q4_K_M}
       LLM_HEBREW_MODEL: ${LLM_HEBREW_MODEL:-qwen2.5:7b}
-      MONGODB_URL: mongodb://LancelotERP_DB:${MONGO_PASSWORD:-<MONGO_PASSWORD>}@mongodb:27017/broadcast?authSource=admin
+      MONGODB_URL: mongodb://${MONGO_USERNAME:?MONGO_USERNAME must be set in .env}:${MONGO_PASSWORD:?MONGO_PASSWORD must be set in .env}@mongodb:27017/broadcast?authSource=admin
       MONGO_DATABASE: broadcast
       SHIFT_SOLVER_ENGINE: ${SHIFT_SOLVER_ENGINE:-ortools}
       OR_TOOLS_SOLVER_URL: http://or-tools-solver:5003
@@ -168,12 +171,16 @@ services:
     restart: unless-stopped
 
   # Grafana - Monitoring Dashboards
+  #
+  # GRAFANA_ADMIN_USER and GRAFANA_PASSWORD must be set in `.env`. We refuse to
+  # boot with the upstream `admin/admin` defaults because those credentials are
+  # publicly known.
   grafana:
     image: grafana/grafana:latest
     container_name: broadcast-grafana
     environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:?GRAFANA_ADMIN_USER must be set in .env}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?GRAFANA_PASSWORD must be set in .env}
     volumes:
       - grafana_data:/var/lib/grafana
     ports:

@@ -8,6 +8,10 @@ import { Permission, canManageUser } from '../rbac';
 import { RoleTemplate } from '../models/roleTemplate';
 import type { Context } from '../types';
 
+// Hard cap on user-list queries to keep an unbounded admin search from
+// pulling tens of thousands of rows in a single request.
+const MAX_USER_LIST = 1000;
+
 async function computePublicKeyFingerprint(publicKey: string): Promise<string> {
   const crypto = await import('crypto');
   const keyBytes = Buffer.from(publicKey, 'base64');
@@ -65,7 +69,7 @@ export const userResolvers = {
         }
       }
 
-      const users = await db.collection('users').find(query).toArray();
+      const users = await db.collection('users').find(query).limit(MAX_USER_LIST).toArray();
       return users.map((user) => ({
         ...user,
         id: user._id.toString(),
@@ -74,7 +78,17 @@ export const userResolvers = {
     },
 
     user: async (_: any, { id }: { id: string }, context: Context) => {
-      requirePermission(context, Permission.USERS_VIEW);
+      const actor = requireAuth(context);
+
+      if (!ObjectId.isValid(id)) {
+        throw new Error('Invalid user ID');
+      }
+
+      // Allow any authenticated user to read their own profile; require
+      // USERS_VIEW for anyone else.
+      if (actor.userId !== id) {
+        requirePermission(context, Permission.USERS_VIEW);
+      }
 
       const db = await connectMongoDB();
       const user = await db.collection('users').findOne({ _id: new ObjectId(id) });
@@ -106,7 +120,7 @@ export const userResolvers = {
       const users = await db.collection('users').find({
         'departments.departmentId': departmentId,
         isActive: true,
-      }).toArray();
+      }).limit(MAX_USER_LIST).toArray();
 
       return users.map((user) => ({
         ...user,
@@ -122,7 +136,7 @@ export const userResolvers = {
       const users = await db.collection('users').find({
         systemRole,
         isActive: true,
-      }).toArray();
+      }).limit(MAX_USER_LIST).toArray();
 
       return users.map((user) => ({
         ...user,
@@ -236,6 +250,10 @@ export const userResolvers = {
     updateUser: async (_: any, { id, input }: { id: string; input: any }, context: Context) => {
       const actor = requireAuth(context);
 
+      if (!ObjectId.isValid(id)) {
+        throw new Error('Invalid user ID');
+      }
+
       const db = await connectMongoDB();
       const targetUser = await db.collection('users').findOne({ _id: new ObjectId(id) });
       if (!targetUser) throw new Error('User not found');
@@ -347,6 +365,10 @@ export const userResolvers = {
 
     deleteUser: async (_: any, { id }: { id: string }, context: Context) => {
       requirePermission(context, Permission.USERS_DELETE);
+
+      if (!ObjectId.isValid(id)) {
+        throw new Error('Invalid user ID');
+      }
 
       const db = await connectMongoDB();
       await db.collection('users').updateOne(

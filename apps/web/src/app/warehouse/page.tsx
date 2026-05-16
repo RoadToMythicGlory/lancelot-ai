@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Alert, List, Card, Input, Button, Space, Tag, Row, Col, Empty, App, Breadcrumb, Select, Statistic, Tabs, DatePicker, Modal } from 'antd';
 import {
   InboxOutlined,
@@ -22,9 +22,10 @@ import {
   UserSwitchOutlined,
 } from '@ant-design/icons';
 import { useQuery } from '@apollo/client';
-import { GET_WAREHOUSE_EQUIPMENT, GET_BROADCAST_EVENTS, GET_STALE_EQUIPMENT } from '../../graphql/queries';
+import { GET_WAREHOUSE_EQUIPMENT, GET_WAREHOUSE_EQUIPMENT_STATS, GET_BROADCAST_EVENTS, GET_STALE_EQUIPMENT } from '../../graphql/queries';
 import Link from 'next/link';
 import EquipmentRegistrationModal from '../../components/warehouse/EquipmentRegistrationModal';
+import EquipmentEditModal from '../../components/warehouse/EquipmentEditModal';
 import EquipmentReturnModal from '../../components/warehouse/EquipmentReturnModal';
 import EquipmentDetailsModal from '../../components/warehouse/EquipmentDetailsModal';
 import EquipmentQuantityAdjustment from '../../components/warehouse/EquipmentQuantityAdjustment';
@@ -39,6 +40,7 @@ import InternalAssignmentsTab from '../../components/warehouse/internalAssignmen
 import dayjs from 'dayjs';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { Permission } from '@/rbac';
+import { useDebouncedValue } from '@/hooks/useDebounce';
 
 const { RangePicker } = DatePicker;
 
@@ -68,6 +70,7 @@ interface Equipment {
     cell: string;
   };
   isQuantityBased: boolean;
+  isSharedEngineeringEquipment?: boolean;
   isDisabled: boolean;
   disabledAt?: string;
   disabledReason?: string;
@@ -101,6 +104,7 @@ const WarehousePage: React.FC = () => {
   const [isReturnModalVisible, setIsReturnModalVisible] = useState(false);
   const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null);
   const [isDetailsModalVisible, setIsDetailsModalVisible] = useState(false);
+  const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [isQuantityAdjustmentVisible, setIsQuantityAdjustmentVisible] = useState(false);
   const [isDisableModalVisible, setIsDisableModalVisible] = useState(false);
   const [activeTab, setActiveTab] = useState('equipment');
@@ -112,10 +116,29 @@ const WarehousePage: React.FC = () => {
   ]);
 
   const dateRangeValid = Boolean(dateRange[0] && dateRange[1]);
+  const debouncedSearchText = useDebouncedValue(searchText.trim(), 300);
+  const equipmentFilter = useMemo(() => {
+    const filter: Record<string, string> = {};
+    if (debouncedSearchText) filter.searchText = debouncedSearchText;
+    if (selectedCategory !== 'all') filter.category = selectedCategory;
+    if (selectedStatus !== 'all') filter.status = selectedStatus;
+    return Object.keys(filter).length > 0 ? filter : undefined;
+  }, [debouncedSearchText, selectedCategory, selectedStatus]);
 
   // Query for warehouse equipment
-  const { data: equipmentData, loading: equipmentLoading, error: equipmentError, refetch } = useQuery(GET_WAREHOUSE_EQUIPMENT);
+  const { data: equipmentData, loading: equipmentLoading, error: equipmentError, refetch } = useQuery(GET_WAREHOUSE_EQUIPMENT, {
+    variables: {
+      filter: equipmentFilter,
+      limit: 500,
+      offset: 0,
+    },
+    fetchPolicy: 'cache-and-network',
+  });
   const equipment: Equipment[] = equipmentData?.warehouseEquipment || [];
+  const { data: equipmentStatsData } = useQuery(GET_WAREHOUSE_EQUIPMENT_STATS, {
+    variables: { filter: equipmentFilter },
+    fetchPolicy: 'cache-and-network',
+  });
 
   // Stale equipment (unused 14+ days)
   const { data: staleData } = useQuery(GET_STALE_EQUIPMENT, { variables: { daysUnused: 14 } });
@@ -142,15 +165,17 @@ const WarehousePage: React.FC = () => {
   // Filter equipment based on search and filters
   const filteredEquipment = equipment.filter(item => {
     // Exclude disabled equipment by default unless specifically filtered
-    if (item.isDisabled && selectedStatus !== 'disabled') {
+    if (item.isDisabled && selectedStatus !== 'disabled' && selectedStatus !== 'under_maintenance') {
       return false;
     }
     
-    const q = searchText.toLowerCase();
-    const matchesSearch = !searchText ||
+    const q = debouncedSearchText.toLowerCase();
+    const matchesSearch = !debouncedSearchText ||
       String(item.name ?? '').toLowerCase().includes(q) ||
       String(item.barcode ?? '').toLowerCase().includes(q) ||
-      String(item.brand ?? '').toLowerCase().includes(q);
+      String(item.brand ?? '').toLowerCase().includes(q) ||
+      String(item.company ?? '').toLowerCase().includes(q) ||
+      String(item.equipmentModel ?? '').toLowerCase().includes(q);
     
     const matchesCategory = selectedCategory === 'all' || item.category === selectedCategory;
     const matchesStatus = selectedStatus === 'all' || 
@@ -161,14 +186,12 @@ const WarehousePage: React.FC = () => {
     return matchesSearch && matchesCategory && matchesStatus;
   });
 
-  // Calculate statistics (excluding disabled equipment)
-  const activeEquipment = equipment.filter(e => !e.isDisabled);
   const statistics = {
-    totalEquipment: activeEquipment.length,
-    totalAvailable: activeEquipment.filter(e => e.status === 'available').length,
-    totalAssigned: activeEquipment.filter(e => e.status === 'assigned').length,
-    totalMaintenance: activeEquipment.filter(e => e.status === 'maintenance').length,
-    totalDisabled: equipment.filter(e => e.isDisabled).length
+    totalEquipment: equipmentStatsData?.warehouseEquipmentStats?.totalEquipment ?? 0,
+    totalAvailable: equipmentStatsData?.warehouseEquipmentStats?.totalAvailable ?? 0,
+    totalAssigned: equipmentStatsData?.warehouseEquipmentStats?.totalAssigned ?? 0,
+    totalMaintenance: equipmentStatsData?.warehouseEquipmentStats?.totalMaintenance ?? 0,
+    totalDisabled: equipmentStatsData?.warehouseEquipmentStats?.totalDisabled ?? 0,
   };
 
   const getStatusColor = (status: string) => {
@@ -540,6 +563,17 @@ const WarehousePage: React.FC = () => {
                     התאם כמות
                   </Button>] : []),
                   <Button
+                    key="edit"
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedEquipment(item);
+                      setIsEditModalVisible(true);
+                    }}
+                  >
+                    עריכה
+                  </Button>,
+                  <Button
                     key="disable"
                     size="small"
                     danger={item.isDisabled}
@@ -574,6 +608,9 @@ const WarehousePage: React.FC = () => {
                       </Tag>
                       {item.isDisabled && (
                         <Tag color="red">מושבת</Tag>
+                      )}
+                      {item.isSharedEngineeringEquipment && (
+                        <Tag color="purple">ציוד הנדסה שיתופי</Tag>
                       )}
                       {item.suspensionStatus && (
                         <Tag color="volcano">
@@ -1070,6 +1107,23 @@ const WarehousePage: React.FC = () => {
           onClose={() => {
             setIsDetailsModalVisible(false);
             setSelectedEquipment(null);
+          }}
+          onEdit={() => {
+            setIsDetailsModalVisible(false);
+            setIsEditModalVisible(true);
+          }}
+        />
+
+        {/* Equipment Edit Modal */}
+        <EquipmentEditModal
+          visible={isEditModalVisible}
+          equipment={selectedEquipment}
+          onClose={() => {
+            setIsEditModalVisible(false);
+            setSelectedEquipment(null);
+          }}
+          onSuccess={() => {
+            refetch();
           }}
         />
 

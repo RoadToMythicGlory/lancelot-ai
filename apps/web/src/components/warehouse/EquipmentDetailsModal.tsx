@@ -13,6 +13,9 @@ interface EquipmentDetailsModalProps {
   visible: boolean;
   equipment: any;
   onClose: () => void;
+  // Optional hook for opening the edit form from the details modal. When
+  // provided, an `עריכה` button is shown in the modal header.
+  onEdit?: () => void;
 }
 
 // Equipment categories mapping
@@ -33,7 +36,8 @@ const EQUIPMENT_CATEGORIES = {
 const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({ 
   visible, 
   equipment,
-  onClose 
+  onClose,
+  onEdit
 }) => {
   const [activeTab, setActiveTab] = useState('1');
   const componentRef = useRef<HTMLDivElement>(null);
@@ -613,7 +617,21 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
             <Descriptions.Item label="מיקום נוכחי">
               {equipment?.currentLocation || 'מחסן ראשי'}
             </Descriptions.Item>
-            
+            <Descriptions.Item label="ציוד הנדסה שיתופי">
+              {equipment?.isSharedEngineeringEquipment ? (
+                <Tag color="purple">כן</Tag>
+              ) : (
+                <Tag>לא</Tag>
+              )}
+            </Descriptions.Item>
+            <Descriptions.Item label="מעקב כמותי">
+              {equipment?.isQuantityBased ? (
+                <Tag color="cyan">כן</Tag>
+              ) : (
+                <Tag>לא</Tag>
+              )}
+            </Descriptions.Item>
+
             {/* Additional Details */}
             {equipment?.price && (
               <Descriptions.Item label="מחיר">
@@ -883,6 +901,11 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
         <Button key="close" onClick={onClose}>
           סגור
         </Button>,
+        onEdit && equipment?.id && (
+          <Button key="edit" onClick={onEdit}>
+            עריכה
+          </Button>
+        ),
         isOrphanState && (
           <Button
             key="force-release"

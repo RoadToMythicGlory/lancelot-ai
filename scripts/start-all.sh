@@ -67,63 +67,15 @@ fi
 
 print_success "Prerequisites checked"
 
-# Create .env file if it doesn't exist
+# Require a populated .env file. We do NOT auto-generate one with credentials —
+# copy services/api-gateway/.env.example to .env and fill it in locally.
 if [ ! -f .env ]; then
-    print_step "Creating .env file..."
-    cat > .env << 'EOL'
-# Environment
-NODE_ENV=development
-
-# MongoDB
-MONGODB_URL=mongodb://LancelotERP_DB:<MONGO_PASSWORD>@localhost:27017/lancelot?authSource=admin
-MONGO_PASSWORD=<MONGO_PASSWORD>
-MONGO_USERNAME=LancelotERP_DB
-
-# OpenSearch
-OPENSEARCH_URL=http://localhost:9200
-OPENSEARCH_USERNAME=admin
-OPENSEARCH_PASSWORD=admin
-
-# MinIO
-MINIO_ENDPOINT=localhost
-MINIO_PORT=9000
-MINIO_USE_SSL=false
-MINIO_ACCESS_KEY=lancelot
-MINIO_SECRET_KEY=<MONGO_PASSWORD>
-
-# Keycloak
-KEYCLOAK_URL=http://localhost:8080
-KEYCLOAK_REALM=lancelot
-KEYCLOAK_CLIENT_ID=lancelot-web
-KEYCLOAK_CLIENT_SECRET=dev_secret
-KEYCLOAK_ADMIN_PASSWORD=admin
-
-# JWT
-JWT_SECRET=dev_jwt_secret_please_change_in_production
-JWT_EXPIRES_IN=7d
-
-# Application URLs
-NEXT_PUBLIC_API_URL=http://localhost:4000
-NEXT_PUBLIC_GRAPHQL_URL=http://localhost:4000/graphql
-NEXT_PUBLIC_WS_URL=ws://localhost:4000
-
-# Features
-ENABLE_EXCEL_IMPORT=true
-ENABLE_BARCODE_SCANNER=true
-ENABLE_VOICE_COMMANDS=true
-GRAPHQL_PLAYGROUND=true
-
-# Logging
-LOG_LEVEL=debug
-
-# Locale
-DEFAULT_LOCALE=he
-TIMEZONE=Asia/Jerusalem
-EOL
-    print_success ".env file created"
-else
-    print_success ".env file already exists"
+    print_error "No .env file found in the repository root."
+    echo "Copy services/api-gateway/.env.example to .env and supply MongoDB /"
+    echo "JWT credentials before running this script."
+    exit 1
 fi
+print_success ".env file detected"
 
 # Install dependencies
 print_step "Installing dependencies..."
@@ -197,12 +149,11 @@ echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━
 echo ""
 echo "📱 Web Application:    http://localhost:3000"
 echo "📊 GraphQL Playground: http://localhost:4000/graphql"
-echo "🗄️  MinIO Console:     http://localhost:9001 (user: lancelot, pass: <MONGO_PASSWORD>)"
-echo "🔐 Keycloak Admin:     http://localhost:8080 (user: admin, pass: admin)"
+echo "🗄️  MinIO Console:     http://localhost:9001 (credentials in your .env)"
+echo "🔐 Keycloak Admin:     http://localhost:8080 (credentials in your .env)"
 echo ""
-echo "🧪 Test Credentials:"
-echo "   Email: admin@example.com"
-echo "   Password: ChangeMe123!"
+echo "🧪 Test credentials are NOT shipped with the repo — see your local .env"
+echo "   or talk to a teammate for a developer login."
 echo ""
 echo "💡 Tips:"
 echo "   - Press Cmd+K to open command palette"

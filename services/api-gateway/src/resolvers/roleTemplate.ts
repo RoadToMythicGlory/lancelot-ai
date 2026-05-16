@@ -5,6 +5,10 @@ import { requireAuth, requirePermission } from '../middleware/auth';
 import { Permission } from '../rbac';
 import type { Context } from '../types';
 
+// Default cap on role-template list queries — admin tooling only, but we
+// still want to avoid pulling thousands of rows in one request.
+const DEFAULT_TEMPLATE_LIMIT = 200;
+
 export const roleTemplateResolvers = {
   RoleTemplate: {
     id: (parent: any) => {
@@ -24,11 +28,14 @@ export const roleTemplateResolvers = {
           { departmentScope: { $exists: false } },
         ];
       }
-      return RoleTemplate.find(filter).sort({ name: 1 }).lean();
+      return RoleTemplate.find(filter).sort({ name: 1 }).limit(DEFAULT_TEMPLATE_LIMIT).lean();
     },
 
     roleTemplate: async (_: any, args: { id: string }, context: Context) => {
       requirePermission(context, Permission.USERS_VIEW);
+      if (!ObjectId.isValid(args.id)) {
+        throw new Error('Invalid role template ID');
+      }
       return RoleTemplate.findById(args.id).lean();
     },
 
@@ -46,7 +53,7 @@ export const roleTemplateResolvers = {
         ];
       }
 
-      return RoleTemplate.find(filter).sort({ name: 1 }).lean();
+      return RoleTemplate.find(filter).sort({ name: 1 }).limit(DEFAULT_TEMPLATE_LIMIT).lean();
     },
   },
 
@@ -72,6 +79,10 @@ export const roleTemplateResolvers = {
     updateRoleTemplate: async (_: any, args: { id: string; input: any }, context: Context) => {
       const user = requirePermission(context, Permission.ROLE_TEMPLATES_MANAGE);
 
+      if (!ObjectId.isValid(args.id)) {
+        throw new Error('Invalid role template ID');
+      }
+
       if (args.input.name) {
         const existing = await RoleTemplate.findOne({
           name: args.input.name,
@@ -96,6 +107,10 @@ export const roleTemplateResolvers = {
 
     deleteRoleTemplate: async (_: any, args: { id: string }, context: Context) => {
       requirePermission(context, Permission.ROLE_TEMPLATES_MANAGE);
+
+      if (!ObjectId.isValid(args.id)) {
+        throw new Error('Invalid role template ID');
+      }
 
       const result = await RoleTemplate.findByIdAndUpdate(
         args.id,

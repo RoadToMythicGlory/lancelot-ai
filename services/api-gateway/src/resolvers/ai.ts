@@ -15,6 +15,15 @@ const logger = createLogger('ai-resolver');
 const AI_AGENT_EMAIL = 'lancelot-ai@internal.system';
 const AI_AGENT_SERVICE_URL = process.env.AI_AGENT_URL || 'http://localhost:4001';
 
+// Cap conversation history fetches so a single request can't pull an
+// unbounded number of messages from Mongo.
+const MAX_AI_HISTORY = 200;
+const DEFAULT_AI_HISTORY = 50;
+
+// TODO(production-hardening): add per-user rate limiting on AI mutations
+// (sendAIMessage / requestLineup / requestCGSpec / triggerNewsFetch) — the
+// upstream agent service is expensive and currently relies only on auth.
+
 /**
  * Fetch from AI agent service.
  *
@@ -77,6 +86,7 @@ export const aiResolvers = {
      * Get AI agent status
      */
     aiAgentStatus: async (_: any, __: any, context: Context) => {
+      requireAuth(context);
       try {
         const status = await fetchFromAIAgent('/ai/status', 'GET', undefined, undefined, context.traceId, context);
         
@@ -119,7 +129,9 @@ export const aiResolvers = {
           return [];
         }
         
-        const messages = memory.messages.slice(-(args.limit || 50));
+        const requested = args.limit ?? DEFAULT_AI_HISTORY;
+        const bounded = Math.max(1, Math.min(requested, MAX_AI_HISTORY));
+        const messages = memory.messages.slice(-bounded);
         
         return messages.map((msg: any) => ({
           id: msg.id,
@@ -139,6 +151,7 @@ export const aiResolvers = {
      * Get AI agent user (for contacts list)
      */
     aiAgentUser: async (_: any, __: any, context: Context) => {
+      requireAuth(context);
       try {
         const mongoDb = await connectMongoDB();
         const usersCollection = mongoDb.collection('users');

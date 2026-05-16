@@ -1,7 +1,12 @@
 const { MongoClient } = require('mongodb');
 
-// Use the same MongoDB URI format as your existing scripts
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://LancelotERP_DB:<MONGO_PASSWORD>@localhost:27017/lancelot?authSource=admin';
+// Credentials must be supplied via the environment so we never ship a
+// hardcoded MongoDB connection string.
+const MONGODB_URI = process.env.MONGODB_URI;
+if (!MONGODB_URI) {
+  console.error('Missing required environment variable: MONGODB_URI');
+  process.exit(1);
+}
 
 async function fixMCRAdminPermissions() {
   const client = new MongoClient(MONGODB_URI);

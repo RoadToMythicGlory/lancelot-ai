@@ -17,6 +17,7 @@ import {
   ChevronDoubleLeftIcon,
   ChevronDoubleRightIcon,
   ChartBarIcon,
+  PresentationChartLineIcon,
   Cog6ToothIcon,
   CreditCardIcon,
   ShieldCheckIcon,
@@ -57,6 +58,7 @@ export default function Sidebar() {
     { name: 'תכנונית', href: '/broadcast-planning', icon: CalendarIcon, requires: Permission.BROADCAST_VIEW },
     { name: 'שידורי חוץ', href: '/external-broadcasts', icon: GlobeAltIcon, requires: Permission.BROADCAST_VIEW },
     { name: 'MCR', href: '/MCR', icon: ChartBarIcon, requires: Permission.MCR_VIEW },
+    { name: 'לוח טיסות', href: '/flight-board', icon: PresentationChartLineIcon, requires: Permission.FLIGHT_BOARD_VIEW },
     { name: 'מחסן', href: '/warehouse', icon: CubeIcon, requires: Permission.WAREHOUSE_VIEW },
   ]
 

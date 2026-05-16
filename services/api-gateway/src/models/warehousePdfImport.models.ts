@@ -78,6 +78,10 @@ const warehousePdfImportSchema = new Schema<IWarehousePdfImport>(
 
 warehousePdfImportSchema.index({ status: 1, uploadedAt: 1 });
 warehousePdfImportSchema.index({ eventId: 1, importContentHash: 1 });
+warehousePdfImportSchema.index({ uploadedBy: 1, uploadedAt: -1 });
+warehousePdfImportSchema.index({ eventId: 1, status: 1 });
+warehousePdfImportSchema.index({ inventoryHash: 1 });
+warehousePdfImportSchema.index({ uploadedAt: -1 });
 
 export const WarehousePdfImport = mongoose.model<IWarehousePdfImport>(
   'WarehousePdfImport',

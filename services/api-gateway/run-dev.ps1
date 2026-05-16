@@ -1,16 +1,26 @@
-# Lancelot API Gateway Development Runner
-Write-Host "🚀 Starting Lancelot API Gateway..." -ForegroundColor Cyan
+# Lancelot API Gateway development runner.
+#
+# Loads environment variables from your shell or `.env` file (via dotenv) and
+# starts the dev server. No credentials are hardcoded here — supply them in
+# `.env` (see services/api-gateway/.env.example) or via your shell.
 
-# Set environment variables
-$env:MONGO_PASSWORD = "<MONGO_PASSWORD>"
-$env:MONGO_USERNAME = "LancelotERP_DB"
-$env:NODE_ENV = "development"
-$env:JWT_SECRET = "YourSecretKeyHere_PleaseChangeInProduction_MinLength32"
+Write-Host "Starting Lancelot API Gateway..." -ForegroundColor Cyan
 
-Write-Host "✅ Environment variables set" -ForegroundColor Green
-Write-Host "   MongoDB Username: $env:MONGO_USERNAME" -ForegroundColor Yellow
-Write-Host "   MongoDB Password: $env:MONGO_PASSWORD" -ForegroundColor Yellow
-Write-Host ""
+if (-not $env:NODE_ENV) { $env:NODE_ENV = "development" }
 
-# Run the development server
-npm run dev 
+$missing = @()
+if (-not $env:MONGODB_URL -and (-not $env:MONGO_USERNAME -or -not $env:MONGO_PASSWORD) -and $env:NODE_ENV -ne "development") {
+    $missing += "MONGODB_URL or MONGO_USERNAME + MONGO_PASSWORD"
+}
+if (-not $env:JWT_SECRET -and $env:NODE_ENV -ne "development") {
+    $missing += "JWT_SECRET"
+}
+
+if ($missing.Count -gt 0) {
+    Write-Host "Missing required environment variables:" -ForegroundColor Red
+    foreach ($m in $missing) { Write-Host "  - $m" -ForegroundColor Red }
+    Write-Host "Set them in your shell or a local .env file before running this script." -ForegroundColor Yellow
+    exit 1
+}
+
+npm run dev

@@ -43,5 +43,9 @@ const guestContactSchema = new Schema<IGuestContact>({
 
 guestContactSchema.index({ organizationId: 1, userId: 1, status: 1 });
 guestContactSchema.index({ name: 'text', topicsExpertise: 'text' });
+guestContactSchema.index({ userId: 1, name: 1 });
+guestContactSchema.index({ email: 1 });
+guestContactSchema.index({ topicsExpertise: 1 });
+guestContactSchema.index({ userId: 1, status: 1, updatedAt: -1 });
 
 export const GuestContact = mongoose.model<IGuestContact>('GuestContact', guestContactSchema);

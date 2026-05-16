@@ -4,7 +4,6 @@
   "private": true,
   "scripts": {
     "dev": "ts-node src/index.ts",
-    "dev:env": "cross-env MONGO_PASSWORD=<MONGO_PASSWORD> MONGO_USERNAME=LancelotERP_DB NODE_ENV=development JWT_SECRET=YourSecretKeyHere_PleaseChangeInProduction_MinLength32 ts-node src/index.ts",
     "start:dev": "ts-node src/index.ts",
     "build": "tsc && node -e \"const fs=require('fs');const path=require('path');const src='src/schema';const out='dist/schema';fs.mkdirSync(out,{recursive:true});for(const f of fs.readdirSync(src)){if(f.endsWith('.graphql')){fs.copyFileSync(path.join(src,f),path.join(out,f));}}\"",
     "start": "NODE_ENV=production node server.js",

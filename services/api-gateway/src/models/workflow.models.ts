@@ -161,12 +161,18 @@ const workflowInstanceSchema = new Schema<IWorkflowInstance>({
 // Indexes
 workflowTemplateSchema.index({ organizationId: 1, isActive: 1 });
 workflowTemplateSchema.index({ resourceType: 1, triggerType: 1 });
+workflowTemplateSchema.index({ organizationId: 1, resourceType: 1 });
+workflowTemplateSchema.index({ createdBy: 1 });
+workflowTemplateSchema.index({ triggerType: 1, isActive: 1 });
 
 workflowInstanceSchema.index({ organizationId: 1, status: 1, createdAt: -1 });
 workflowInstanceSchema.index({ resourceType: 1, resourceId: 1 });
 workflowInstanceSchema.index({ templateId: 1 });
 workflowInstanceSchema.index({ 'stepHistory.assigneeId': 1, status: 1 });
 workflowInstanceSchema.index({ slaDeadline: 1, slaBreached: 1 });
+workflowInstanceSchema.index({ status: 1, createdAt: -1 });
+workflowInstanceSchema.index({ initiatedBy: 1, createdAt: -1 });
+workflowInstanceSchema.index({ organizationId: 1, templateId: 1 });
 
 export const WorkflowTemplate = mongoose.model<IWorkflowTemplate>('WorkflowTemplate', workflowTemplateSchema);
 export const WorkflowInstance = mongoose.model<IWorkflowInstance>('WorkflowInstance', workflowInstanceSchema);

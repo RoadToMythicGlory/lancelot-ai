@@ -59,6 +59,9 @@ ShiftRoleTemplateSchema.index({ departmentId: 1, dayOfWeek: 1, shiftType: 1, nam
 
 // Index for querying templates by department
 ShiftRoleTemplateSchema.index({ departmentId: 1, isActive: 1 });
+ShiftRoleTemplateSchema.index({ departmentId: 1, dayOfWeek: 1, isActive: 1 });
+ShiftRoleTemplateSchema.index({ shiftType: 1, isActive: 1 });
+ShiftRoleTemplateSchema.index({ createdBy: 1 });
 
 // Virtual for total required workers
 ShiftRoleTemplateSchema.virtual('totalRequiredWorkers').get(function() {

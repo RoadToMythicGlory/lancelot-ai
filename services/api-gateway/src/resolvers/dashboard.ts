@@ -5,6 +5,11 @@ import { BroadcastEvent } from '../models/broadcast.models';
 import { requirePermission } from '../middleware/auth';
 import { Permission } from '../rbac';
 
+// Hard caps so an unbounded query can't pull thousands of rows.
+const MAX_DASHBOARD_BROADCASTS = 1000;
+const MAX_DASHBOARD_SHIFTS = 1000;
+const MAX_BULLETIN_LIMIT = 200;
+
 // Define resolver types
 type ResolverFn = (parent: any, args: any, context: Context, info?: any) => any;
 type ResolverMap = {
@@ -78,7 +83,7 @@ export const dashboardResolvers = {
             $gte: today,
             $lt: tomorrow
           }
-        }).sort({ startTime: 1 }).exec();
+        }).sort({ startTime: 1 }).limit(MAX_DASHBOARD_BROADCASTS).exec();
 
         console.log(`Found ${broadcasts.length} broadcasts for today`);
 
@@ -111,7 +116,13 @@ export const dashboardResolvers = {
         const usersCollection = mongoDb.collection('users');
         
         const targetUserId = userId || context.userId;
-        
+
+        // If a caller passes an explicit userId we must validate it before
+        // shoving it into an ObjectId() further down.
+        if (userId && !ObjectId.isValid(userId)) {
+          throw new Error('Invalid user ID');
+        }
+
         // Get current week's date range
         const today = new Date();
         const currentDay = today.getDay();
@@ -132,7 +143,7 @@ export const dashboardResolvers = {
             { 'assignedWorkers.userId': targetUserId },
             { 'assignedWorkers.user.id': targetUserId },
           ],
-        }).sort({ date: 1, startTime: 1 }).toArray();
+        }).sort({ date: 1, startTime: 1 }).limit(MAX_DASHBOARD_SHIFTS).toArray();
 
         // Get user info if needed
         let userInfo = null;
@@ -190,6 +201,9 @@ export const dashboardResolvers = {
     bulletinPosts: async (_parent: any, { departmentId, limit = 10, onlyEmergency = false, onlyPinned = false }: any, context: Context) => {
       requirePermission(context, Permission.DASHBOARD_VIEW);
 
+      // Bound caller-provided limits.
+      const boundedLimit = Math.max(1, Math.min(Number(limit) || 10, MAX_BULLETIN_LIMIT));
+
       try {
         // In production, this would query MongoDB
         let posts = [...mockBulletinPosts];
@@ -219,7 +233,7 @@ export const dashboardResolvers = {
         });
 
         // Limit results
-        return posts.slice(0, limit);
+        return posts.slice(0, boundedLimit);
       } catch (error) {
         console.error('Error fetching bulletin posts:', error);
         return [];

@@ -4,6 +4,7 @@ import { EquipmentSet } from '../models/equipmentSet.models';
 import { BroadcastEvent } from '../models/broadcast.models';
 import { requireAuth, requirePermission } from '../middleware/auth';
 import { Permission } from '../rbac';
+import { syncSharedEngineeringSnapshotForEvent } from '../services/sharedEngineeringSnapshot';
 import mongoose from 'mongoose';
 
 let mongooseConnected = false;
@@ -38,6 +39,7 @@ function mapEquipmentToGql(item: any) {
     imageUrl: item.imageUrl || null,
     storage: item.storage || null,
     isQuantityBased: item.isQuantityBased || false,
+    isSharedEngineeringEquipment: item.isSharedEngineeringEquipment || false,
     isDisabled: item.isDisabled || false,
     disabledAt: item.disabledAt?.toISOString() || null,
     disabledReason: item.disabledReason || null,
@@ -70,19 +72,32 @@ function mapSetToGql(doc: any) {
 
 export const equipmentSetsResolvers = {
   Query: {
-    equipmentSets: async () => {
+    equipmentSets: async (_: any, args: { limit?: number; offset?: number } = {}, context: any) => {
+      requirePermission(context, Permission.WAREHOUSE_VIEW);
       await ensureMongoConnection();
-      const docs = await EquipmentSet.find().sort({ name: 1 }).exec();
+      const MAX_LIMIT = 500;
+      const limit = Math.min(Math.max(args.limit ?? 200, 1), MAX_LIMIT);
+      const offset = Math.max(args.offset ?? 0, 0);
+      const docs = await EquipmentSet.find()
+        .sort({ name: 1 })
+        .skip(offset)
+        .limit(limit)
+        .exec();
       return docs.map(mapSetToGql);
     },
 
-    equipmentSet: async (_: any, { id }: { id: string }) => {
+    equipmentSet: async (_: any, { id }: { id: string }, context: any) => {
+      requirePermission(context, Permission.WAREHOUSE_VIEW);
       await ensureMongoConnection();
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        throw new Error('Invalid equipment set ID');
+      }
       const doc = await EquipmentSet.findById(id).exec();
       return doc ? mapSetToGql(doc) : null;
     },
 
-    equipmentSetByBarcode: async (_: any, { barcode }: { barcode: string }) => {
+    equipmentSetByBarcode: async (_: any, { barcode }: { barcode: string }, context: any) => {
+      requirePermission(context, Permission.WAREHOUSE_VIEW);
       await ensureMongoConnection();
       const doc = await EquipmentSet.findOne({
         barcode: { $regex: `^${barcode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
@@ -90,10 +105,14 @@ export const equipmentSetsResolvers = {
       return doc ? mapSetToGql(doc) : null;
     },
 
-    staleEquipment: async (_: any, { daysUnused }: { daysUnused?: number }) => {
+    staleEquipment: async (_: any, { daysUnused, limit, offset }: { daysUnused?: number; limit?: number; offset?: number }, context: any) => {
+      requirePermission(context, Permission.WAREHOUSE_VIEW);
       await ensureMongoConnection();
       const days = daysUnused ?? 14;
       const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+      const MAX_LIMIT = 500;
+      const cappedLimit = Math.min(Math.max(limit ?? 200, 1), MAX_LIMIT);
+      const cappedOffset = Math.max(offset ?? 0, 0);
 
       const items = await Equipment.find({
         isDisabled: false,
@@ -103,6 +122,8 @@ export const equipmentSetsResolvers = {
         ],
       })
         .sort({ lastUsedAt: 1 })
+        .skip(cappedOffset)
+        .limit(cappedLimit)
         .exec();
 
       return items.map(mapEquipmentToGql);
@@ -265,6 +286,12 @@ export const equipmentSetsResolvers = {
       eventDoc.markModified('metadata');
       await eventDoc.save();
 
+      // Sets can contain flagged shared engineering equipment — refresh
+      // the snapshot so MCR sees the new allocations.
+      await syncSharedEngineeringSnapshotForEvent(eventId).catch((err) =>
+        console.error('Shared engineering snapshot sync (set assign) failed', err),
+      );
+
       return {
         success: true,
         message: `סט "${set.name}" הוקצה בהצלחה`,
@@ -408,6 +435,10 @@ export const equipmentSetsResolvers = {
         await eventDoc.save();
       }
 
+      await syncSharedEngineeringSnapshotForEvent(eventId).catch((err) =>
+        console.error('Shared engineering snapshot sync (set return) failed', err),
+      );
+
       return {
         success: true,
         message: `סט "${set.name}" הוחזר. ${returnedCount} הוחזרו, ${missingCount} חסרים, ${replacedCount} הוחלפו.`,
@@ -420,7 +451,11 @@ export const equipmentSetsResolvers = {
 
   // Field resolver: resolve equipment details within set items
   EquipmentSetItem: {
-    equipment: async (parent: any) => {
+    equipment: async (parent: any, _args: any, context: any) => {
+      // Field resolvers inherit the parent query's auth requirement, but
+      // re-check here to keep this lookup safe if EquipmentSetItem ever
+      // gets exposed from a different (less guarded) parent type.
+      requireAuth(context);
       if (!parent.equipmentId) return null;
       await ensureMongoConnection();
       const eq = await Equipment.findById(parent.equipmentId).exec();

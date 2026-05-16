@@ -5,6 +5,17 @@ import { ExternalBroadcastPreset } from '../models/externalBroadcastPreset.model
 import mongoose from 'mongoose';
 import { requireAuth, requirePermission } from '../middleware/auth';
 import { Permission } from '../rbac';
+import { preflightBroadcastEvent, validateStatusTransition } from '../services/broadcast.service';
+import { allocateEquipment, returnEquipment } from '../services/warehouse.service';
+import {
+  ensureShadowMcrEventForBroadcast,
+  syncShadowMcrEventFromBroadcast,
+  detachShadowMcrEventOnBroadcastDelete,
+} from '../services/mcrShadowEvent';
+import { syncSharedEngineeringSnapshotForEvent } from '../services/sharedEngineeringSnapshot';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('broadcast-resolver');
 
 let mongooseConnected = false;
 
@@ -14,6 +25,65 @@ async function ensureMongoConnection() {
     await connectMongoose();
     mongooseConnected = true;
   }
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getContextUserId(context: any): string {
+  return context?.user?.userId || context?.user?.id || 'system';
+}
+
+function getContextUserDisplayName(context: any): string {
+  const user = context?.user;
+  return (
+    user?.displayName ||
+    [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim() ||
+    user?.email ||
+    'System'
+  );
+}
+
+function buildWarehouseEquipmentQuery(filter?: any): any {
+  const query: any = {};
+
+  if (!filter) return query;
+
+  if (filter.category) {
+    query.category = filter.category;
+  }
+  if (filter.status) {
+    if (filter.status === 'disabled') {
+      query.isDisabled = true;
+    } else if (filter.status === 'under_maintenance') {
+      query.suspensionStatus = 'under_maintenance';
+      query.isDisabled = true;
+    } else {
+      query.status = filter.status;
+    }
+  }
+  if (filter.available) {
+    query.quantityAvailable = { $gt: 0 };
+  }
+  if (filter.location) {
+    query.currentLocation = { $regex: filter.location, $options: 'i' };
+  }
+  if (filter.searchText && String(filter.searchText).trim()) {
+    const searchRegex = { $regex: escapeRegex(String(filter.searchText).trim()), $options: 'i' };
+    query.$or = [
+      { name: searchRegex },
+      { barcode: searchRegex },
+      { company: searchRegex },
+      { equipmentModel: searchRegex },
+      { category: searchRegex },
+    ];
+  }
+  if (filter.isSharedEngineeringEquipment !== undefined && filter.isSharedEngineeringEquipment !== null) {
+    query.isSharedEngineeringEquipment = !!filter.isSharedEngineeringEquipment;
+  }
+
+  return query;
 }
 
 // Map database status values to GraphQL BroadcastEventStatus enum values
@@ -104,29 +174,26 @@ export const broadcastResolvers = {
       }
     },
 
-    warehouseEquipment: async (_: any, { filter }: { filter?: any }) => {
+    warehouseEquipment: async (_: any, { filter, limit, offset }: { filter?: any; limit?: number; offset?: number }, context: any) => {
       try {
+        requirePermission(context, Permission.WAREHOUSE_VIEW);
         await ensureMongoConnection();
-        
-        // Build query filter
-        const query: any = {};
-        
-        if (filter) {
-          if (filter.category) {
-            query.category = filter.category;
-          }
-          if (filter.status) {
-            query.status = filter.status;
-          }
-          if (filter.available) {
-            query.quantityAvailable = { $gt: 0 };
-          }
-          if (filter.location) {
-            query.currentLocation = { $regex: filter.location, $options: 'i' };
-          }
-        }
-        
-        const equipment = await Equipment.find(query).sort({ name: 1 }).exec();
+
+        const query = buildWarehouseEquipmentQuery(filter);
+
+        // Hard cap pagination so the warehouse list never returns the
+        // entire collection (currently ~4,000+ items). For administrative
+        // exports use a dedicated reporting endpoint rather than raising
+        // this cap.
+        const MAX_LIMIT = 500;
+        const cappedLimit = Math.min(Math.max(limit ?? 200, 1), MAX_LIMIT);
+        const cappedOffset = Math.max(offset ?? 0, 0);
+
+        const equipment = await Equipment.find(query)
+          .sort({ name: 1 })
+          .skip(cappedOffset)
+          .limit(cappedLimit)
+          .exec();
         
         // Map to GraphQL format
         return equipment.map(item => ({
@@ -151,6 +218,7 @@ export const broadcastResolvers = {
           imageUrl: item.imageUrl || null,
           storage: item.storage || null,
           isQuantityBased: item.isQuantityBased || false,
+          isSharedEngineeringEquipment: item.isSharedEngineeringEquipment || false,
           isDisabled: item.isDisabled || false,
           disabledAt: item.disabledAt?.toISOString() || null,
           disabledReason: item.disabledReason || null,
@@ -165,8 +233,50 @@ export const broadcastResolvers = {
       }
     },
 
-    broadcastEvents: async (_: any, args: { startDate?: string; endDate?: string; filter?: any }) => {
+    warehouseEquipmentStats: async (_: any, { filter }: { filter?: any }, context: any) => {
       try {
+        requirePermission(context, Permission.WAREHOUSE_VIEW);
+        await ensureMongoConnection();
+
+        const baseQuery = buildWarehouseEquipmentQuery(filter);
+        const activeQuery = { ...baseQuery, isDisabled: { $ne: true } };
+
+        const [
+          totalEquipment,
+          totalAvailable,
+          totalAssigned,
+          totalMaintenance,
+          totalDisabled,
+        ] = await Promise.all([
+          Equipment.countDocuments(activeQuery),
+          Equipment.countDocuments({ ...activeQuery, status: 'available' }),
+          Equipment.countDocuments({ ...activeQuery, status: 'assigned' }),
+          Equipment.countDocuments({ ...activeQuery, status: 'maintenance' }),
+          Equipment.countDocuments({ ...baseQuery, isDisabled: true }),
+        ]);
+
+        return {
+          totalEquipment,
+          totalAvailable,
+          totalAssigned,
+          totalMaintenance,
+          totalDisabled,
+        };
+      } catch (error) {
+        console.error('Error fetching warehouse equipment stats:', error);
+        return {
+          totalEquipment: 0,
+          totalAvailable: 0,
+          totalAssigned: 0,
+          totalMaintenance: 0,
+          totalDisabled: 0,
+        };
+      }
+    },
+
+    broadcastEvents: async (_: any, args: { startDate?: string; endDate?: string; filter?: any; limit?: number; offset?: number }, context: any) => {
+      try {
+        requirePermission(context, Permission.BROADCAST_VIEW);
         await ensureMongoConnection();
         console.log('🔍 broadcastEvents resolver called with args:', args);
         
@@ -216,9 +326,17 @@ export const broadcastResolvers = {
         }
         
         console.log('📊 MongoDB query:', JSON.stringify(query, null, 2));
-        
-        const events = await BroadcastEvent.find(query).sort({ startTime: 1 }).exec();
-        
+
+        const MAX_LIMIT = 500;
+        const cappedLimit = Math.min(Math.max(args.limit ?? 200, 1), MAX_LIMIT);
+        const cappedOffset = Math.max(args.offset ?? 0, 0);
+
+        const events = await BroadcastEvent.find(query)
+          .sort({ startTime: 1 })
+          .skip(cappedOffset)
+          .limit(cappedLimit)
+          .exec();
+
         console.log('📊 Found', events.length, 'events');
         
         // Map MongoDB documents to GraphQL format
@@ -300,14 +418,29 @@ export const broadcastResolvers = {
       }
     },
 
-    broadcastEvent: async (_: any, { id }: { id: string }) => {
+    broadcastEvent: async (_: any, { id }: { id: string }, context: any) => {
       try {
+        const user = requirePermission(context, Permission.BROADCAST_VIEW);
         await ensureMongoConnection();
-        
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+          throw new Error('Invalid broadcast event ID');
+        }
+
         const eventDoc = await BroadcastEvent.findById(id).exec();
-        
+
         if (!eventDoc) {
           return null;
+        }
+
+        const eventDept = (eventDoc as any).departmentId;
+        if (
+          eventDept &&
+          user.systemRole !== 'SYSTEM_ADMIN' &&
+          user.systemRole !== 'IT_ADMIN' &&
+          !user.hasForDept(Permission.BROADCAST_VIEW, eventDept)
+        ) {
+          throw new Error('You do not have access to this broadcast event');
         }
         
         const event: any = eventDoc.toObject ? eventDoc.toObject() : eventDoc;
@@ -384,13 +517,17 @@ export const broadcastResolvers = {
     },
 
     // Equipment Assignment Queries
-    equipmentAssignmentsByEvent: async (_: any, { broadcastEventId }: { broadcastEventId: string }) => {
+    equipmentAssignmentsByEvent: async (_: any, { broadcastEventId }: { broadcastEventId: string }, context: any) => {
       try {
+        requirePermission(context, Permission.WAREHOUSE_VIEW);
         await ensureMongoConnection();
+        if (!mongoose.Types.ObjectId.isValid(broadcastEventId)) {
+          return [];
+        }
         const assignments = await EquipmentAssignment.find({
           eventId: new mongoose.Types.ObjectId(broadcastEventId),
           status: 'active'
-        }).sort({ assignedAt: -1 }).exec();
+        }).sort({ assignedAt: -1 }).limit(500).exec();
         
         return assignments.map(a => ({
           id: a._id.toString(),
@@ -425,9 +562,11 @@ export const broadcastResolvers = {
     },
 
     // Equipment Assignments by Equipment ID (for equipment details modal)
-    equipmentAssignments: async (_: any, { equipmentId }: { equipmentId: string }) => {
+    equipmentAssignments: async (_: any, { equipmentId, limit }: { equipmentId: string; limit?: number }, context: any) => {
       try {
+        requirePermission(context, Permission.WAREHOUSE_VIEW);
         await ensureMongoConnection();
+        const cappedLimit = Math.min(Math.max(limit ?? 200, 1), 500);
         
         console.log('🔍 Fetching equipment assignments for equipmentId:', equipmentId);
         
@@ -444,8 +583,8 @@ export const broadcastResolvers = {
         const assignments = await EquipmentAssignment.find({
           equipmentId: equipmentObjectId,
           status: 'active'
-        }).sort({ startDate: -1 }).exec();
-        
+        }).sort({ startDate: -1 }).limit(cappedLimit).exec();
+
         console.log(`📊 Found ${assignments.length} active assignments`);
         
         // Map to GraphQL format
@@ -492,9 +631,11 @@ export const broadcastResolvers = {
     // would let the return modal claim un-scanned gear is checked out.
     // No date filter — if the assignment is still active, the event appears
     // even if it ran months ago.
-    eventsWithAssignedEquipment: async () => {
+    eventsWithAssignedEquipment: async (_: any, args: { limit?: number } = {}, context: any) => {
       try {
+        requirePermission(context, Permission.WAREHOUSE_VIEW);
         await ensureMongoConnection();
+        const cappedLimit = Math.min(Math.max(args.limit ?? 200, 1), 500);
 
         const eventIdSet = new Set<string>();
 
@@ -539,6 +680,7 @@ export const broadcastResolvers = {
 
         const events = await BroadcastEvent.find({ _id: { $in: objectIds } })
           .sort({ startTime: -1 })
+          .limit(cappedLimit)
           .exec();
 
         const now = new Date();
@@ -586,9 +728,11 @@ export const broadcastResolvers = {
     },
 
     // Equipment History by Equipment ID (for equipment details modal)
-    equipmentHistory: async (_: any, { equipmentId }: { equipmentId: string }) => {
+    equipmentHistory: async (_: any, { equipmentId, limit }: { equipmentId: string; limit?: number }, context: any) => {
       try {
+        requirePermission(context, Permission.WAREHOUSE_VIEW);
         await ensureMongoConnection();
+        const cappedLimit = Math.min(Math.max(limit ?? 200, 1), 500);
         
         console.log('🔍 Fetching equipment history for equipmentId:', equipmentId);
         
@@ -604,7 +748,7 @@ export const broadcastResolvers = {
         // Find all history records for this equipment
         const history = await EquipmentHistory.find({
           equipmentId: equipmentObjectId
-        }).sort({ date: -1 }).exec();
+        }).sort({ date: -1 }).limit(cappedLimit).exec();
         
         console.log(`📊 Found ${history.length} history records`);
         
@@ -638,10 +782,11 @@ export const broadcastResolvers = {
     },
 
     // External Broadcast Presets
-    externalBroadcastPresets: async () => {
+    externalBroadcastPresets: async (_: any, __: any, context: any) => {
       try {
+        requireAuth(context);
         await ensureMongoConnection();
-        const presets = await ExternalBroadcastPreset.find().sort({ name: 1 }).exec();
+        const presets = await ExternalBroadcastPreset.find().sort({ name: 1 }).limit(500).exec();
         return presets.map((doc: any) => ({
           id: doc._id.toString(),
           ...doc.toObject(),
@@ -652,8 +797,9 @@ export const broadcastResolvers = {
       }
     },
 
-    externalBroadcastPreset: async (_: any, { id }: { id: string }) => {
+    externalBroadcastPreset: async (_: any, { id }: { id: string }, context: any) => {
       try {
+        requireAuth(context);
         await ensureMongoConnection();
         const doc = await ExternalBroadcastPreset.findById(id).exec();
         if (!doc) return null;
@@ -666,10 +812,26 @@ export const broadcastResolvers = {
   },
 
   Mutation: {
-    createBroadcastEvent: async (_: any, { input }: { input: BroadcastEventInput }) => {
+    createBroadcastEvent: async (_: any, { input }: { input: BroadcastEventInput }, context: any) => {
       try {
+        requirePermission(context, Permission.BROADCAST_MANAGE);
         await ensureMongoConnection();
-        
+
+        // Pre-flight validation: blocks obvious invalid states (overlapping
+        // routing, inverted time range, etc.) before we hit the database.
+        const preflight = await preflightBroadcastEvent({
+          title: input.title,
+          startTime: input.startTime,
+          endTime: input.endTime || input.startTime,
+          channel: (input as any).channel,
+          routingPreset: (input as any).routingPreset,
+          status: 'planned',
+          departmentId: (input as any).departmentId,
+        });
+        if (!preflight.ok) {
+          throw new Error(`Validation failed: ${preflight.errors.join('; ')}`);
+        }
+
         const event = new BroadcastEvent({
           title: input.title,
           description: input.description,
@@ -685,9 +847,14 @@ export const broadcastResolvers = {
           priority: input.priority || 'normal',
           metadata: input.metadata || {}
         });
-        
+
         const savedEvent = await event.save();
-        
+
+        // Mirror the broadcast event into the MCR workspace so operators
+        // see it the moment production schedules it. Failures here are
+        // logged but never block the production mutation.
+        await ensureShadowMcrEventForBroadcast(savedEvent, context?.user?.userId);
+
         return {
           id: savedEvent.id,
           title: savedEvent.title,
@@ -712,12 +879,17 @@ export const broadcastResolvers = {
       }
     },
 
-    updateBroadcastEvent: async (_: any, { id, input }: { id: string; input: Partial<BroadcastEventInput> }) => {
+    updateBroadcastEvent: async (_: any, { id, input }: { id: string; input: Partial<BroadcastEventInput> }, context: any) => {
       try {
+        requirePermission(context, Permission.BROADCAST_MANAGE);
         await ensureMongoConnection();
-        
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+          throw new Error('Invalid broadcast event ID');
+        }
+
         const updateData: any = {};
-        
+
         if (input.title !== undefined) updateData.title = input.title;
         if (input.description !== undefined) updateData.description = input.description;
         if (input.eventType !== undefined) updateData.eventType = input.eventType;
@@ -730,7 +902,40 @@ export const broadcastResolvers = {
         if (input.controlOperatorId !== undefined) updateData.controlOperatorId = input.controlOperatorId;
         if (input.priority !== undefined) updateData.priority = input.priority;
         if (input.metadata !== undefined) updateData.metadata = input.metadata;
-        
+
+        // Pre-flight validation against the merged record. We need the
+        // existing event to compare effective start/end times and to check
+        // status transitions.
+        const existing = await BroadcastEvent.findById(id).lean();
+        if (!existing) {
+          throw new Error('Broadcast event not found');
+        }
+        const effectiveStart = updateData.startTime || existing.startTime;
+        const effectiveEnd = updateData.endTime || existing.endTime;
+        const preflight = await preflightBroadcastEvent({
+          eventId: id,
+          excludeEventId: id,
+          title: updateData.title || existing.title,
+          startTime: effectiveStart,
+          endTime: effectiveEnd,
+          channel: (updateData as any).channel ?? existing.channel,
+          routingPreset: (updateData as any).routingPreset ?? existing.routingPreset,
+          status: existing.status,
+          departmentId: (updateData as any).departmentId ?? existing.departmentId,
+        });
+        if (!preflight.ok) {
+          throw new Error(`Validation failed: ${preflight.errors.join('; ')}`);
+        }
+
+        // Status transitions are validated separately so the operator gets a
+        // clear error rather than a generic "validation failed".
+        if ((input as any).status && (input as any).status !== existing.status) {
+          const transitionErrors = validateStatusTransition(existing.status, (input as any).status);
+          if (transitionErrors.length > 0) {
+            throw new Error(transitionErrors.join('; '));
+          }
+        }
+
         const updatedEvent = await BroadcastEvent.findByIdAndUpdate(
           id,
           updateData,
@@ -740,7 +945,11 @@ export const broadcastResolvers = {
         if (!updatedEvent) {
           throw new Error('Broadcast event not found');
         }
-        
+
+        // Keep the shadow MCR event's title/start/end in sync, but never
+        // overwrite MCR-only operational fields (mcrStartTime, feeds, etc.).
+        await syncShadowMcrEventFromBroadcast(updatedEvent);
+
         return {
           id: updatedEvent.id,
           title: updatedEvent.title,
@@ -764,13 +973,18 @@ export const broadcastResolvers = {
       }
     },
 
-    updateBroadcastEventDepartmentData: async (_: any, { eventId, department, data }: { eventId: string; department: string; data: any }) => {
+    updateBroadcastEventDepartmentData: async (_: any, { eventId, department, data }: { eventId: string; department: string; data: any }, context: any) => {
       try {
+        requirePermission(context, Permission.BROADCAST_MANAGE);
         await ensureMongoConnection();
         console.log('🔧 Updating broadcast event department data:', { eventId, department, data });
-        
+
+        if (!mongoose.Types.ObjectId.isValid(eventId)) {
+          throw new Error('Invalid broadcast event ID');
+        }
+
         const event = await BroadcastEvent.findById(eventId).exec();
-        
+
         if (!event) {
           throw new Error('Broadcast event not found');
         }
@@ -946,6 +1160,15 @@ export const broadcastResolvers = {
           throw new Error('Failed to update broadcast event');
         }
 
+        // After any warehouse department update, refresh the shared
+        // engineering snapshot so MCR's view of flagged equipment stays
+        // consistent with the active assignments we just wrote.
+        if (department === 'warehouse') {
+          await syncSharedEngineeringSnapshotForEvent(eventId).catch((err) =>
+            console.error('Shared engineering snapshot sync (department data) failed', err),
+          );
+        }
+
         console.log('✅ Successfully updated broadcast event department data');
         return {
           id: updatedEvent.id,
@@ -958,11 +1181,23 @@ export const broadcastResolvers = {
       }
     },
 
-    deleteBroadcastEvent: async (_: any, { id }: { id: string }) => {
+    deleteBroadcastEvent: async (_: any, { id }: { id: string }, context: any) => {
       try {
+        requirePermission(context, Permission.BROADCAST_DELETE);
         await ensureMongoConnection();
-        
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+          throw new Error('Invalid broadcast event ID');
+        }
+
         const result = await BroadcastEvent.findByIdAndDelete(id).exec();
+
+        if (result) {
+          // Soft-detach the shadow MCR event so MCR keeps any preparation
+          // work they've already done.
+          await detachShadowMcrEventOnBroadcastDelete(id);
+        }
+
         return result !== null;
       } catch (error) {
         console.error('Error deleting broadcast event:', error);
@@ -971,8 +1206,9 @@ export const broadcastResolvers = {
     },
 
     // Equipment mutations
-    createEquipment: async (_: any, { input }: { input: any }) => {
+    createEquipment: async (_: any, { input }: { input: any }, context: any) => {
       try {
+        requirePermission(context, Permission.WAREHOUSE_MANAGE);
         await ensureMongoConnection();
         console.log('🆕 Creating equipment:', input);
         
@@ -1000,6 +1236,7 @@ export const broadcastResolvers = {
           storage: input.storage,
           currentLocation: input.storage ? `Row ${input.storage.row}, Shelf ${input.storage.shelf}, Cell ${input.storage.cell}` : null,
           isQuantityBased: input.isQuantityBased ?? QUANTITY_BASED_DEFAULT_CATEGORIES.has(input.category),
+          isSharedEngineeringEquipment: input.isSharedEngineeringEquipment ?? false,
           lastUsedAt: new Date()
         });
         
@@ -1029,6 +1266,7 @@ export const broadcastResolvers = {
           imageUrl: savedEquipment.imageUrl || null,
           storage: savedEquipment.storage || null,
           isQuantityBased: savedEquipment.isQuantityBased || false,
+          isSharedEngineeringEquipment: savedEquipment.isSharedEngineeringEquipment || false,
           isDisabled: savedEquipment.isDisabled || false,
           disabledAt: savedEquipment.disabledAt?.toISOString() || null,
           disabledReason: savedEquipment.disabledReason || null,
@@ -1043,8 +1281,9 @@ export const broadcastResolvers = {
       }
     },
 
-    updateEquipment: async (_: any, { id, input }: { id: string; input: any }) => {
+    updateEquipment: async (_: any, { id, input }: { id: string; input: any }, context: any) => {
       try {
+        requirePermission(context, Permission.WAREHOUSE_MANAGE);
         await ensureMongoConnection();
         console.log('🔄 Updating equipment:', id, input);
         
@@ -1074,6 +1313,9 @@ export const broadcastResolvers = {
         if (input.disabledReason !== undefined) updateData.disabledReason = input.disabledReason;
         if (input.suspensionStatus !== undefined) updateData.suspensionStatus = input.suspensionStatus;
         if (input.isQuantityBased !== undefined) updateData.isQuantityBased = input.isQuantityBased;
+        if (input.isSharedEngineeringEquipment !== undefined) {
+          updateData.isSharedEngineeringEquipment = !!input.isSharedEngineeringEquipment;
+        }
         
         // Update equipment
         const updatedEquipment = await Equipment.findByIdAndUpdate(
@@ -1111,6 +1353,7 @@ export const broadcastResolvers = {
           imageUrl: updatedEquipment.imageUrl || null,
           storage: updatedEquipment.storage || null,
           isQuantityBased: updatedEquipment.isQuantityBased || false,
+          isSharedEngineeringEquipment: updatedEquipment.isSharedEngineeringEquipment || false,
           isDisabled: updatedEquipment.isDisabled || false,
           disabledAt: updatedEquipment.disabledAt?.toISOString() || null,
           disabledReason: updatedEquipment.disabledReason || null,
@@ -1125,8 +1368,9 @@ export const broadcastResolvers = {
       }
     },
 
-    deleteEquipment: async (_: any, { id }: { id: string }) => {
+    deleteEquipment: async (_: any, { id }: { id: string }, context: any) => {
       try {
+        requirePermission(context, Permission.WAREHOUSE_MANAGE);
         await ensureMongoConnection();
         console.log('🗑️ Deleting equipment:', id);
         
@@ -1144,310 +1388,247 @@ export const broadcastResolvers = {
       }
     },
 
-    returnEquipmentFromEvent: async (_: any, { eventId, equipmentIds }: { eventId: string; equipmentIds: string[] }) => {
+    returnEquipmentFromEvent: async (_: any, { eventId, equipmentIds }: { eventId: string; equipmentIds: string[] }, context: any) => {
       try {
+        const user = requirePermission(context, Permission.WAREHOUSE_MANAGE);
         await ensureMongoConnection();
-        console.log('🔄 Returning equipment from event:', { eventId, equipmentIds });
-        
+        log.info('Returning equipment from event', {
+          eventId,
+          itemCount: Array.isArray(equipmentIds) ? equipmentIds.length : 0,
+          userId: user.userId,
+        });
+
         // Find the broadcast event
         const event = await BroadcastEvent.findById(eventId).exec();
         if (!event) {
           throw new Error(`Broadcast event with ID ${eventId} not found`);
         }
-        
-        // Update the event's equipment list
+
+        const performerName = (user.displayName || `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim()) || 'System';
+
+        // ---------------------------------------------------------------
+        // Step 1: perform warehouse-side returns FIRST via the hardened
+        // service. We only touch event metadata for items that were
+        // actually returned successfully so the event document cannot
+        // claim equipment was returned when inventory wasn't updated.
+        // ---------------------------------------------------------------
+        const updatedEquipment: Array<{
+          id: string;
+          status: string;
+          quantityAvailable: number;
+          quantityAssigned: number;
+        }> = [];
+        const successfulReturnedKeys = new Set<string>();
+        const failures: Array<{ equipmentId: string; reason?: string; error?: string }> = [];
+
+        for (const requestedId of equipmentIds) {
+          // Resolve by Mongo _id first, then fall back to barcode lookup so
+          // we always have a canonical equipmentId for the service call.
+          let equipment = mongoose.Types.ObjectId.isValid(requestedId)
+            ? await Equipment.findById(requestedId).exec()
+            : null;
+          if (!equipment) {
+            equipment = await Equipment.findOne({ barcode: requestedId }).exec();
+          }
+
+          if (!equipment) {
+            log.warn('Equipment not found for return', { requestedId });
+            failures.push({ equipmentId: requestedId, reason: 'not_found', error: 'Equipment not found' });
+            continue;
+          }
+
+          const result = await returnEquipment({
+            equipmentId: equipment._id.toString(),
+            eventId: (event._id as mongoose.Types.ObjectId).toString(),
+            returnedBy: user.userId,
+            returnedByName: performerName,
+            notes: 'Equipment returned via return equipment action',
+          });
+
+          if (!result.success) {
+            log.warn('Equipment return failed', {
+              equipmentId: equipment._id.toString(),
+              barcode: equipment.barcode,
+              reason: result.reason,
+              error: result.error,
+            });
+            failures.push({
+              equipmentId: equipment._id.toString(),
+              reason: result.reason,
+              error: result.error,
+            });
+            continue;
+          }
+
+          successfulReturnedKeys.add(equipment._id.toString());
+          if (equipment.barcode) successfulReturnedKeys.add(equipment.barcode);
+          successfulReturnedKeys.add(requestedId);
+
+          if (result.equipment) {
+            updatedEquipment.push({
+              id: result.equipment.id,
+              status: result.equipment.status,
+              quantityAvailable: result.equipment.quantityAvailable,
+              quantityAssigned: result.equipment.quantityAssigned,
+            });
+          }
+        }
+
+        // ---------------------------------------------------------------
+        // Step 2: only now update event metadata to reflect the returns
+        // that actually succeeded. Items that failed remain on the event
+        // so operators can see and retry them.
+        // ---------------------------------------------------------------
         const eventDoc = event as any;
-        
-        // Log current state
-        console.log('📋 Current event metadata structure:', JSON.stringify(eventDoc.metadata, null, 2));
-        
+        const matchesReturned = (id: any) =>
+          typeof id === 'string' && successfulReturnedKeys.has(id);
+
         const currentEquipmentList = eventDoc.equipment_list || [];
-        const updatedEquipmentList = currentEquipmentList.filter(
-          (equipmentId: string) => !equipmentIds.includes(equipmentId)
+        eventDoc.equipment_list = currentEquipmentList.filter(
+          (equipmentId: string) => !matchesReturned(equipmentId)
         );
-        
-        eventDoc.equipment_list = updatedEquipmentList;
-        
-        // Also update metadata if equipment is stored there
+
         if (eventDoc.metadata && eventDoc.metadata.departments) {
-          // Update warehouse assignedItems (check both with and without customData wrapper)
           if (eventDoc.metadata.departments.warehouse) {
-            console.log('🏭 Found warehouse department in metadata');
-            
-            // Get current assigned items and history
             const warehouseData = eventDoc.metadata.departments.warehouse;
             const customData = warehouseData.customData || {};
-            
-            // Get current assigned items
             const assignedItems = customData.assignedItems || warehouseData.assignedItems || [];
-            
-            // Get or create equipment history
             const equipmentHistory = customData.equipmentHistory || warehouseData.equipmentHistory || [];
-            
-            // Find items being returned and add to history with 'returned' status
+
             const returnedItems = assignedItems.filter((item: any) => {
               const itemId = item.equipmentId || item.barcode || item.id;
-              return equipmentIds.includes(itemId);
+              return matchesReturned(itemId);
             });
-            
-            // Mark returned items in history
+
             returnedItems.forEach((item: any) => {
               const historyEntry = {
                 ...item,
                 action: 'returned',
-                returnedAt: new Date().toISOString()
+                returnedAt: new Date().toISOString(),
               };
-              
-              // Check if this item already exists in history (avoid duplicates)
-              const existingIndex = equipmentHistory.findIndex((h: any) => 
-                h.barcode === item.barcode && h.action !== 'returned'
+              const existingIndex = equipmentHistory.findIndex(
+                (h: any) => h.barcode === item.barcode && h.action !== 'returned'
               );
-              
               if (existingIndex >= 0) {
-                // Update existing entry to show it's returned
                 equipmentHistory[existingIndex] = historyEntry;
               } else {
-                // Add as new history entry
                 equipmentHistory.push(historyEntry);
               }
             });
-            
-            // Remove returned items from current assignments
+
             const remainingAssignedItems = assignedItems.filter((item: any) => {
               const itemId = item.equipmentId || item.barcode || item.id;
-              const shouldRemove = equipmentIds.includes(itemId);
-              if (shouldRemove) {
-                console.log(`   Removing from assignedItems: ${itemId}`);
-              }
-              return !shouldRemove;
+              return !matchesReturned(itemId);
             });
-            
-            // Update warehouse data with history preserved
+
             if (customData.assignedItems !== undefined) {
               eventDoc.metadata.departments.warehouse.customData = {
                 ...customData,
                 assignedItems: remainingAssignedItems,
-                equipmentHistory: equipmentHistory,
+                equipmentHistory,
                 totalAssigned: remainingAssignedItems.length,
-                lastUpdated: new Date().toISOString()
+                lastUpdated: new Date().toISOString(),
               };
             } else {
-              // Legacy structure
               eventDoc.metadata.departments.warehouse.assignedItems = remainingAssignedItems;
               eventDoc.metadata.departments.warehouse.equipmentHistory = equipmentHistory;
               eventDoc.metadata.departments.warehouse.totalAssigned = remainingAssignedItems.length;
             }
-            
-            console.log(`   Updated warehouse with ${remainingAssignedItems.length} current items and ${equipmentHistory.length} history entries`);
           }
-          
-          // Update external broadcasts equipmentList (check both with and without customData wrapper)
+
           if (eventDoc.metadata.departments.externalBroadcasts) {
-            console.log('📺 Found externalBroadcasts department in metadata');
-            
-            // Check if equipmentList is in customData
-            if (eventDoc.metadata.departments.externalBroadcasts.customData && 
-                eventDoc.metadata.departments.externalBroadcasts.customData.equipmentList) {
-              const beforeCount = eventDoc.metadata.departments.externalBroadcasts.customData.equipmentList.length;
-              eventDoc.metadata.departments.externalBroadcasts.customData.equipmentList = 
-                eventDoc.metadata.departments.externalBroadcasts.customData.equipmentList.filter((item: any) => {
-                  const itemId = item.equipmentId || item.id;
-                  const shouldRemove = equipmentIds.includes(itemId);
-                  if (shouldRemove) {
-                    console.log(`   Removing from externalBroadcasts.customData.equipmentList: ${itemId}`);
-                  }
-                  return !shouldRemove;
-                });
-              const afterCount = eventDoc.metadata.departments.externalBroadcasts.customData.equipmentList.length;
-              console.log(`   ExternalBroadcasts customData.equipmentList: ${beforeCount} -> ${afterCount}`);
+            const ext = eventDoc.metadata.departments.externalBroadcasts;
+            if (ext.customData && Array.isArray(ext.customData.equipmentList)) {
+              ext.customData.equipmentList = ext.customData.equipmentList.filter((item: any) => {
+                const itemId = item.equipmentId || item.id;
+                return !matchesReturned(itemId);
+              });
             }
-            
-            // Also check if equipmentList is directly in externalBroadcasts (legacy structure)
-            if (eventDoc.metadata.departments.externalBroadcasts.equipmentList) {
-              const beforeCount = eventDoc.metadata.departments.externalBroadcasts.equipmentList.length;
-              eventDoc.metadata.departments.externalBroadcasts.equipmentList = 
-                eventDoc.metadata.departments.externalBroadcasts.equipmentList.filter((item: any) => {
-                  const itemId = item.equipmentId || item.id;
-                  const shouldRemove = equipmentIds.includes(itemId);
-                  if (shouldRemove) {
-                    console.log(`   Removing from externalBroadcasts.equipmentList: ${itemId}`);
-                  }
-                  return !shouldRemove;
-                });
-              const afterCount = eventDoc.metadata.departments.externalBroadcasts.equipmentList.length;
-              console.log(`   ExternalBroadcasts equipmentList: ${beforeCount} -> ${afterCount}`);
+            if (Array.isArray(ext.equipmentList)) {
+              ext.equipmentList = ext.equipmentList.filter((item: any) => {
+                const itemId = item.equipmentId || item.id;
+                return !matchesReturned(itemId);
+              });
             }
           }
         }
-        
-        // ALSO check metadata.warehouseData (for backward compatibility)
+
         if (eventDoc.metadata && eventDoc.metadata.warehouseData) {
-          console.log('🏭 Found warehouseData in metadata (legacy location)');
-          
           const warehouseData = eventDoc.metadata.warehouseData;
           const customData = warehouseData.customData || {};
-          
-          // Get current assigned items and history
           const assignedItems = customData.assignedItems || warehouseData.assignedItems || [];
           const equipmentHistory = customData.equipmentHistory || warehouseData.equipmentHistory || [];
-          
-          // Find items being returned and add to history with 'returned' status
+
           const returnedItems = assignedItems.filter((item: any) => {
             const itemId = item.equipmentId || item.barcode || item.id;
-            return equipmentIds.includes(itemId);
+            return matchesReturned(itemId);
           });
-          
-          // Mark returned items in history
+
           returnedItems.forEach((item: any) => {
             const historyEntry = {
               ...item,
               action: 'returned',
-              returnedAt: new Date().toISOString()
+              returnedAt: new Date().toISOString(),
             };
-            
-            // Check if this item already exists in history (avoid duplicates)
-            const existingIndex = equipmentHistory.findIndex((h: any) => 
-              h.barcode === item.barcode && h.action !== 'returned'
+            const existingIndex = equipmentHistory.findIndex(
+              (h: any) => h.barcode === item.barcode && h.action !== 'returned'
             );
-            
             if (existingIndex >= 0) {
-              // Update existing entry to show it's returned
               equipmentHistory[existingIndex] = historyEntry;
             } else {
-              // Add as new history entry
               equipmentHistory.push(historyEntry);
             }
           });
-          
-          // Remove returned items from current assignments
+
           const remainingAssignedItems = assignedItems.filter((item: any) => {
             const itemId = item.equipmentId || item.barcode || item.id;
-            const shouldRemove = equipmentIds.includes(itemId);
-            if (shouldRemove) {
-              console.log(`   Removing from warehouseData.assignedItems: ${itemId}`);
-            }
-            return !shouldRemove;
+            return !matchesReturned(itemId);
           });
-          
-          // Update warehouse data with history preserved
+
           if (customData.assignedItems !== undefined) {
             eventDoc.metadata.warehouseData.customData = {
               ...customData,
               assignedItems: remainingAssignedItems,
-              equipmentHistory: equipmentHistory,
+              equipmentHistory,
               totalAssigned: remainingAssignedItems.length,
-              lastUpdated: new Date().toISOString()
+              lastUpdated: new Date().toISOString(),
             };
           } else {
             eventDoc.metadata.warehouseData.assignedItems = remainingAssignedItems;
             eventDoc.metadata.warehouseData.equipmentHistory = equipmentHistory;
             eventDoc.metadata.warehouseData.totalAssigned = remainingAssignedItems.length;
           }
-          
-          console.log(`   Updated legacy warehouseData with ${remainingAssignedItems.length} current items and ${equipmentHistory.length} history entries`);
         }
-        
-        // Log updated state before saving
-        console.log('📋 Updated event metadata structure:', JSON.stringify(eventDoc.metadata, null, 2));
-        
-        // Mark fields as modified to ensure Mongoose saves nested changes
+
         event.markModified('equipment_list');
         event.markModified('metadata');
-        
         await event.save();
-        
-        // Verify save by re-fetching
-        const verifyEvent = await BroadcastEvent.findById(eventId).exec();
-        console.log('✅ Verified saved metadata:', JSON.stringify(verifyEvent?.metadata, null, 2));
-        
-        // Update equipment status and quantities
-        const updatedEquipment = [];
-        
-        for (const equipmentId of equipmentIds) {
-          // Try to find equipment by ID or barcode
-          let equipment = await Equipment.findById(equipmentId).exec();
-          if (!equipment) {
-            equipment = await Equipment.findOne({ barcode: equipmentId }).exec();
-          }
-          
-          if (equipment) {
-            console.log(`📦 Processing equipment return: ${equipment.name} (${equipment.barcode})`);
-            console.log(`   Current status: ${equipment.status}`);
-            console.log(`   Current quantities - Available: ${equipment.quantityAvailable}, Assigned: ${equipment.quantityAssigned}`);
-            
-            // Update equipment status and quantities
-            if (equipment.quantityAssigned > 0) {
-              equipment.quantityAssigned -= 1;
-              equipment.quantityAvailable += 1;
-            }
-            
-            // If all items are returned, set status to available
-            if (equipment.quantityAssigned === 0) {
-              equipment.status = 'available';
-            }
 
-            equipment.lastUsedAt = new Date();
-            
-            await equipment.save();
-            
-            console.log(`   Updated status: ${equipment.status}`);
-            console.log(`   Updated quantities - Available: ${equipment.quantityAvailable}, Assigned: ${equipment.quantityAssigned}`);
-            
-            // Find and update the assignment record
-            const assignment = await EquipmentAssignment.findOne({
-              equipmentId: equipment._id,
-              eventId: event._id,
-              status: 'active'
-            }).exec();
-            
-            if (assignment) {
-              assignment.status = 'completed';
-              assignment.returnedAt = new Date();
-              assignment.returnedBy = 'system';
-              assignment.returnedByName = 'System';
-              await assignment.save();
-            }
-            
-            // Create history record for return
-            const historyRecord = new EquipmentHistory({
-              equipmentId: equipment._id,
-              eventId: event._id,
-              eventName: event.title,
-              date: new Date(),
-              action: 'returned',
-              quantity: 1,
-              performedBy: 'system',
-              performedByName: 'System',
-              notes: 'Equipment returned via return equipment action'
-            });
-            await historyRecord.save();
-            
-            updatedEquipment.push({
-              id: equipment._id.toString(),
-              status: equipment.status,
-              quantityAvailable: equipment.quantityAvailable,
-              quantityAssigned: equipment.quantityAssigned
-            });
-          } else {
-            console.warn(`⚠️ Equipment not found with ID/Barcode: ${equipmentId}`);
-          }
-        }
-        
-        console.log('✅ Successfully returned equipment from event');
-        console.log(`   Total equipment returned: ${updatedEquipment.length}`);
-        console.log(`   Event equipment list updated: ${eventDoc.equipment_list.length} items remaining`);
-        
+        const successCount = updatedEquipment.length;
+        const message = failures.length === 0
+          ? `${successCount} פריטי ציוד הוחזרו בהצלחה למחסן`
+          : `${successCount} פריטי ציוד הוחזרו בהצלחה (${failures.length} נכשלו)`;
+
+        log.info('Equipment return completed', {
+          eventId,
+          successCount,
+          failureCount: failures.length,
+        });
+
         return {
-          success: true,
-          message: `${equipmentIds.length} פריטי ציוד הוחזרו בהצלחה למחסן`,
+          success: failures.length === 0,
+          message,
           updatedEvent: {
-            id: event._id.toString(),
-            equipment_list: eventDoc.equipment_list
+            id: (event._id as mongoose.Types.ObjectId).toString(),
+            equipment_list: eventDoc.equipment_list,
           },
-          updatedEquipment
+          updatedEquipment,
         };
       } catch (error) {
-        console.error('❌ Error returning equipment from event:', error);
+        log.error('Error returning equipment from event', {
+          eventId,
+          error: error instanceof Error ? error.message : String(error),
+        });
         return {
           success: false,
           message: `Failed to return equipment: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -1457,8 +1638,9 @@ export const broadcastResolvers = {
       }
     },
 
-    transferEquipmentBetweenEvents: async (_: any, { sourceEventId, targetEventId, equipmentIds }: { sourceEventId: string; targetEventId: string; equipmentIds: string[] }) => {
+    transferEquipmentBetweenEvents: async (_: any, { sourceEventId, targetEventId, equipmentIds }: { sourceEventId: string; targetEventId: string; equipmentIds: string[] }, context: any) => {
       try {
+        requirePermission(context, Permission.WAREHOUSE_MANAGE);
         await ensureMongoConnection();
         console.log('🔄 Transferring equipment between events:', { sourceEventId, targetEventId, equipmentIds });
         
@@ -1655,7 +1837,21 @@ export const broadcastResolvers = {
         
         // Save both events
         await Promise.all([sourceEvent.save(), targetEvent.save()]);
-        
+
+        // Refresh shared engineering snapshots for both endpoints — items
+        // that were flagged shared engineering need to leave the source's
+        // snapshot and appear in the target's (and the matching MCR
+        // shadow events). Best-effort: failures here are logged but do
+        // not undo the transfer.
+        await Promise.all([
+          syncSharedEngineeringSnapshotForEvent(sourceEventId).catch((err) =>
+            console.error('Shared engineering snapshot sync (source) failed', err),
+          ),
+          syncSharedEngineeringSnapshotForEvent(targetEventId).catch((err) =>
+            console.error('Shared engineering snapshot sync (target) failed', err),
+          ),
+        ]);
+
         console.log('✅ Successfully transferred equipment between events');
         console.log(`   Source event (${sourceEventId}): ${sourceDoc.equipment_list.length} items remaining`);
         console.log(`   Target event (${targetEventId}): ${targetDoc.equipment_list.length} items total`);
@@ -1684,35 +1880,49 @@ export const broadcastResolvers = {
     },
 
     // Equipment Assignment Mutations
-    createEquipmentAssignment: async (_: any, { input }: { input: any }) => {
+    createEquipmentAssignment: async (_: any, { input }: { input: any }, context: any) => {
       try {
+        requirePermission(context, Permission.WAREHOUSE_MANAGE);
         await ensureMongoConnection();
-        
+
+        if (!mongoose.Types.ObjectId.isValid(input.broadcastEventId)) {
+          throw new Error('Invalid broadcastEventId');
+        }
+        if (!mongoose.Types.ObjectId.isValid(input.equipmentId)) {
+          throw new Error('Invalid equipmentId');
+        }
+
         const event = await BroadcastEvent.findById(input.broadcastEventId).exec();
         if (!event) {
           throw new Error('Broadcast event not found');
         }
-        
-        const assignment = new EquipmentAssignment({
-          equipmentId: new mongoose.Types.ObjectId(input.equipmentId),
-          eventId: new mongoose.Types.ObjectId(input.broadcastEventId),
+
+        // Use the atomic allocation helper so concurrent requests cannot
+        // overcommit the same item. The service handles inventory decrement,
+        // assignment creation, history logging, and rollback on failure.
+        const result = await allocateEquipment({
+          equipmentId: input.equipmentId,
+          eventId: input.broadcastEventId,
           eventName: event.title || '',
           startDate: event.startTime || new Date(),
           endDate: event.endTime || new Date(),
           location: event.location || event.venue || null,
-          status: 'active',
-          quantityAssigned: input.quantityAssigned || 1,
-          assignedBy: input.assignedToName || 'system',
-          assignedByName: input.assignedToName || 'System',
-          assignedAt: input.assignedAt ? new Date(input.assignedAt) : new Date(),
-          notes: input.assignmentNotes || null
+          quantity: input.quantityAssigned || 1,
+          assignedBy: getContextUserId(context),
+          assignedByName: getContextUserDisplayName(context),
+          notes: input.assignmentNotes || null,
         });
-        
-        const saved = await assignment.save();
 
-        // Stamp lastUsedAt on the equipment
-        await Equipment.findByIdAndUpdate(input.equipmentId, { $set: { lastUsedAt: new Date() } }).exec();
-        
+        if (!result.success || !result.assignmentId) {
+          throw new Error(result.error || 'Failed to allocate equipment');
+        }
+
+        // Re-read the persisted assignment to return a complete object.
+        const saved = await EquipmentAssignment.findById(result.assignmentId).exec();
+        if (!saved) {
+          throw new Error('Allocation succeeded but assignment record could not be loaded');
+        }
+
         return {
           id: saved._id.toString(),
           equipmentId: saved.equipmentId.toString(),
@@ -1739,16 +1949,17 @@ export const broadcastResolvers = {
           createdAt: saved.createdAt.toISOString(),
           updatedAt: saved.updatedAt.toISOString()
         };
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error creating equipment assignment:', error);
-        throw new Error('Failed to create equipment assignment');
+        throw new Error(error.message || 'Failed to create equipment assignment');
       }
     },
 
-    updateEquipmentAssignment: async (_: any, { id, input }: { id: string, input: any }) => {
+    updateEquipmentAssignment: async (_: any, { id, input }: { id: string, input: any }, context: any) => {
       try {
+        requirePermission(context, Permission.WAREHOUSE_MANAGE);
         await ensureMongoConnection();
-        
+
         const assignment = await EquipmentAssignment.findById(id).exec();
         if (!assignment) {
           throw new Error('Equipment assignment not found');
@@ -1758,7 +1969,6 @@ export const broadcastResolvers = {
         if (input.assignmentStatus !== undefined) assignment.status = input.assignmentStatus === 'completed' ? 'completed' : input.assignmentStatus === 'cancelled' ? 'cancelled' : 'active';
         if (input.actualReturnAt !== undefined) { assignment.returnedAt = new Date(input.actualReturnAt); }
         if (input.returnNotes !== undefined) assignment.notes = input.returnNotes;
-        if (input.assignedToName !== undefined) assignment.assignedByName = input.assignedToName;
         
         const saved = await assignment.save();
 
@@ -1797,8 +2007,9 @@ export const broadcastResolvers = {
       }
     },
 
-    deleteEquipmentAssignment: async (_: any, { id }: { id: string }) => {
+    deleteEquipmentAssignment: async (_: any, { id }: { id: string }, context: any) => {
       try {
+        requirePermission(context, Permission.WAREHOUSE_MANAGE);
         await ensureMongoConnection();
         const result = await EquipmentAssignment.findByIdAndDelete(id).exec();
         return result !== null;
@@ -1808,10 +2019,11 @@ export const broadcastResolvers = {
       }
     },
 
-    updateWarehouseEquipmentQuantity: async (_: any, { id, quantityChange }: { id: string, quantityChange: number }) => {
+    updateWarehouseEquipmentQuantity: async (_: any, { id, quantityChange }: { id: string, quantityChange: number }, context: any) => {
       try {
+        requirePermission(context, Permission.WAREHOUSE_MANAGE);
         await ensureMongoConnection();
-        
+
         const equipment = await Equipment.findById(id).exec();
         if (!equipment) {
           throw new Error('Equipment not found');
@@ -1904,6 +2116,8 @@ export const broadcastResolvers = {
           quantityAvailable: equipment.quantityAvailable,
           quantityAssigned: equipment.quantityAssigned,
           currentLocation: equipment.currentLocation || null,
+          isQuantityBased: equipment.isQuantityBased || false,
+          isSharedEngineeringEquipment: equipment.isSharedEngineeringEquipment || false,
           isDisabled: equipment.isDisabled || false,
           createdAt: equipment.createdAt.toISOString(),
           updatedAt: equipment.updatedAt.toISOString()
@@ -1987,6 +2201,8 @@ export const broadcastResolvers = {
           quantityAvailable: equipment.quantityAvailable,
           quantityAssigned: equipment.quantityAssigned,
           currentLocation: equipment.currentLocation || null,
+          isQuantityBased: equipment.isQuantityBased || false,
+          isSharedEngineeringEquipment: equipment.isSharedEngineeringEquipment || false,
           isDisabled: equipment.isDisabled || false,
           createdAt: equipment.createdAt.toISOString(),
           updatedAt: equipment.updatedAt.toISOString(),
@@ -2047,6 +2263,7 @@ export const broadcastResolvers = {
           quantityAssigned: equipment.quantityAssigned,
           currentLocation: equipment.currentLocation || null,
           isQuantityBased: equipment.isQuantityBased || false,
+          isSharedEngineeringEquipment: equipment.isSharedEngineeringEquipment || false,
           isDisabled: equipment.isDisabled,
           disabledAt: equipment.disabledAt?.toISOString() || null,
           disabledBy: equipment.disabledBy ? { id: equipment.disabledBy } : null,
@@ -2114,6 +2331,8 @@ export const broadcastResolvers = {
           quantityAvailable: equipment.quantityAvailable,
           quantityAssigned: equipment.quantityAssigned,
           currentLocation: equipment.currentLocation || null,
+          isQuantityBased: equipment.isQuantityBased || false,
+          isSharedEngineeringEquipment: equipment.isSharedEngineeringEquipment || false,
           isDisabled: equipment.isDisabled,
           createdAt: equipment.createdAt.toISOString(),
           updatedAt: equipment.updatedAt.toISOString()
@@ -2241,7 +2460,8 @@ export const broadcastResolvers = {
     },
 
     // External Broadcast Presets
-    createExternalBroadcastPreset: async (_: any, { input }: { input: any }) => {
+    createExternalBroadcastPreset: async (_: any, { input }: { input: any }, context: any) => {
+      requirePermission(context, Permission.BROADCAST_MANAGE);
       try {
         await ensureMongoConnection();
         const preset = new ExternalBroadcastPreset(input);
@@ -2253,7 +2473,8 @@ export const broadcastResolvers = {
       }
     },
 
-    updateExternalBroadcastPreset: async (_: any, { id, input }: { id: string; input: any }) => {
+    updateExternalBroadcastPreset: async (_: any, { id, input }: { id: string; input: any }, context: any) => {
+      requirePermission(context, Permission.BROADCAST_MANAGE);
       try {
         await ensureMongoConnection();
         const updated = await ExternalBroadcastPreset.findByIdAndUpdate(id, input, {
@@ -2270,7 +2491,8 @@ export const broadcastResolvers = {
       }
     },
 
-    deleteExternalBroadcastPreset: async (_: any, { id }: { id: string }) => {
+    deleteExternalBroadcastPreset: async (_: any, { id }: { id: string }, context: any) => {
+      requirePermission(context, Permission.BROADCAST_DELETE);
       try {
         await ensureMongoConnection();
         const result = await ExternalBroadcastPreset.findByIdAndDelete(id).exec();

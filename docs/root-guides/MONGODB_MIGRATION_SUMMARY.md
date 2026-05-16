@@ -4,10 +4,10 @@
 Successfully migrated the Lancelot application to use Docker MongoDB with new secure credentials and removed all PostgreSQL/SQL references.
 
 ## New MongoDB Credentials
-- **Username**: `LancelotERP_DB`
-- **Password**: `<MONGO_PASSWORD>`
+- **Username**: redacted — supplied via `MONGO_USERNAME` env var
+- **Password**: redacted — supplied via `MONGO_PASSWORD` env var
 - **Database**: `lancelot`
-- **Connection String**: `mongodb://LancelotERP_DB:<MONGO_PASSWORD>@localhost:27017/lancelot?authSource=admin`
+- **Connection String**: `mongodb://<USER>:<PASSWORD>@localhost:27017/lancelot?authSource=admin`
 
 ## Changes Made
 
@@ -71,9 +71,9 @@ Successfully migrated the Lancelot application to use Docker MongoDB with new se
 
 4. **Update .env file** (if you have one):
    ```env
-   MONGO_USERNAME=LancelotERP_DB
-   MONGO_PASSWORD=<MONGO_PASSWORD>
-   MONGODB_URL=mongodb://LancelotERP_DB:<MONGO_PASSWORD>@localhost:27017/lancelot?authSource=admin
+   MONGO_USERNAME=<your-username>
+   MONGO_PASSWORD=<your-password>
+   MONGODB_URL=mongodb://<your-username>:<your-password>@localhost:27017/lancelot?authSource=admin
    ```
 
 5. **Start the application**:

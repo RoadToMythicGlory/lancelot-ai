@@ -293,13 +293,38 @@ export function setupChatSocket(httpServer: HttpServer) {
     // Join user to their personal room
     socket.join(`user:${user.userId}`);
 
-    // Handle joining private conversations
-    socket.on('join-private-conversation', (conversationId: string) => {
+    // Handle joining private conversations.
+    // Membership must be validated server-side — otherwise an attacker who
+    // knows a conversationId could subscribe to messages they shouldn't see.
+    socket.on('join-private-conversation', async (conversationId: string) => {
       if (!isNonEmptyString(conversationId)) {
         socket.emit('error', { message: 'Invalid conversationId' });
         return;
       }
-      socket.join(`conversation:${conversationId}`);
+      try {
+        const mongoDb = await connectMongoDB();
+        const conversation = await mongoDb.collection('privateConversations').findOne({
+          id: conversationId,
+          $or: [
+            { participant1Id: user.userId },
+            { participant2Id: user.userId },
+          ],
+        });
+        if (!conversation) {
+          logger.warn('User tried to join unauthorized conversation', {
+            userId: user.userId,
+            conversationId,
+          });
+          socket.emit('error', { message: 'Unauthorized conversation access' });
+          return;
+        }
+        socket.join(`conversation:${conversationId}`);
+      } catch (error) {
+        logger.error('Failed to validate conversation membership', {
+          error: (error as Error).message,
+        });
+        socket.emit('error', { message: 'Failed to join conversation' });
+      }
     });
 
     // Handle leaving private conversations

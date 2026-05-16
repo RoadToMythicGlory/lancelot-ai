@@ -167,11 +167,19 @@ organizationSchema.index({ domain: 1 }, { sparse: true });
 organizationSchema.index({ stripeCustomerId: 1 }, { sparse: true });
 organizationSchema.index({ isActive: 1 });
 organizationSchema.index({ plan: 1 });
+organizationSchema.index({ isActive: 1, plan: 1 });
+organizationSchema.index({ isTrial: 1, trialEndsAt: 1 });
+organizationSchema.index({ planExpiresAt: 1 });
+organizationSchema.index({ createdBy: 1 });
+organizationSchema.index({ createdAt: -1 });
 
 organizationInviteSchema.index({ organizationId: 1 });
 organizationInviteSchema.index({ email: 1 });
 organizationInviteSchema.index({ token: 1 }, { unique: true });
 organizationInviteSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+organizationInviteSchema.index({ organizationId: 1, status: 1 });
+organizationInviteSchema.index({ email: 1, status: 1 });
+organizationInviteSchema.index({ status: 1, createdAt: -1 });
 
 export const Organization = mongoose.model<IOrganization>('Organization', organizationSchema);
 export const OrganizationInvite = mongoose.model<IOrganizationInvite>('OrganizationInvite', organizationInviteSchema);

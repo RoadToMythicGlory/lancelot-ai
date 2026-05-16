@@ -50,5 +50,10 @@ const clipSchema = new Schema<IClip>({
 clipSchema.index({ organizationId: 1, userId: 1, status: 1 });
 clipSchema.index({ sourceStreamId: 1 });
 clipSchema.index({ sourceEpisodeId: 1 });
+clipSchema.index({ userId: 1, createdAt: -1 });
+clipSchema.index({ userId: 1, clipType: 1 });
+clipSchema.index({ status: 1, createdAt: -1 });
+clipSchema.index({ tags: 1 });
+clipSchema.index({ sourceType: 1, status: 1 });
 
 export const Clip = mongoose.model<IClip>('Clip', clipSchema);

@@ -286,22 +286,34 @@ broadcastEventSchema.pre('save', async function(next) {
 });
 
 // Create indexes
+// Single-field indexes for the most common filters and sorts.
 broadcastEventSchema.index({ status: 1 });
 broadcastEventSchema.index({ startTime: 1, endTime: 1 });
 broadcastEventSchema.index({ outlookEventId: 1 });
+broadcastEventSchema.index({ departmentId: 1 });
+broadcastEventSchema.index({ createdAt: -1 });
+broadcastEventSchema.index({ eventType: 1 });
+// Compound indexes for common filtered+sorted queries.
+broadcastEventSchema.index({ departmentId: 1, status: 1 });
+broadcastEventSchema.index({ startTime: 1, departmentId: 1 });
+broadcastEventSchema.index({ status: 1, startTime: 1 });
 
 eventStaffAssignmentSchema.index({ eventId: 1 });
 eventStaffAssignmentSchema.index({ userId: 1 });
 eventStaffAssignmentSchema.index({ role: 1 });
+eventStaffAssignmentSchema.index({ userId: 1, eventId: 1 });
 
 routingConfigSchema.index({ eventId: 1 });
 routingConfigSchema.index({ isActive: 1 });
+routingConfigSchema.index({ eventId: 1, isActive: 1 });
 
 routingSourceSchema.index({ routingId: 1 });
 routingSourceSchema.index({ equipmentId: 1 });
+routingSourceSchema.index({ status: 1 });
 
 satelliteScheduleSchema.index({ eventId: 1 });
 satelliteScheduleSchema.index({ startTime: 1, endTime: 1 });
+satelliteScheduleSchema.index({ status: 1 });
 
 // Export models
 export const BroadcastEvent = mongoose.model<IBroadcastEvent>('BroadcastEvent', broadcastEventSchema);

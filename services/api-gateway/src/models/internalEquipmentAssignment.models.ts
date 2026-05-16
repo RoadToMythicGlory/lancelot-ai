@@ -114,6 +114,11 @@ const internalEquipmentAssignmentSchema = new Schema<IInternalEquipmentAssignmen
 internalEquipmentAssignmentSchema.index({ status: 1, assignedAt: -1 });
 internalEquipmentAssignmentSchema.index({ assignedToUserId: 1, status: 1 });
 internalEquipmentAssignmentSchema.index({ equipmentId: 1, status: 1 });
+internalEquipmentAssignmentSchema.index({ assignedToType: 1, status: 1 });
+internalEquipmentAssignmentSchema.index({ assignedBy: 1, assignedAt: -1 });
+internalEquipmentAssignmentSchema.index({ transferredToAssignmentId: 1 });
+internalEquipmentAssignmentSchema.index({ transferredFromAssignmentId: 1 });
+internalEquipmentAssignmentSchema.index({ assignedToExternalName: 1 });
 
 export const InternalEquipmentAssignment = mongoose.model<IInternalEquipmentAssignment>(
   'InternalEquipmentAssignment',

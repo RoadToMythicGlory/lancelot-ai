@@ -217,12 +217,20 @@ const paymentMethodSchema = new Schema<IPaymentMethod>({
 subscriptionSchema.index({ organizationId: 1 }, { unique: true });
 subscriptionSchema.index({ stripeSubscriptionId: 1 }, { sparse: true });
 subscriptionSchema.index({ status: 1, currentPeriodEnd: 1 });
+subscriptionSchema.index({ stripeCustomerId: 1 });
+subscriptionSchema.index({ plan: 1, status: 1 });
+subscriptionSchema.index({ trialEnd: 1 });
 
 invoiceSchema.index({ organizationId: 1, createdAt: -1 });
 invoiceSchema.index({ stripeInvoiceId: 1 }, { sparse: true });
 invoiceSchema.index({ invoiceNumber: 1 }, { unique: true });
+invoiceSchema.index({ subscriptionId: 1, createdAt: -1 });
+invoiceSchema.index({ organizationId: 1, status: 1, createdAt: -1 });
+invoiceSchema.index({ status: 1, dueDate: 1 });
 
 paymentMethodSchema.index({ organizationId: 1 });
+paymentMethodSchema.index({ organizationId: 1, isDefault: 1 });
+paymentMethodSchema.index({ stripePaymentMethodId: 1 });
 
 export const Subscription = mongoose.model<ISubscription>('Subscription', subscriptionSchema);
 export const Invoice = mongoose.model<IInvoice>('Invoice', invoiceSchema);

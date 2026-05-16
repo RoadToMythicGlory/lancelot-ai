@@ -1,7 +1,10 @@
 import { Context } from '../types';
 import { VizrtConfig, VizrtTemplate, VizrtMode } from '../models/vizrt.models';
-import { requirePermission } from '../middleware/auth';
+import { requireAuth, requirePermission } from '../middleware/auth';
 import { Permission } from '../rbac';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('vizrt');
 
 // Vizrt API clients
 interface VizrtClient {
@@ -89,21 +92,19 @@ function createVizrtClient(config: any): VizrtClient {
 export const vizrtResolvers = {
   Query: {
     vizrtConfigs: async (_: any, __: any, context: Context) => {
-      // TEMPORARY: Completely bypass permissions for testing
-      console.log('Vizrt configs accessed by:', context.user?.email || 'No user', 'Permissions:', context.user?.permissions || 'None');
+      const user = requirePermission(context, Permission.VIZRT_VIEW);
+      logger.debug('Vizrt configs accessed', { email: user.email });
       return VizrtConfig.find({ isActive: true }).sort({ name: 1 });
     },
 
     vizrtTemplates: async (_: any, { category }: any, context: Context) => {
-      // TEMPORARY: Completely bypass permissions for testing
-      console.log('Vizrt templates accessed by:', context.user?.email || 'No user', 'Permissions:', context.user?.permissions || 'None');
+      requirePermission(context, Permission.VIZRT_VIEW);
       const filter = category ? { category } : {};
-      return VizrtTemplate.find(filter).sort({ category: 1, name: 1 });
+      return VizrtTemplate.find(filter).sort({ category: 1, name: 1 }).limit(500);
     },
 
     vizrtTemplate: async (_: any, { id }: any, context: Context) => {
-      // TEMPORARY: Completely bypass permissions for testing
-      console.log('Vizrt template accessed by:', context.user?.email || 'No user');
+      requirePermission(context, Permission.VIZRT_VIEW);
       return VizrtTemplate.findById(id);
     }
   },
@@ -169,10 +170,7 @@ export const vizrtResolvers = {
     },
 
     triggerCG: async (_: any, { input }: any, context: Context) => {
-      // Temporary: Allow any authenticated user for testing
-      if (!context.user) {
-        throw new Error('Authentication required');
-      }
+      requirePermission(context, Permission.VIZRT_OPERATE);
 
       try {
         // Get template to determine which config to use
@@ -200,7 +198,7 @@ export const vizrtResolvers = {
         }
 
         // Log the trigger for audit
-        console.log(`CG Triggered by ${context.user.email}: Template ${template.name}, Event ${input.eventId}, Segment ${input.segmentId}`);
+        console.log(`CG Triggered by ${context.user?.email ?? 'unknown'}: Template ${template.name}, Event ${input.eventId}, Segment ${input.segmentId}`);
 
         return {
           success: result.success,
@@ -218,10 +216,7 @@ export const vizrtResolvers = {
     },
 
     previewCG: async (_: any, { input }: any, context: Context) => {
-      // Temporary: Allow any authenticated user for testing
-      if (!context.user) {
-        throw new Error('Authentication required');
-      }
+      requirePermission(context, Permission.VIZRT_OPERATE);
 
       try {
         const template = await VizrtTemplate.findById(input.templateId);

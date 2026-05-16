@@ -48,12 +48,29 @@ export const config = {
 
   
   // MongoDB
-  MONGO_CONNECTION_STRING: process.env.MONGO_CONNECTION_STRING || 
-    process.env.MONGODB_URL || 
-    (process.env.NODE_ENV === 'development'
-      ? 'mongodb://localhost:27017/lancelot'
-      : `mongodb://LancelotERP_DB:${process.env.MONGO_PASSWORD || '<MONGO_PASSWORD>'}@${process.env.MONGO_HOST || 'mongodb'}:27017/lancelot?authSource=admin`
-    ),
+  // In production we REQUIRE MONGO_CONNECTION_STRING (or MONGODB_URL) to be provided explicitly.
+  // No hardcoded password defaults are allowed in non-development environments.
+  MONGO_CONNECTION_STRING: (() => {
+    const explicit = process.env.MONGO_CONNECTION_STRING || process.env.MONGODB_URL;
+    if (explicit) return explicit;
+
+    if (process.env.NODE_ENV === 'development') {
+      return 'mongodb://localhost:27017/lancelot';
+    }
+
+    // Production / staging path: require all parts to come from env vars.
+    const password = process.env.MONGO_PASSWORD;
+    const host = process.env.MONGO_HOST;
+    const user = process.env.MONGO_USER || 'LancelotERP_DB';
+    const dbName = process.env.MONGO_DB_NAME || 'lancelot';
+    if (!password || !host) {
+      throw new Error(
+        'MongoDB configuration missing. Set MONGO_CONNECTION_STRING (or MONGODB_URL), ' +
+        'or provide MONGO_HOST and MONGO_PASSWORD environment variables in production.'
+      );
+    }
+    return `mongodb://${user}:${password}@${host}:27017/${dbName}?authSource=admin`;
+  })(),
   
   // Redis
   // In production, do NOT default to localhost to avoid unwanted Redis dependency.

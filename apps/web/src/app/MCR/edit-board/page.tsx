@@ -12,6 +12,7 @@ import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { Permission } from '@/rbac';
+import { sanitizeMcrHtml } from '../utils/sanitizeHtml';
 
 const broadcastTypes: BroadcastType[] = [
   'SRT_CALLER', 'SRT_LISTENER', 'DVBS2', 'DVBS2X', 'NS4', 'NS3',
@@ -162,7 +163,7 @@ export default function EditBoardPage() {
         <div
           onClick={() => startEdit(activity.id, field, value)}
           className="cursor-pointer p-1 hover:bg-gray-100 min-h-[30px] rounded"
-          dangerouslySetInnerHTML={{ __html: value || '&nbsp;' }}
+          dangerouslySetInnerHTML={{ __html: sanitizeMcrHtml(value || '&nbsp;') }}
         />
       );
     }

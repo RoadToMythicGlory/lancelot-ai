@@ -85,5 +85,12 @@ const podcastEpisodeSchema = new Schema<IPodcastEpisode>({
 podcastEpisodeSchema.index({ organizationId: 1, userId: 1, status: 1 });
 podcastEpisodeSchema.index({ showId: 1 });
 podcastEpisodeSchema.index({ scheduledPublishDate: -1 });
+podcastEpisodeSchema.index({ showId: 1, status: 1 });
+podcastEpisodeSchema.index({ showId: 1, episodeNumber: -1 });
+podcastEpisodeSchema.index({ userId: 1, status: 1, scheduledRecordDate: -1 });
+podcastEpisodeSchema.index({ scheduledRecordDate: -1 });
+podcastEpisodeSchema.index({ status: 1, scheduledPublishDate: -1 });
+podcastEpisodeSchema.index({ relatedStreamId: 1 });
+podcastEpisodeSchema.index({ format: 1 });
 
 export const PodcastEpisode = mongoose.model<IPodcastEpisode>('PodcastEpisode', podcastEpisodeSchema);

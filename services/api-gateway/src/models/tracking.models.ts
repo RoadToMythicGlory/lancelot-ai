@@ -48,6 +48,8 @@ const trackerTagSchema = new Schema<ITrackerTag>({
 
 trackerTagSchema.index({ equipmentId: 1 });
 trackerTagSchema.index({ status: 1 });
+trackerTagSchema.index({ status: 1, lastSeenAt: -1 });
+trackerTagSchema.index({ lastSeenAt: -1 });
 
 export const TrackerTag = mongoose.model<ITrackerTag>('TrackerTag', trackerTagSchema);
 
@@ -84,6 +86,9 @@ const trackerSiteSchema = new Schema<ITrackerSite>({
   timestamps: true,
   collection: 'tracker_sites',
 });
+
+trackerSiteSchema.index({ isActive: 1 });
+trackerSiteSchema.index({ name: 1 });
 
 export const TrackerSite = mongoose.model<ITrackerSite>('TrackerSite', trackerSiteSchema);
 
@@ -132,6 +137,9 @@ const trackerGatewaySchema = new Schema<ITrackerGateway>({
 });
 
 trackerGatewaySchema.index({ siteId: 1, kind: 1 });
+trackerGatewaySchema.index({ isActive: 1 });
+trackerGatewaySchema.index({ kind: 1, isActive: 1 });
+trackerGatewaySchema.index({ lastHeartbeatAt: -1 });
 
 export const TrackerGateway = mongoose.model<ITrackerGateway>('TrackerGateway', trackerGatewaySchema);
 
@@ -176,6 +184,8 @@ const trackerReadingSchema = new Schema<ITrackerReading>({
 const retentionDays = parseInt(process.env.TRACKING_RETENTION_DAYS || '30', 10);
 trackerReadingSchema.index({ createdAt: 1 }, { expireAfterSeconds: retentionDays * 86400 });
 trackerReadingSchema.index({ tagId: 1, ts: -1 });
+trackerReadingSchema.index({ gatewayId: 1, ts: -1 });
+trackerReadingSchema.index({ ts: -1 });
 
 export const TrackerReading = mongoose.model<ITrackerReading>('TrackerReading', trackerReadingSchema);
 
@@ -235,6 +245,9 @@ const trackerLatestPositionSchema = new Schema<ITrackerLatestPosition>({
 
 trackerLatestPositionSchema.index({ siteId: 1 });
 trackerLatestPositionSchema.index({ kind: 1 });
+trackerLatestPositionSchema.index({ gatewayId: 1 });
+trackerLatestPositionSchema.index({ siteId: 1, kind: 1 });
+trackerLatestPositionSchema.index({ computedAt: -1 });
 
 export const TrackerLatestPosition = mongoose.model<ITrackerLatestPosition>(
   'TrackerLatestPosition',

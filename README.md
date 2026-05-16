@@ -65,13 +65,27 @@ npm run dev
 
 ## Environment Variables
 
-Create `.env` files in each service directory:
+Create `.env` files in each service directory. **Never commit real credentials**
+— copy the canonical templates and fill them in locally.
 
 ### API Gateway (`services/api-gateway/.env`)
+
+Use [`services/api-gateway/.env.example`](services/api-gateway/.env.example) as
+the canonical template. At minimum you must set:
+
 ```env
 NODE_ENV=development
 PORT=4000
-MONGODB_URI=mongodb://LancelotERP_DB:<MONGO_PASSWORD>@localhost:27017/lancelot?authSource=admin
+
+# Either supply MONGODB_URI directly...
+MONGODB_URI=mongodb://USER:PASSWORD@localhost:27017/lancelot?authSource=admin
+
+# ...or supply the parts (preferred — `.env` is the only place credentials live).
+MONGO_USERNAME=
+MONGO_PASSWORD=
+
+# Generate with `openssl rand -base64 64` (min 64 chars in production).
+JWT_SECRET=
 ```
 
 ### Web Frontend (`apps/web/.env.local`)

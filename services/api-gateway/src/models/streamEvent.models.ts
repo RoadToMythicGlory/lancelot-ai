@@ -69,5 +69,11 @@ const streamEventSchema = new Schema<IStreamEvent>({
 streamEventSchema.index({ organizationId: 1, userId: 1, scheduledDate: -1 });
 streamEventSchema.index({ status: 1 });
 streamEventSchema.index({ platforms: 1 });
+streamEventSchema.index({ userId: 1, status: 1, scheduledDate: -1 });
+streamEventSchema.index({ status: 1, scheduledDate: 1 });
+streamEventSchema.index({ streamType: 1 });
+streamEventSchema.index({ isRecurring: 1 });
+streamEventSchema.index({ scheduledDate: 1 });
+streamEventSchema.index({ tags: 1 });
 
 export const StreamEvent = mongoose.model<IStreamEvent>('StreamEvent', streamEventSchema);

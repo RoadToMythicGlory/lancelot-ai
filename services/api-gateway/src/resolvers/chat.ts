@@ -10,13 +10,15 @@ interface Context {
   mongoDb: Db;
 }
 
+// Bound list-style chat queries.
+const MAX_CONVERSATIONS = 200;
+const MAX_CHAT_MESSAGES = 200;
+
 // Chat resolvers implementation
 export const chatResolvers = {
   Query: {
     privateConversations: async (_: any, __: any, context: Context) => {
-      if (!context.user) {
-        throw new Error('Unauthorized');
-      }
+      requireAuth(context as any);
 
       try {
         const mongoDb = await connectMongoDB();
@@ -27,14 +29,15 @@ export const chatResolvers = {
         
         const conversationsCollection = mongoDb.collection('privateConversations');
         
-        // Find all conversations where the user is a participant
+        // Find all conversations where the user is a participant.
+        // Cap at MAX_CONVERSATIONS to avoid unbounded reads.
         const conversations = await conversationsCollection.find({
           $or: [
-            { participant1Id: context.user.userId },
-            { participant2Id: context.user.userId }
+            { participant1Id: context.user!.userId },
+            { participant2Id: context.user!.userId }
           ],
           isActive: { $ne: false }
-        }).toArray();
+        }).sort({ lastMessageAt: -1 }).limit(MAX_CONVERSATIONS).toArray();
 
         // Get user details for participants
         const userIds = new Set<string>();
@@ -99,16 +102,30 @@ export const chatResolvers = {
     },
 
     conversationMessages: async (_: any, args: { conversationId: string; limit?: number; offset?: number }, context: Context) => {
-      if (!context.user) {
-        throw new Error('Unauthorized');
-      }
+      requireAuth(context as any);
 
       try {
         const mongoDb = await connectMongoDB();
         const messagesCollection = mongoDb.collection('chatMessages');
-        
-        const limit = args.limit || 50;
-        const offset = args.offset || 0;
+        const conversationsCollection = mongoDb.collection('privateConversations');
+
+        // Cap caller-provided pagination so a client can't pull thousands of
+        // messages in one shot.
+        const limit = Math.max(1, Math.min(Number(args.limit) || 50, MAX_CHAT_MESSAGES));
+        const offset = Math.max(0, Number(args.offset) || 0);
+
+        // Verify the requesting user is actually a participant in the
+        // conversation before returning any messages.
+        const conversation = await conversationsCollection.findOne({
+          id: args.conversationId,
+          $or: [
+            { participant1Id: context.user!.userId },
+            { participant2Id: context.user!.userId },
+          ],
+        });
+        if (!conversation) {
+          throw new Error('Conversation not found or unauthorized');
+        }
 
         // Fetch messages for the conversation
         const messages = await messagesCollection
@@ -165,11 +182,13 @@ export const chatResolvers = {
 
   Mutation: {
     createOrGetConversation: async (_: any, args: { userId: string }, context: Context) => {
-      if (!context.user) {
-        throw new Error('Unauthorized');
+      requireAuth(context as any);
+
+      if (!ObjectId.isValid(args.userId)) {
+        throw new Error('Invalid user ID');
       }
 
-      if (context.user.userId === args.userId) {
+      if (context.user!.userId === args.userId) {
         throw new Error('Cannot create conversation with yourself');
       }
 
@@ -178,7 +197,7 @@ export const chatResolvers = {
         const conversationsCollection = mongoDb.collection('privateConversations');
         
         // Ensure consistent ordering of participant IDs
-        const [participant1Id, participant2Id] = [context.user.userId, args.userId].sort();
+        const [participant1Id, participant2Id] = [context.user!.userId, args.userId].sort();
 
         // Check if conversation already exists
         let conversation = await conversationsCollection.findOne({
@@ -247,9 +266,7 @@ export const chatResolvers = {
     },
 
     sendPrivateMessage: async (_: any, args: { conversationId: string; message: string; messageType?: string }, context: Context) => {
-      if (!context.user) {
-        throw new Error('Unauthorized');
-      }
+      requireAuth(context as any);
 
       try {
         const mongoDb = await connectMongoDB();
@@ -260,8 +277,8 @@ export const chatResolvers = {
         const conversation = await conversationsCollection.findOne({
           id: args.conversationId,
           $or: [
-            { participant1Id: context.user.userId },
-            { participant2Id: context.user.userId }
+            { participant1Id: context.user!.userId },
+            { participant2Id: context.user!.userId }
           ]
         });
 
@@ -273,7 +290,7 @@ export const chatResolvers = {
         const newMessage = {
           id: uuidv4(),
           conversationId: args.conversationId,
-          fromUserId: context.user.userId,
+          fromUserId: context.user!.userId,
           message: args.message,
           messageType: args.messageType || 'text',
           isRead: false,
@@ -284,7 +301,7 @@ export const chatResolvers = {
         await messagesCollection.insertOne(newMessage);
 
         // Update conversation's last message info
-        const otherParticipantPosition = conversation.participant1Id === context.user.userId ? 'participant2' : 'participant1';
+        const otherParticipantPosition = conversation.participant1Id === context.user!.userId ? 'participant2' : 'participant1';
         await conversationsCollection.updateOne(
           { id: args.conversationId },
           {
@@ -312,9 +329,9 @@ export const chatResolvers = {
           message: newMessage.message,
           messageType: newMessage.messageType,
           fromUser: {
-            id: context.user.userId,
-            displayName: context.user.displayName || `${context.user.firstName} ${context.user.lastName}`.trim(),
-            email: context.user.email
+            id: context.user!.userId,
+            displayName: context.user!.displayName || `${context.user!.firstName} ${context.user!.lastName}`.trim(),
+            email: context.user!.email
           },
           isRead: false,
           createdAt: newMessage.createdAt
@@ -326,9 +343,7 @@ export const chatResolvers = {
     },
 
     markMessagesAsRead: async (_: any, args: { conversationId: string }, context: Context) => {
-      if (!context.user) {
-        throw new Error('Unauthorized');
-      }
+      requireAuth(context as any);
 
       try {
         const mongoDb = await connectMongoDB();
@@ -339,8 +354,8 @@ export const chatResolvers = {
         const conversation = await conversationsCollection.findOne({
           id: args.conversationId,
           $or: [
-            { participant1Id: context.user.userId },
-            { participant2Id: context.user.userId }
+            { participant1Id: context.user!.userId },
+            { participant2Id: context.user!.userId }
           ]
         });
 
@@ -352,7 +367,7 @@ export const chatResolvers = {
         await messagesCollection.updateMany(
           {
             conversationId: args.conversationId,
-            fromUserId: { $ne: context.user.userId },
+            fromUserId: { $ne: context.user!.userId },
             isRead: false
           },
           {
@@ -364,7 +379,7 @@ export const chatResolvers = {
         );
 
         // Reset unread count for the current user
-        const participantPosition = conversation.participant1Id === context.user.userId ? 'participant1' : 'participant2';
+        const participantPosition = conversation.participant1Id === context.user!.userId ? 'participant1' : 'participant2';
         await conversationsCollection.updateOne(
           { id: args.conversationId },
           {

@@ -26,5 +26,9 @@ const streamerActivitySchema = new Schema<IStreamerActivity>({
 });
 
 streamerActivitySchema.index({ organizationId: 1, userId: 1, createdAt: -1 });
+streamerActivitySchema.index({ entityType: 1, entityId: 1 });
+streamerActivitySchema.index({ userId: 1, action: 1, createdAt: -1 });
+streamerActivitySchema.index({ action: 1, createdAt: -1 });
+streamerActivitySchema.index({ createdAt: -1 });
 
 export const StreamerActivity = mongoose.model<IStreamerActivity>('StreamerActivity', streamerActivitySchema);

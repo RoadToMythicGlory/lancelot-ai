@@ -25,11 +25,12 @@ import { saasResolvers } from './resolvers/saas';
 import { streamerResolvers } from './resolvers/streamer';
 import { apiLimiter, graphqlLimiter, websocketLimiter } from './middleware/rateLimiter';
 import { sanitizeError, expressErrorHandler } from './middleware/errorHandler';
+import { createGraphqlLoggingPlugin } from './middleware/graphqlLogging';
 import { securityMiddleware } from './middleware/security';
 import { connectMongoose, closeMongoDB } from './config/mongodb';
 import { jwtService } from './services/jwtService';
 import { setupChatSocket, getE2eeFallbackCount } from './socket/chat-socket';
-import { buildGraphQLContext } from './middleware/context';
+import { buildGraphQLContext, buildContextFromToken } from './middleware/context';
 import { pubsub } from './utils/pubsub';
 import { startScheduler, stopScheduler } from './services/jobScheduler';
 import { metrics } from './services/metrics';
@@ -40,6 +41,7 @@ import { equipmentSetsResolvers } from './resolvers/equipmentSets';
 import { internalAssignmentsResolvers } from './resolvers/internalAssignments';
 import { trackingResolvers } from './resolvers/tracking';
 import { roleTemplateResolvers } from './resolvers/roleTemplate';
+import { flightBoardResolvers } from './resolvers/flightBoard';
 import { startTrackerIngest, stopTrackerIngest } from './services/trackerIngestService';
 
 // Load GraphQL schema
@@ -53,6 +55,7 @@ const resolvers = {
     // Only add non-conflicting resolvers from basic broadcast resolvers
     departments: broadcastResolvers.Query.departments,
     warehouseEquipment: broadcastResolvers.Query.warehouseEquipment,
+    warehouseEquipmentStats: broadcastResolvers.Query.warehouseEquipmentStats,
     equipmentAssignmentsByEvent: broadcastResolvers.Query.equipmentAssignmentsByEvent,
     equipmentAssignments: broadcastResolvers.Query.equipmentAssignments,
     equipmentHistory: broadcastResolvers.Query.equipmentHistory,
@@ -90,6 +93,8 @@ const resolvers = {
     ...trackingResolvers.Query,
     // Role Templates
     ...roleTemplateResolvers.Query,
+    // Flight Board queries
+    ...flightBoardResolvers.Query,
     health: () => ({
       status: 'OK',
       timestamp: new Date().toISOString(),
@@ -153,6 +158,8 @@ const resolvers = {
     ...trackingResolvers.Mutation,
     // Role Templates
     ...roleTemplateResolvers.Mutation,
+    // Flight Board mutations
+    ...flightBoardResolvers.Mutation,
   },
   Subscription: {
     ...enhancedBroadcastResolvers.Subscription,
@@ -196,6 +203,10 @@ const resolvers = {
   MCREvent: mcrResolvers.MCREvent,
   MCRBulletinPost: mcrResolvers.MCRBulletinPost,
   ActivityRow: mcrResolvers.ActivityRow,
+  MCRDailyCheckEntry: mcrResolvers.MCRDailyCheckEntry,
+  MCRExchangeGroup: mcrResolvers.MCRExchangeGroup,
+  // Flight Board field resolvers
+  FlightBoard: flightBoardResolvers.FlightBoard,
 };
 
 const schema = makeExecutableSchema({
@@ -242,31 +253,34 @@ async function startServer() {
       res.json(metrics.getJsonMetrics());
     });
 
-    // Debug endpoint to check JWT token
-    app.get('/debug/jwt', (req, res) => {
-      try {
-        const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-          return res.status(401).json({ error: 'No JWT token provided' });
-        }
-        
-        const token = authHeader.substring(7);
-        const payload = jwtService.verify(token);
-        
-        res.json({
-          success: true,
-          tokenData: {
-            userId: payload.userId,
-            userIdType: typeof payload.userId,
-            email: payload.email,
-            role: payload.role,
-            systemRole: payload.systemRole
+    // Debug endpoint to inspect a JWT token. Strictly gated to non-production environments
+    // because it lets callers introspect token contents and is a recon tool for attackers.
+    if (config.NODE_ENV !== 'production') {
+      app.get('/debug/jwt', (req, res) => {
+        try {
+          const authHeader = req.headers.authorization;
+          if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({ error: 'No JWT token provided' });
           }
-        });
-      } catch (error: any) {
-        res.status(401).json({ error: 'Invalid token', message: error.message });
-      }
-    });
+
+          const token = authHeader.substring(7);
+          const payload = jwtService.verify(token);
+
+          res.json({
+            success: true,
+            tokenData: {
+              userId: payload.userId,
+              userIdType: typeof payload.userId,
+              email: payload.email,
+              role: payload.role,
+              systemRole: payload.systemRole
+            }
+          });
+        } catch (error: any) {
+          res.status(401).json({ error: 'Invalid token', message: error.message });
+        }
+      });
+    }
 
     // Apply rate limiting to all routes
     app.use(apiLimiter);
@@ -324,11 +338,64 @@ async function startServer() {
       }
     });
 
-    // Set up WebSocket server for GraphQL subscriptions
-    const serverCleanup = useServer({
-      schema,
-      context: async () => ({ pubsub }),
-    }, wsServer);
+    // Cap concurrent WebSocket connections per process to bound resource usage.
+    // Set WS_MAX_CONNECTIONS in env to override (default 1000).
+    const WS_MAX_CONNECTIONS = parseInt(process.env.WS_MAX_CONNECTIONS || '1000', 10);
+    let activeWsConnections = 0;
+
+    // Set up WebSocket server for GraphQL subscriptions.
+    // Authenticates each subscription connection via the connectionParams
+    // payload (Authorization header) sent by the client during the
+    // graphql-ws connection_init message.
+    const serverCleanup = useServer(
+      {
+        schema,
+        // `context` runs for every operation; we pass through the same context
+        // built during onConnect (cached on extra) so resolvers see the same user.
+        context: async (ctx: any) => {
+          return ctx.extra?.gqlContext ?? { pubsub, user: null };
+        },
+        // Authenticate the WebSocket connection itself. Tokens may arrive as
+        // `Authorization: Bearer <token>`, `authorization` (lowercase), or a
+        // bare `token` field, depending on the client.
+        onConnect: async (ctx: any) => {
+          if (activeWsConnections >= WS_MAX_CONNECTIONS) {
+            console.warn(`WS connection rejected: cap of ${WS_MAX_CONNECTIONS} reached`);
+            return false;
+          }
+
+          const params = ctx.connectionParams || {};
+          const rawAuth =
+            params.Authorization ||
+            params.authorization ||
+            params.token ||
+            '';
+          const token = typeof rawAuth === 'string' && rawAuth.startsWith('Bearer ')
+            ? rawAuth.substring(7)
+            : rawAuth;
+
+          const gqlContext = await buildContextFromToken(token);
+
+          // Reject unauthenticated connections in production. In development we
+          // allow anonymous connections to keep the GraphQL playground usable;
+          // individual subscription resolvers still gate themselves with
+          // requireAuth/requirePermission.
+          if (!gqlContext.user && config.NODE_ENV === 'production') {
+            console.warn('WS connection rejected: missing or invalid auth token');
+            return false;
+          }
+
+          activeWsConnections += 1;
+          ctx.extra = ctx.extra || {};
+          ctx.extra.gqlContext = gqlContext;
+          return true;
+        },
+        onDisconnect: () => {
+          activeWsConnections = Math.max(0, activeWsConnections - 1);
+        },
+      },
+      wsServer
+    );
 
     // Set up Socket.IO for chat
     const chatSocket = setupChatSocket(httpServer);
@@ -347,10 +414,26 @@ async function startServer() {
             };
           },
         },
+        createGraphqlLoggingPlugin(),
       ],
       formatError: (formattedError, error) => {
-        // Use the sanitizeError function appropriately
-        return formattedError;
+        // Run every GraphQL error through the central sanitizer so production
+        // never leaks raw stack traces, DB errors, or vendor messages to clients.
+        // Non-production environments keep the original error for debuggability.
+        try {
+          const inputErr = (error instanceof Error ? error : new Error(formattedError.message));
+          const sanitized = sanitizeError(inputErr as any);
+          return {
+            ...formattedError,
+            message: sanitized.message,
+            extensions: {
+              ...formattedError.extensions,
+              ...(sanitized.extensions || {}),
+            },
+          };
+        } catch {
+          return formattedError;
+        }
       },
     });
 

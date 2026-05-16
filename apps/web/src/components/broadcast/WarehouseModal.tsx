@@ -106,6 +106,9 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
 
   // Lazy query to check if a scanned barcode is an equipment set
   const [fetchSetByBarcode] = useLazyQuery(GET_EQUIPMENT_SET_BY_BARCODE);
+  const [lookupEquipmentByBarcode, { loading: equipmentLookupLoading }] = useLazyQuery(GET_WAREHOUSE_EQUIPMENT, {
+    fetchPolicy: 'network-only',
+  });
 
   // Mutation to assign an entire set to an event
   const [assignSetToEvent] = useMutation(ASSIGN_EQUIPMENT_SET_TO_EVENT, {
@@ -171,17 +174,6 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
       return;
     }
 
-    if (equipmentLoading) {
-      message.warning('מערכת טוענת נתוני ציוד, אנא המתן...');
-      return;
-    }
-
-    if (equipmentError) {
-      message.error('שגיאה בטעינת נתוני ציוד');
-      console.error('Equipment query error:', equipmentError);
-      return;
-    }
-
     // Check if barcode belongs to an equipment set first
     try {
       const { data: setData } = await fetchSetByBarcode({ variables: { barcode: trimmedBarcode } });
@@ -235,10 +227,29 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
       // Not a set barcode, continue to individual equipment lookup
     }
 
-    // Find equipment by barcode (case-insensitive)
-    const scannedEquipment = equipment.find(e => 
+    // Find equipment by barcode (case-insensitive). The modal's initial
+    // equipment list is capped, so always ask the backend before declaring a
+    // barcode missing.
+    let scannedEquipment = equipment.find(e =>
       e.barcode.toLowerCase() === trimmedBarcode.toLowerCase()
     );
+
+    if (!scannedEquipment) {
+      try {
+        const { data } = await lookupEquipmentByBarcode({
+          variables: {
+            filter: { searchText: trimmedBarcode },
+            limit: 20,
+            offset: 0,
+          },
+        });
+        scannedEquipment = (data?.warehouseEquipment || []).find((e: Equipment) =>
+          e.barcode.toLowerCase() === trimmedBarcode.toLowerCase()
+        );
+      } catch (error) {
+        console.error('Equipment barcode lookup error:', error);
+      }
+    }
     
     if (!scannedEquipment) {
       message.error(`ברקוד "${trimmedBarcode}" לא נמצא במערכת`);
@@ -271,7 +282,7 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
     // Add to assigned items
     const newAssignedItem: ScannedItem = {
       equipmentId: scannedEquipment.id,
-      barcode: scannedBarcode,
+      barcode: trimmedBarcode,
       scannedAt: new Date().toISOString(),
       name: scannedEquipment.name,
       category: scannedEquipment.category || 'general'
@@ -363,7 +374,6 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
                 input: {
                   quantityAssigned: items.length,
                   assignmentStatus: 'assigned',
-                  assignedToName: event.title,
                   returnNotes: `Updated assignment for broadcast event: ${event.title}`
                 }
               }
@@ -385,7 +395,6 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
                   broadcastEventId: event.id,
                   quantityAssigned: items.length,
                   assignmentStatus: 'assigned',
-                  assignedToName: event.title,
                   assignmentNotes: `Assigned to broadcast event: ${event.title}`,
                   scheduledPickupAt: event.startTime,
                   scheduledReturnAt: event.endTime
@@ -554,7 +563,8 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
                 type="primary" 
                 onClick={handleBarcodeScan}
                 size="large"
-                disabled={!scannedBarcode || equipmentLoading}
+                loading={equipmentLookupLoading}
+                disabled={!scannedBarcode || equipmentLoading || equipmentLookupLoading}
               >
                 סרוק
               </Button>

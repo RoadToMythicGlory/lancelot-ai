@@ -76,6 +76,10 @@ auditLogSchema.index({ userId: 1, createdAt: -1 });
 auditLogSchema.index({ resource: 1, resourceId: 1 });
 auditLogSchema.index({ action: 1, createdAt: -1 });
 auditLogSchema.index({ severity: 1 });
+auditLogSchema.index({ organizationId: 1, resource: 1, createdAt: -1 });
+auditLogSchema.index({ organizationId: 1, userId: 1, createdAt: -1 });
+auditLogSchema.index({ severity: 1, createdAt: -1 });
+auditLogSchema.index({ organizationId: 1, severity: 1, createdAt: -1 });
 // TTL index - auto-delete after 365 days (configurable)
 auditLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: 365 * 24 * 60 * 60 });
 

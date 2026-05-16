@@ -185,8 +185,8 @@ export const GET_EMPLOYEES_BY_DEPARTMENT = gql`
 
 // Warehouse Equipment Queries (needed for external broadcasts and warehouse modals)
 export const GET_WAREHOUSE_EQUIPMENT = gql`
-  query GetWarehouseEquipment($filter: WarehouseEquipmentFilter) {
-    warehouseEquipment(filter: $filter) {
+  query GetWarehouseEquipment($filter: WarehouseEquipmentFilter, $limit: Int, $offset: Int) {
+    warehouseEquipment(filter: $filter, limit: $limit, offset: $offset) {
       id
       name
       category
@@ -212,6 +212,7 @@ export const GET_WAREHOUSE_EQUIPMENT = gql`
         cell
       }
       isQuantityBased
+      isSharedEngineeringEquipment
       isDisabled
       disabledAt
       disabledReason
@@ -219,6 +220,18 @@ export const GET_WAREHOUSE_EQUIPMENT = gql`
       lastUsedAt
       createdAt
       updatedAt
+    }
+  }
+`;
+
+export const GET_WAREHOUSE_EQUIPMENT_STATS = gql`
+  query GetWarehouseEquipmentStats($filter: WarehouseEquipmentFilter) {
+    warehouseEquipmentStats(filter: $filter) {
+      totalEquipment
+      totalAvailable
+      totalAssigned
+      totalMaintenance
+      totalDisabled
     }
   }
 `;
@@ -879,6 +892,7 @@ export const GET_INTERNAL_EQUIPMENT_ASSIGNMENTS = gql`
         quantityAvailable
         quantityAssigned
         isQuantityBased
+        isSharedEngineeringEquipment
         isDisabled
       }
       assignedToType

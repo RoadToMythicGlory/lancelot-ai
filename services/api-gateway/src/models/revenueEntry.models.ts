@@ -33,5 +33,11 @@ const revenueEntrySchema = new Schema<IRevenueEntry>({
 
 revenueEntrySchema.index({ organizationId: 1, userId: 1, date: -1 });
 revenueEntrySchema.index({ source: 1 });
+revenueEntrySchema.index({ userId: 1, date: -1 });
+revenueEntrySchema.index({ userId: 1, source: 1, date: -1 });
+revenueEntrySchema.index({ relatedStreamId: 1 });
+revenueEntrySchema.index({ relatedEpisodeId: 1 });
+revenueEntrySchema.index({ platform: 1 });
+revenueEntrySchema.index({ organizationId: 1, source: 1, date: -1 });
 
 export const RevenueEntry = mongoose.model<IRevenueEntry>('RevenueEntry', revenueEntrySchema);

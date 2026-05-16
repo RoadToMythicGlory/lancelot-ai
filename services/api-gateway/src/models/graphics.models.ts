@@ -271,15 +271,23 @@ GraphicsProjectSchema.index({ createdBy: 1, createdAt: -1 });
 GraphicsProjectSchema.index({ template: 1 });
 GraphicsProjectSchema.index({ tags: 1 });
 GraphicsProjectSchema.index({ isPublic: 1 });
+GraphicsProjectSchema.index({ isPublic: 1, createdAt: -1 });
+GraphicsProjectSchema.index({ updatedBy: 1 });
+GraphicsProjectSchema.index({ assets: 1 });
+GraphicsProjectSchema.index({ name: 1 });
 
 GraphicsExportSchema.index({ projectId: 1 });
 GraphicsExportSchema.index({ createdBy: 1, createdAt: -1 });
 GraphicsExportSchema.index({ status: 1 });
+GraphicsExportSchema.index({ status: 1, createdAt: 1 });
+GraphicsExportSchema.index({ projectId: 1, status: 1 });
 
 GraphicsAssetSchema.index({ type: 1 });
 GraphicsAssetSchema.index({ uploadedBy: 1 });
 GraphicsAssetSchema.index({ tags: 1 });
 GraphicsAssetSchema.index({ isPublic: 1 });
+GraphicsAssetSchema.index({ type: 1, isPublic: 1 });
+GraphicsAssetSchema.index({ uploadedBy: 1, createdAt: -1 });
 
 // Middleware
 GraphicsProjectSchema.pre('save', function(next) {

@@ -18,24 +18,70 @@
 }
 
 /* Kiosk / full-screen mode.
- * Promotes the page to a top-level overlay and hides the app shell
- * (sidebar, top nav, etc.) so the board fills the viewport. Triggered by the
- * "מסך מלא" button which also requests the browser Fullscreen API. */
+ * Promotes the page to a top-level overlay and hides EVERY piece of chrome
+ * (header, sidebar, etc.) so only the data is visible — meant for wall-
+ * mounted TVs and control rooms. Triggered by the "מסך מלא" button which
+ * also requests the browser Fullscreen API. */
 .flight-board-page.is-kiosk {
   position: fixed;
   inset: 0;
   z-index: 1000;
   width: 100vw;
   height: 100vh;
-  overflow: auto;
+  overflow: hidden;
 }
 
-/* Some browsers report fullscreen via the :fullscreen pseudo. Make sure the
- * inner shell stretches to fill the viewport in either path. */
-.flight-board-page.is-kiosk .flight-board-shell,
+/* Stretch the inner shell edge-to-edge — no padding, no gap above the
+ * panels, no rounded card chrome. */
+.flight-board-page.is-kiosk .flight-board-shell {
+  padding: 0;
+  gap: 0;
+  min-height: 100vh;
+  height: 100vh;
+}
+
 .flight-board-page:fullscreen .flight-board-shell,
 .flight-board-page:-webkit-full-screen .flight-board-shell {
   min-height: 100vh;
+}
+
+/* Hide the entire page header (title, board selector, action buttons, range
+ * controls) in kiosk mode. The data is the deliverable. */
+.flight-board-page.is-kiosk .flight-board-header {
+  display: none !important;
+}
+
+/* The panel grid takes the entire viewport and stretches every panel to fill
+ * it. Multi-panel boards keep their grid columns; single-panel boards span
+ * the entire screen. */
+.flight-board-page.is-kiosk .flight-board-grid {
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.flight-board-page.is-kiosk .flight-board-panel-cell {
+  min-height: 0;
+}
+
+.flight-board-page.is-kiosk .flight-board-panel,
+.flight-board-page.is-kiosk .flight-board-panel.is-expanded {
+  /* Cancel the legacy floating-panel layout — kiosk uses the natural grid
+   * cell and stretches it to 100%. */
+  position: static;
+  inset: auto;
+  border-radius: 0;
+  border: none;
+  height: 100%;
+  width: 100%;
+  box-shadow: none;
+}
+
+.flight-board-page.is-kiosk .flight-board-panel-body {
+  height: calc(100% - 36px);
+  overflow: auto;
 }
 
 /* When the page is the fullscreen element the browser already hides the rest
@@ -47,6 +93,163 @@ body:has(.flight-board-page.is-kiosk) aside.app-sidebar,
 body:has(.flight-board-page.is-kiosk) header.app-header,
 body:has(.flight-board-page.is-kiosk) nav.app-topbar {
   display: none !important;
+}
+
+/* Kiosk table styling.
+ *
+ * Inside the kiosk overlay we want the wall-mounted-TV look from the
+ * reference: bold rows, crisp white grid borders, centered text, and
+ * fixed equal row heights regardless of row count. We override the regular
+ * density variables here so the adaptive density logic in TablePanel.tsx
+ * can't shrink rows below the readable threshold.
+ *
+ * All numeric values are scaled to 67% of the original kiosk sizing so the
+ * board fits more rows while staying TV-readable. */
+.flight-board-page.is-kiosk .flight-board-panel-table-wrapper {
+  height: 100%;
+  --fb-cell-padding: clamp(9px, 0.8vw, 16px) clamp(11px, 0.94vw, 19px);
+  --fb-row-font: clamp(13px, 1.14vw, 20px);
+  --fb-header-font: clamp(12px, 0.94vw, 17px);
+  --fb-pill-font: clamp(10px, 0.74vw, 13px);
+}
+
+.flight-board-page.is-kiosk .flight-board-table {
+  width: 100%;
+  height: 100%;
+  color: #f8fafc;
+  border-collapse: collapse;
+  background: #000;
+  /* Switch from the default fixed layout to auto so columns flex to their
+   * content. Empty/short columns shrink, long-title columns grow. */
+  table-layout: auto;
+}
+
+.flight-board-page.is-kiosk .flight-board-table th,
+.flight-board-page.is-kiosk .flight-board-table td {
+  border: 1.5px solid rgba(255, 255, 255, 0.45);
+  text-align: center;
+  vertical-align: middle;
+  font-weight: 700;
+  /* Equal row heights — viewport-relative so 3 rows or 30 rows still feel
+   * dense and readable on a TV. (Scaled 67% from the original sizing.) */
+  height: clamp(43px, 5.36vh, 80px);
+  min-height: clamp(43px, 5.36vh, 80px);
+  /* Let auto layout shrink columns, but never below this width so cells
+   * never feel cramped on the TV. Inline padding adds the breathing room. */
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.flight-board-page.is-kiosk .flight-board-table th {
+  background: #0f172a;
+  color: #ffffff;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  /* Header banner — also scaled to 67%. */
+  height: clamp(38px, 4vh, 54px);
+  /* Kiosk is read-only; the headers shouldn't look clickable. */
+  cursor: default;
+}
+
+.flight-board-page.is-kiosk .flight-board-table tbody tr:hover {
+  background: rgba(56, 189, 248, 0.08);
+}
+
+/* In auto layout we drop the fixed widths and use `min-width` so columns
+ * can flex to fit their text. Time/date/status columns still keep a small
+ * floor so they don't collapse to a sliver when the content is short. */
+.flight-board-page.is-kiosk .flight-board-table .fb-col-narrow,
+.flight-board-page.is-kiosk .flight-board-table .fb-col-time,
+.flight-board-page.is-kiosk .flight-board-table .fb-col-date,
+.flight-board-page.is-kiosk .flight-board-table .fb-col-channel,
+.flight-board-page.is-kiosk .flight-board-table .fb-col-status {
+  width: auto;
+}
+
+.flight-board-page.is-kiosk .flight-board-table .fb-col-narrow {
+  min-width: clamp(40px, 3vw, 60px);
+}
+.flight-board-page.is-kiosk .flight-board-table .fb-col-time {
+  min-width: clamp(56px, 4vw, 84px);
+  white-space: nowrap;
+}
+.flight-board-page.is-kiosk .flight-board-table .fb-col-date {
+  min-width: clamp(64px, 4.5vw, 100px);
+  white-space: nowrap;
+}
+.flight-board-page.is-kiosk .flight-board-table .fb-col-channel {
+  min-width: clamp(64px, 4.5vw, 110px);
+}
+.flight-board-page.is-kiosk .flight-board-table .fb-col-status {
+  min-width: clamp(72px, 5vw, 120px);
+}
+
+/* Status / type pills also scale (67%) so they remain proportional. */
+.flight-board-page.is-kiosk .flight-board-status-pill,
+.flight-board-page.is-kiosk .flight-board-type-pill {
+  font-size: var(--fb-pill-font);
+  padding: 4px 9px;
+  border-radius: 999px;
+}
+
+/* The table-internal scroll container should fill the panel body. */
+.flight-board-page.is-kiosk .flight-board-panel-table-wrapper {
+  overflow: auto;
+}
+
+/* In single-panel boards we hide the panel header entirely so the table
+ * goes truly edge-to-edge. Multi-panel boards keep a tiny title strip so
+ * each panel stays identifiable. */
+.flight-board-page.is-kiosk .flight-board-grid:has(.flight-board-panel-cell:only-child)
+  .flight-board-panel-header {
+  display: none;
+}
+
+.flight-board-page.is-kiosk
+  .flight-board-grid:has(.flight-board-panel-cell:only-child)
+  .flight-board-panel-body {
+  height: 100%;
+}
+
+/* In kiosk the LIVE/expand/edit chrome on the panel header is unnecessary —
+ * keep only the title strip on multi-panel boards. */
+.flight-board-page.is-kiosk .flight-board-panel-actions,
+.flight-board-page.is-kiosk .flight-board-live-dot {
+  display: none;
+}
+
+/* Floating "exit kiosk" button — visible only in kiosk mode so admins can
+ * leave full-screen without hunting for Esc. Sits in the top-left corner
+ * (RTL convention; close-affordances live near the page edge), stays dim
+ * until hovered so it doesn't compete with the data. */
+.flight-board-kiosk-exit {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 1100;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.55);
+  color: #f1f5f9;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.4;
+  transition: opacity 160ms ease, background 160ms ease;
+  font-size: 18px;
+}
+
+.flight-board-kiosk-exit:hover,
+.flight-board-kiosk-exit:focus-visible {
+  opacity: 1;
+  background: rgba(15, 23, 42, 0.85);
+  outline: none;
 }
 
 .flight-board-shell {
@@ -260,6 +463,19 @@ body:has(.flight-board-page.is-kiosk) nav.app-topbar {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* Panel header lives on a dark background; antd's default text-button color
+ * is too dark to be visible there, so force the edit/expand icons white. */
+.flight-board-panel-actions .ant-btn,
+.flight-board-panel-actions .ant-btn:hover,
+.flight-board-panel-actions .ant-btn:focus,
+.flight-board-panel-actions .ant-btn .anticon {
+  color: #f8fafc;
+}
+
+.flight-board-panel-actions .ant-btn:hover {
+  background: rgba(248, 250, 252, 0.12);
 }
 
 .flight-board-panel-body {

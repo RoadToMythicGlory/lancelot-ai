@@ -17,8 +17,8 @@ export enum PermissionCategory {
   DASHBOARD = 'DASHBOARD',
   CHAT = 'CHAT',
   INTEGRATIONS = 'INTEGRATIONS',
-  BILLING = 'BILLING',
   AUDIT = 'AUDIT',
+  IT_SUPPORT = 'IT_SUPPORT',
 }
 
 export enum PermissionType {
@@ -101,17 +101,17 @@ const CATEGORY_PERMISSION_MAP: Record<PermissionCategory, Record<string, Permiss
     CREATE: Permission.INTEGRATIONS_MANAGE,
     DELETE: Permission.INTEGRATIONS_MANAGE,
   },
-  [PermissionCategory.BILLING]: {
-    VIEW: Permission.BILLING_VIEW,
-    MANAGE: Permission.BILLING_MANAGE,
-    CREATE: Permission.BILLING_MANAGE,
-    DELETE: Permission.BILLING_MANAGE,
-  },
   [PermissionCategory.AUDIT]: {
     VIEW: Permission.AUDIT_VIEW,
     MANAGE: Permission.AUDIT_VIEW,
     CREATE: Permission.AUDIT_VIEW,
     DELETE: Permission.AUDIT_VIEW,
+  },
+  [PermissionCategory.IT_SUPPORT]: {
+    VIEW: Permission.IT_SUPPORT_VIEW,
+    MANAGE: Permission.IT_SUPPORT_MANAGE,
+    CREATE: Permission.IT_SUPPORT_MANAGE,
+    DELETE: Permission.IT_SUPPORT_MANAGE,
   },
 };
 

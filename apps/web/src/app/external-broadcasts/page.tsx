@@ -22,6 +22,8 @@ import { GET_BROADCAST_EVENTS, GET_EMPLOYEES_BY_DEPARTMENT, GET_DEPARTMENTS, GET
 import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA, CREATE_EXTERNAL_BROADCAST_PRESET, UPDATE_EXTERNAL_BROADCAST_PRESET, DELETE_EXTERNAL_BROADCAST_PRESET } from '@/graphql/mutations';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { Permission } from '@/rbac';
+import { useAuth } from '@/contexts/AuthContext';
+import DynamicDepartmentJobsPanel, { AssignmentJob } from '@/components/assignments/DynamicDepartmentJobsPanel';
 
 dayjs.extend(isoWeek);
 dayjs.extend(utc);
@@ -165,6 +167,8 @@ const statusLabels: Record<DataStatus, string> = {
 
 const ExternalBroadcastsPage: React.FC = () => {
   const { message: messageApi } = App.useApp();
+  const { hasPermission } = useAuth();
+  const canManageBroadcasts = hasPermission(Permission.BROADCAST_MANAGE);
 
   // Navigation
   const [currentDate, setCurrentDate] = useState(dayjs());
@@ -184,6 +188,9 @@ const ExternalBroadcastsPage: React.FC = () => {
   // Equipment requests (category-based)
   const [equipmentRequests, setEquipmentRequests] = useState<EquipmentRequest[]>([]);
   const [newEquipCategory, setNewEquipCategory] = useState<string>('');
+
+  // Admin-configurable dynamic jobs (departments configured in Settings → טפסים).
+  const [dynamicJobs, setDynamicJobs] = useState<AssignmentJob[]>([]);
 
   // Saving
   const [saving, setSaving] = useState(false);
@@ -335,6 +342,22 @@ const ExternalBroadcastsPage: React.FC = () => {
     } else {
       setEquipmentRequests([]);
     }
+
+    // Load dynamic jobs (admin-configured department list)
+    const savedJobs: any[] = cd.dynamicJobs || dept.dynamicJobs || [];
+    setDynamicJobs(
+      Array.isArray(savedJobs)
+        ? savedJobs.map((j: any, i: number) => ({
+            uid: `loaded_${i}_${Date.now()}`,
+            departmentCode: j.departmentCode,
+            roleKey: j.roleKey,
+            roleLabel: j.roleLabel,
+            count: typeof j.count === 'number' ? j.count : 1,
+            userId: j.userId,
+            userName: j.userName,
+          }))
+        : [],
+    );
   }, [selectedEvent]);
 
   // Keep selectedEvent in sync with live data
@@ -444,6 +467,11 @@ const ExternalBroadcastsPage: React.FC = () => {
 
   const handleSave = async () => {
     if (!selectedEvent) return;
+    if (!canManageBroadcasts) {
+      messageApi.error('אין לך הרשאה לשנות שידורים');
+      return;
+    }
+
     setSaving(true);
     try {
       const productionCrew = crewAssignments.map(c => ({
@@ -474,6 +502,14 @@ const ExternalBroadcastsPage: React.FC = () => {
             customData: {
               productionCrew,
               equipmentRequests: eqRequests,
+              dynamicJobs: dynamicJobs.map((j) => ({
+                departmentCode: j.departmentCode,
+                roleKey: j.roleKey,
+                roleLabel: j.roleLabel,
+                count: j.count || 1,
+                userId: j.userId,
+                userName: j.userName,
+              })),
               notApplicable: false,
             },
           },
@@ -493,6 +529,11 @@ const ExternalBroadcastsPage: React.FC = () => {
 
   const handleNotApplicable = async () => {
     if (!selectedEvent) return;
+    if (!canManageBroadcasts) {
+      messageApi.error('אין לך הרשאה לשנות שידורים');
+      return;
+    }
+
     setSaving(true);
     try {
       await updateDepartmentData({
@@ -546,6 +587,11 @@ const ExternalBroadcastsPage: React.FC = () => {
   // ─── Preset CRUD ────────────────────────────────────────
 
   const openPresetModal = (preset?: Preset) => {
+    if (!canManageBroadcasts) {
+      messageApi.error('אין לך הרשאה לנהל פריסטים');
+      return;
+    }
+
     setEditingPreset(preset || null);
     if (preset) {
       presetForm.setFieldsValue({ name: preset.name, description: preset.description, tags: preset.tags });
@@ -556,6 +602,11 @@ const ExternalBroadcastsPage: React.FC = () => {
   };
 
   const handleSavePreset = async () => {
+    if (!canManageBroadcasts) {
+      messageApi.error('אין לך הרשאה לנהל פריסטים');
+      return;
+    }
+
     try {
       const values = await presetForm.validateFields();
 
@@ -611,6 +662,11 @@ const ExternalBroadcastsPage: React.FC = () => {
   };
 
   const handleDeletePreset = async (presetId: string) => {
+    if (!canManageBroadcasts) {
+      messageApi.error('אין לך הרשאה למחוק פריסטים');
+      return;
+    }
+
     try {
       await deletePreset({ variables: { id: presetId } });
       messageApi.success('הפריסט נמחק');
@@ -788,10 +844,12 @@ const ExternalBroadcastsPage: React.FC = () => {
                       );
                     })()}
                   </Space>
-                  <Space>
-                    <Button onClick={handleNotApplicable} loading={saving}>לא עבורנו</Button>
-                    <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={saving}>שמור</Button>
-                  </Space>
+                  {canManageBroadcasts && (
+                    <Space>
+                      <Button onClick={handleNotApplicable} loading={saving}>לא עבורנו</Button>
+                      <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={saving}>שמור</Button>
+                    </Space>
+                  )}
                 </div>
               }
               style={{ height: 'calc(100vh - 180px)', overflow: 'auto' }}
@@ -822,12 +880,14 @@ const ExternalBroadcastsPage: React.FC = () => {
                       </Tooltip>
                     </Col>
                   ))}
-                  <Col>
-                    <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={() => openPresetModal()}>
-                      שמור כפריסט
-                    </Button>
-                  </Col>
-                  {presets.length > 0 && (
+                  {canManageBroadcasts && (
+                    <Col>
+                      <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={() => openPresetModal()}>
+                        שמור כפריסט
+                      </Button>
+                    </Col>
+                  )}
+                  {canManageBroadcasts && presets.length > 0 && (
                     <Col>
                       <Button size="small" type="link" icon={<EditOutlined />} onClick={() => openPresetModal(presets[0])}>
                         ניהול
@@ -875,7 +935,9 @@ const ExternalBroadcastsPage: React.FC = () => {
                                       )}
                                       {member.phone && <Text type="secondary" style={{ fontSize: 12 }}>{member.phone}</Text>}
                                     </Space>
-                                    <Button type="text" danger size="small" icon={<MinusCircleOutlined />} onClick={() => removeCrew(globalIdx)} />
+                                    {canManageBroadcasts && (
+                                      <Button type="text" danger size="small" icon={<MinusCircleOutlined />} onClick={() => removeCrew(globalIdx)} />
+                                    )}
                                   </div>
                                 );
                               })}
@@ -883,15 +945,29 @@ const ExternalBroadcastsPage: React.FC = () => {
                           );
                         })}
 
-                        <Button
-                          type="dashed"
-                          icon={<PlusOutlined />}
-                          onClick={() => setAddCrewModalOpen(true)}
-                          style={{ width: '100%', marginTop: 12 }}
-                        >
-                          הוסף איש צוות
-                        </Button>
+                        {canManageBroadcasts && (
+                          <Button
+                            type="dashed"
+                            icon={<PlusOutlined />}
+                            onClick={() => setAddCrewModalOpen(true)}
+                            style={{ width: '100%', marginTop: 12 }}
+                          >
+                            הוסף איש צוות
+                          </Button>
+                        )}
                       </div>
+                    ),
+                  },
+                  {
+                    key: 'dynamic-jobs',
+                    label: <span><AppstoreOutlined /> משימות לפי מחלקות ({dynamicJobs.length})</span>,
+                    children: (
+                      <DynamicDepartmentJobsPanel
+                        formKey="externalBroadcasts"
+                        value={dynamicJobs}
+                        onChange={canManageBroadcasts ? setDynamicJobs : () => {}}
+                        title="משימות שיוך לפי הגדרת מחלקות"
+                      />
                     ),
                   },
                   {
@@ -906,6 +982,7 @@ const ExternalBroadcastsPage: React.FC = () => {
                               placeholder="בחר קטגוריית ציוד"
                               value={newEquipCategory || undefined}
                               onChange={setNewEquipCategory}
+                              disabled={!canManageBroadcasts}
                               style={{ width: '100%' }}
                               showSearch
                               filterOption={(input, option) =>
@@ -919,9 +996,11 @@ const ExternalBroadcastsPage: React.FC = () => {
                                 ))}
                             </Select>
                           </Col>
-                          <Col>
-                            <Button icon={<PlusOutlined />} onClick={addEquipmentRequest}>הוסף</Button>
-                          </Col>
+                          {canManageBroadcasts && (
+                            <Col>
+                              <Button icon={<PlusOutlined />} onClick={addEquipmentRequest}>הוסף</Button>
+                            </Col>
+                          )}
                         </Row>
 
                         {equipmentRequests.length === 0 && (
@@ -947,15 +1026,18 @@ const ExternalBroadcastsPage: React.FC = () => {
                                     max={50}
                                     value={req.count}
                                     onChange={v => updateEquipmentCount(req.category, v || 1)}
+                                    disabled={!canManageBroadcasts}
                                     size="small"
                                   />
-                                  <Button
-                                    type="text"
-                                    danger
-                                    size="small"
-                                    icon={<DeleteOutlined />}
-                                    onClick={() => removeEquipmentRequest(req.category)}
-                                  />
+                                  {canManageBroadcasts && (
+                                    <Button
+                                      type="text"
+                                      danger
+                                      size="small"
+                                      icon={<DeleteOutlined />}
+                                      onClick={() => removeEquipmentRequest(req.category)}
+                                    />
+                                  )}
                                 </Space>
                               </div>
                             }
@@ -982,6 +1064,7 @@ const ExternalBroadcastsPage: React.FC = () => {
                                             placeholder="תפקיד / ייעוד"
                                             value={unit.purpose}
                                             onChange={e => updateUnitSetting(req.category, unit.unitIndex, 'purpose', e.target.value)}
+                                            disabled={!canManageBroadcasts}
                                             size="small"
                                           />
                                         </Col>
@@ -992,6 +1075,7 @@ const ExternalBroadcastsPage: React.FC = () => {
                                               prefix={<AudioOutlined />}
                                               value={unit.audioConfig || ''}
                                               onChange={e => updateUnitSetting(req.category, unit.unitIndex, 'audioConfig', e.target.value)}
+                                              disabled={!canManageBroadcasts}
                                               size="small"
                                             />
                                           </Col>
@@ -1109,6 +1193,7 @@ const ExternalBroadcastsPage: React.FC = () => {
         onCancel={() => { setPresetModalOpen(false); presetForm.resetFields(); }}
         width={700}
         footer={null}
+        forceRender
       >
         <Form form={presetForm} layout="vertical" onFinish={handleSavePreset}>
           <Form.Item name="name" label="שם הפריסט" rules={[{ required: true, message: 'חובה' }]}>

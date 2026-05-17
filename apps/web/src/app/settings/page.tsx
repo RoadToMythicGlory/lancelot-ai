@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'
 import { useQuery, useMutation } from '@apollo/client'
-import { Tabs, Card, Form, Input, Select, Switch, Button, Tag, Space, Divider, InputNumber, message, Spin, Alert } from 'antd'
+import { Tabs, Card, Form, Input, Select, Switch, Button, Tag, Space, Divider, InputNumber, App as AntApp, Spin } from 'antd'
 import {
   BuildingOfficeIcon,
   UserIcon,
@@ -10,6 +10,8 @@ import {
   PuzzlePieceIcon,
   BellIcon,
   KeyIcon,
+  UserGroupIcon,
+  RectangleStackIcon,
 } from '@heroicons/react/24/outline'
 import { useAuth } from '@/contexts/AuthContext'
 import ProtectedRoute from '@/components/auth/ProtectedRoute'
@@ -22,9 +24,12 @@ import {
   UPDATE_SECURITY_SETTINGS,
   UPDATE_NOTIFICATION_PREFERENCES,
 } from '@/graphql/saasMutations'
+import DepartmentsAdminPanel from '@/components/admin/DepartmentsAdminPanel'
+import AssignmentFormConfigPanel from '@/components/admin/AssignmentFormConfigPanel'
 
 export default function SettingsPage() {
   const { user } = useAuth()
+  const { message } = AntApp.useApp()
   const [activeTab, setActiveTab] = useState('organization')
   const { data: orgData, loading: orgLoading } = useQuery(GET_MY_ORGANIZATION)
   const { data: notifPrefsData } = useQuery(GET_NOTIFICATION_PREFERENCES)
@@ -41,15 +46,25 @@ export default function SettingsPage() {
   const canWrite = isAdmin
 
   const handleSaveOrg = async (values: any) => {
+    if (!canWrite) {
+      message.error('אין לך הרשאה לשנות הגדרות');
+      return;
+    }
+
     try {
       await updateOrg({ variables: { input: values } })
-      message.success('הגדרות הארגון עודכנו בהצלחה')
+      message.success('פרטי החברה עודכנו בהצלחה')
     } catch (err: any) {
       message.error(err.message)
     }
   }
 
   const handleSaveSettings = async (values: any) => {
+    if (!canWrite) {
+      message.error('אין לך הרשאה לשנות הגדרות');
+      return;
+    }
+
     try {
       await updateSettings({ variables: { input: values } })
       message.success('ההגדרות עודכנו בהצלחה')
@@ -59,6 +74,11 @@ export default function SettingsPage() {
   }
 
   const handleSaveFeatures = async (values: any) => {
+    if (!canWrite) {
+      message.error('אין לך הרשאה לשנות הגדרות');
+      return;
+    }
+
     try {
       await updateFeatures({ variables: { input: values } })
       message.success('תכונות עודכנו בהצלחה')
@@ -68,6 +88,11 @@ export default function SettingsPage() {
   }
 
   const handleSaveSecurity = async (values: any) => {
+    if (!canWrite) {
+      message.error('אין לך הרשאה לשנות הגדרות');
+      return;
+    }
+
     try {
       await updateSecurity({ variables: { input: values } })
       message.success('הגדרות אבטחה עודכנו בהצלחה')
@@ -90,11 +115,11 @@ export default function SettingsPage() {
       label: (
         <span className="flex items-center gap-2">
           <BuildingOfficeIcon className="h-4 w-4" />
-          ארגון
+          חברה
         </span>
       ),
       children: (
-        <Card title="פרטי ארגון" className="mb-4">
+        <Card title="פרטי החברה" className="mb-4">
           <Form
             layout="vertical"
             initialValues={{
@@ -108,10 +133,10 @@ export default function SettingsPage() {
             onFinish={handleSaveOrg}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Form.Item name="name" label="שם ארגון (אנגלית)">
+              <Form.Item name="name" label="שם חברה (אנגלית)">
                 <Input />
               </Form.Item>
-              <Form.Item name="hebrewName" label="שם ארגון (עברית)">
+              <Form.Item name="hebrewName" label="שם חברה (עברית)">
                 <Input />
               </Form.Item>
               <Form.Item name="contactEmail" label="אימייל ליצירת קשר">
@@ -269,6 +294,26 @@ export default function SettingsPage() {
         </Card>
       ),
     },
+    ...(canWrite ? [{
+      key: 'departments',
+      label: (
+        <span className="flex items-center gap-2">
+          <UserGroupIcon className="h-4 w-4" />
+          מחלקות
+        </span>
+      ),
+      children: <DepartmentsAdminPanel />,
+    },
+    {
+      key: 'forms',
+      label: (
+        <span className="flex items-center gap-2">
+          <RectangleStackIcon className="h-4 w-4" />
+          הגדרות טפסים
+        </span>
+      ),
+      children: <AssignmentFormConfigPanel />,
+    }] : []),
     {
       key: 'notifications',
       label: (
@@ -309,28 +354,18 @@ export default function SettingsPage() {
 
   return (
     <ProtectedRoute requires={Permission.SETTINGS_VIEW}>
-    <div className="max-w-6xl mx-auto">
+    <div className="w-full max-w-7xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">הגדרות</h1>
-        <p className="text-gray-500">ניהול הגדרות הארגון, האבטחה והתכונות</p>
+        <p className="text-gray-500">ניהול הגדרות החברה, האבטחה והתכונות במערכת המקומית</p>
       </div>
-
-      {!org && (
-        <Alert
-          message="לא נמצא ארגון"
-          description="ליצירת ארגון חדש, עבור לדף ההרשמה הארגוני."
-          type="info"
-          showIcon
-          className="mb-4"
-        />
-      )}
 
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
         items={tabItems}
         tabPosition="right"
-        className="settings-tabs"
+        className="settings-tabs min-w-0"
       />
     </div>
     </ProtectedRoute>

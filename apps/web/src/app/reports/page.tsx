@@ -14,6 +14,8 @@ import {
 } from '@heroicons/react/24/outline'
 import { useAuth } from '@/contexts/AuthContext'
 import { gql } from '@apollo/client'
+import ProtectedRoute from '@/components/auth/ProtectedRoute'
+import { Permission } from '@/rbac'
 
 const { RangePicker } = DatePicker
 
@@ -130,6 +132,7 @@ export default function ReportsPage() {
   }
 
   return (
+    <ProtectedRoute requires={Permission.AUDIT_VIEW}>
     <div className="max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -238,5 +241,6 @@ export default function ReportsPage() {
         />
       </Card>
     </div>
+    </ProtectedRoute>
   )
 }

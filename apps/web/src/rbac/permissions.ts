@@ -36,15 +36,15 @@ export enum Permission {
   VIZRT_OPERATE = 'VIZRT_OPERATE',
   VIZRT_ADMIN = 'VIZRT_ADMIN',
 
-  // SaaS / Organisation
-  BILLING_VIEW = 'BILLING_VIEW',
-  BILLING_MANAGE = 'BILLING_MANAGE',
-  ORG_VIEW = 'ORG_VIEW',
-  ORG_MANAGE = 'ORG_MANAGE',
+  // Site / Audit / Settings
   AUDIT_VIEW = 'AUDIT_VIEW',
   AUDIT_EXPORT = 'AUDIT_EXPORT',
   SETTINGS_VIEW = 'SETTINGS_VIEW',
   SETTINGS_MANAGE = 'SETTINGS_MANAGE',
+
+  // Internal IT support
+  IT_SUPPORT_VIEW = 'IT_SUPPORT_VIEW',
+  IT_SUPPORT_MANAGE = 'IT_SUPPORT_MANAGE',
 
   // Admin
   ROLE_TEMPLATES_MANAGE = 'ROLE_TEMPLATES_MANAGE',
@@ -77,6 +77,12 @@ export const LEGACY_PERMISSION_MAP: Record<string, Permission> = {
   'VIZRT_ADMIN': Permission.VIZRT_ADMIN,
   'broadcast_planner': Permission.BROADCAST_MANAGE,
   'broadcast_coordinator': Permission.BROADCAST_MANAGE,
+  // Legacy SaaS/org permissions kept as no-ops so old tokens don't crash decoding;
+  // they map to harmless settings-view as an inert fallback.
+  'BILLING_VIEW': Permission.SETTINGS_VIEW,
+  'BILLING_MANAGE': Permission.SETTINGS_MANAGE,
+  'ORG_VIEW': Permission.SETTINGS_VIEW,
+  'ORG_MANAGE': Permission.SETTINGS_MANAGE,
 };
 
 export type SystemRole = 'SYSTEM_ADMIN' | 'IT_ADMIN' | 'IT_USER' | 'DEPARTMENT_ADMIN' | 'DEPARTMENT_USER';

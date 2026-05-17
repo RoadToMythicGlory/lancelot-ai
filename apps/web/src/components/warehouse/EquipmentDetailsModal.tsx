@@ -16,6 +16,8 @@ interface EquipmentDetailsModalProps {
   // Optional hook for opening the edit form from the details modal. When
   // provided, an `עריכה` button is shown in the modal header.
   onEdit?: () => void;
+  canManage?: boolean;
+  canForceRelease?: boolean;
 }
 
 // Equipment categories mapping
@@ -37,7 +39,9 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
   visible, 
   equipment,
   onClose,
-  onEdit
+  onEdit,
+  canManage = false,
+  canForceRelease = false
 }) => {
   const [activeTab, setActiveTab] = useState('1');
   const componentRef = useRef<HTMLDivElement>(null);
@@ -516,8 +520,8 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
     {
       title: 'פעולות',
       key: 'actions',
-      render: (_, record: any) => {
-        if (record.action === 'transferred' && record.transferDetails?.canUndo) {
+      render: (_: unknown, record: any) => {
+        if (canManage && record.action === 'transferred' && record.transferDetails?.canUndo) {
           return (
             <Button
               size="small"
@@ -556,7 +560,7 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
       ),
       children: (
         <div>
-          {isOrphanState && (
+          {isOrphanState && canForceRelease && (
             <Alert
               type="warning"
               showIcon
@@ -735,7 +739,7 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
                 מיקום חי (BLE)
               </Space>
             }
-            extra={
+            extra={canManage ? (
               <Button
                 size="small"
                 icon={<LinkOutlined />}
@@ -743,7 +747,7 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
               >
                 {boundTag ? 'ערוך תגית' : 'קשר תגית'}
               </Button>
-            }
+            ) : undefined}
           >
             {boundTag ? (
               <Descriptions size="small" column={2} bordered>
@@ -783,6 +787,7 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
                 description="לא קושרה תגית BLE לציוד זה"
               >
+                {canManage && (
                 <Button
                   type="primary"
                   size="small"
@@ -791,6 +796,7 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
                 >
                   קשר תגית עכשיו
                 </Button>
+                )}
               </Empty>
             )}
           </Card>
@@ -901,12 +907,12 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
         <Button key="close" onClick={onClose}>
           סגור
         </Button>,
-        onEdit && equipment?.id && (
+        canManage && onEdit && equipment?.id && (
           <Button key="edit" onClick={onEdit}>
             עריכה
           </Button>
         ),
-        isOrphanState && (
+        isOrphanState && canForceRelease && (
           <Button
             key="force-release"
             danger
@@ -937,7 +943,7 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
       />
       <BarcodeLabel ref={componentRef} />
 
-      {equipment?.id && (
+      {canManage && equipment?.id && (
         <TrackerTagBindingModal
           visible={isTrackerBindingVisible}
           equipmentId={equipment.id}

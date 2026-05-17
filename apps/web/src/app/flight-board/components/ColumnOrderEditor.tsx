@@ -88,9 +88,12 @@ const SortableColumnChip: React.FC<{
       <span className="flight-board-column-chip-label">
         {label}
         {group ? (
-          <Text type="secondary" style={{ fontSize: 11, marginInlineStart: 6 }}>
+          <span
+            className="flight-board-column-chip-group"
+            style={{ fontSize: 11, marginInlineStart: 6, color: '#94a3b8' }}
+          >
             · {group}
-          </Text>
+          </span>
         ) : null}
       </span>
       <Button

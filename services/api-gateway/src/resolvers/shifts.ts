@@ -65,6 +65,40 @@ function checkAuthentication(context: any) {
   requireAuth(context);
 }
 
+/**
+ * Range/department read gate for the `shifts(...)` and `getShiftsByWeek(...)`
+ * queries. Authenticated callers may always read their OWN data — anything
+ * else requires SHIFTS_VIEW_ALL (globally) or scoped to the requested
+ * department, mirroring the rule used elsewhere in the shifts UI.
+ *
+ * - `args.userId === current user`: allowed via SHIFTS_VIEW_OWN.
+ * - `args.department`: requires SHIFTS_VIEW_ALL for that dept.
+ * - neither: requires SHIFTS_VIEW_ALL globally.
+ */
+export function checkShiftRangeRead(
+  context: any,
+  args: { userId?: string; department?: string },
+) {
+  const user = requireAuth(context);
+  const isOwn =
+    !!args.userId && (args.userId === user.userId || args.userId === user.email);
+  if (isOwn) {
+    if (!user.has(Permission.SHIFTS_VIEW_OWN)) {
+      throw new Error('Missing permission: SHIFTS_VIEW_OWN');
+    }
+    return;
+  }
+  if (args.department) {
+    if (!user.hasForDept(Permission.SHIFTS_VIEW_ALL, args.department)) {
+      throw new Error(`Missing permission: SHIFTS_VIEW_ALL for department ${args.department}`);
+    }
+    return;
+  }
+  if (!user.has(Permission.SHIFTS_VIEW_ALL)) {
+    throw new Error('Missing permission: SHIFTS_VIEW_ALL');
+  }
+}
+
 // Helper function to get the start of the week (Sunday)
 function getWeekStartDate(date: Date): Date {
   const d = new Date(date);
@@ -77,7 +111,7 @@ export const shiftsResolvers = {
   Query: {
     // All shifts (admin only)
     shifts: async (_: any, args: any, context: any) => {
-      checkAuthentication(context);
+      checkShiftRangeRead(context, { userId: args.userId, department: args.department });
 
       const db = await getDB();
       const query: any = {
@@ -564,8 +598,11 @@ export const shiftsResolvers = {
 
     // Admin queries
     getShiftsByWeek: async (_: any, args: any, context: any) => {
-      checkAuthentication(context);
-      
+      // The week-grid view is admin-grade: it returns shifts across departments
+      // for the requested week, so we require SHIFTS_VIEW_ALL globally. Employees
+      // viewing their own week should use myUpcomingShifts / shifts(userId=me).
+      requirePermission(context, Permission.SHIFTS_VIEW_ALL);
+
       const db = await getDB();
       const weekOffset = args.weekOffset || 0;
       const currentDate = new Date();

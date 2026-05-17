@@ -12,6 +12,7 @@ import { useQuery, useMutation } from '@apollo/client';
 import { GET_USERS } from '@/graphql/queries';
 import { GET_MY_CONVERSATIONS as GET_PRIVATE_CONVERSATIONS, CREATE_PRIVATE_CONVERSATION } from '@/graphql/chat-queries';
 import { GET_AI_AGENT_USER, GET_AI_AGENT_STATUS } from '@/graphql/ai-queries';
+import { Permission } from '@/rbac';
 import { toast } from 'react-hot-toast';
 import { computeFingerprint } from '@/utils/crypto/keys';
 import {
@@ -75,8 +76,13 @@ interface TypingUser {
 }
 
 const ChatManager: React.FC = () => {
-  const { user: currentUser, loading: authLoading } = useAuth();
+  const { user: currentUser, loading: authLoading, hasPermission } = useAuth();
   const isAuthenticated = !!currentUser && !authLoading;
+  // The contacts list relies on the `users` query, which requires USERS_VIEW.
+  // Roles without that permission (e.g. regular users) would otherwise hit the
+  // server only to receive "Missing permission: USERS_VIEW" — skip the call
+  // entirely so chat falls back to existing conversations + AI agent only.
+  const canListUsers = isAuthenticated && hasPermission(Permission.USERS_VIEW);
   const { socket, isConnected } = useWebSocket(); // Use socket from context
   const { registerConversationHandler } = useChat();
   
@@ -98,14 +104,20 @@ const ChatManager: React.FC = () => {
   // GraphQL queries
   const { data: usersData } = useQuery(GET_USERS, {
     variables: { isActive: true },
-    skip: !isAuthenticated || !currentUser?.id,
+    skip: !canListUsers || !currentUser?.id,
     fetchPolicy: 'cache-and-network',
     errorPolicy: 'all',
     onError: (error) => {
-      // Silently handle unauthorized errors for non-admin users
-      if (!error.message.includes('Unauthorized')) {
-        console.error('Error fetching users:', error);
+      // Silently handle permission errors — many roles (e.g. MCR Operator)
+      // don't have USERS_VIEW; the chat list is just empty for them.
+      if (
+        error.message.includes('Unauthorized') ||
+        error.message.includes('Missing permission') ||
+        error.message.includes('Not authenticated')
+      ) {
+        return;
       }
+      console.error('Error fetching users:', error);
     }
   });
 

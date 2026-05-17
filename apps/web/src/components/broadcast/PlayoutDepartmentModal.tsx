@@ -72,13 +72,16 @@ interface PlayoutDepartmentModalProps {
   event: BroadcastEvent;
   onClose: () => void;
   onDataSaved?: () => void;
+  /** When false, hides save / not-applicable buttons and disables interactive controls. */
+  canEdit?: boolean;
 }
 
 const PlayoutDepartmentModal: React.FC<PlayoutDepartmentModalProps> = ({ 
   visible, 
   event, 
   onClose, 
-  onDataSaved 
+  onDataSaved,
+  canEdit = true,
 }) => {
   const { message } = App.useApp();
   const [loading, setLoading] = useState(false);
@@ -420,7 +423,7 @@ const PlayoutDepartmentModal: React.FC<PlayoutDepartmentModalProps> = ({
       open={visible}
       onCancel={onClose}
       width={1200}
-      footer={[
+      footer={canEdit ? [
         <Button key="cancel" onClick={onClose}>
           ביטול
         </Button>,
@@ -440,6 +443,10 @@ const PlayoutDepartmentModal: React.FC<PlayoutDepartmentModalProps> = ({
           icon={<CheckCircleOutlined />}
         >
           שמור שידורי לוויין ({selectedEventIds.length})
+        </Button>
+      ] : [
+        <Button key="close" onClick={onClose}>
+          סגור
         </Button>
       ]}
     >

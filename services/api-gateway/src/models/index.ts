@@ -5,18 +5,8 @@ export * from './vizrt.models';
 export * from './equipment.models';
 export * from './vendor.models';
 
-// Streamer + Podcast models
-export * from './streamEvent.models';
-export * from './podcastEpisode.models';
-export * from './podcastShow.models';
-export * from './guestContact.models';
-export * from './clip.models';
-export * from './revenueEntry.models';
-export * from './streamerActivity.models';
-
-// SaaS Platform models
+// On-prem platform models
 export * from './organization.models';
-export * from './billing.models';
 export * from './audit.models';
 export * from './notification.models';
 export * from './workflow.models';
@@ -28,3 +18,5 @@ export * from './externalBroadcastPreset.models';
 export * from './equipmentSet.models';
 export * from './warehousePdfImport.models';
 export * from './internalEquipmentAssignment.models';
+export * from './department.models';
+export * from './assignmentForm.models';

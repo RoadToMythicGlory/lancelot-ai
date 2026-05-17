@@ -34,6 +34,13 @@ interface UserRoleAssignerProps {
   roleTemplateId?: string | null;
   /** Custom permissions (controlled) */
   customPermissions?: string[];
+  /**
+   * Permissions that are already implicitly granted to the user via the
+   * department(s) and role(s) they were assigned to (outside of this
+   * component). They are surfaced as locked, pre-checked entries inside the
+   * "custom permissions" tab so the admin can see the full effective picture.
+   */
+  presetPermissions?: string[];
   /** Callbacks */
   onRoleTemplateChange?: (templateId: string | null) => void;
   onCustomPermissionsChange?: (perms: string[]) => void;
@@ -51,6 +58,7 @@ export default function UserRoleAssigner({
   actorSystemRole,
   roleTemplateId,
   customPermissions = [],
+  presetPermissions = [],
   onRoleTemplateChange,
   onCustomPermissionsChange,
 }: UserRoleAssignerProps) {
@@ -61,6 +69,19 @@ export default function UserRoleAssigner({
 
   const templates: RoleTemplate[] = data?.assignableRoleTemplates ?? [];
   const selectedTemplate = templates.find((t) => t.id === roleTemplateId);
+
+  // The "preset" permissions surfaced inside the custom-permissions picker
+  // are the union of:
+  //   1. Permissions implied by the user's selected department(s) + role(s)
+  //      (passed in via the `presetPermissions` prop)
+  //   2. Permissions provided by the currently selected role template (if any)
+  const effectivePresetPermissions = React.useMemo(() => {
+    const set = new Set<string>(presetPermissions);
+    if (selectedTemplate) {
+      for (const p of selectedTemplate.permissions || []) set.add(p);
+    }
+    return Array.from(set);
+  }, [presetPermissions, selectedTemplate]);
 
   const handleTemplateChange = (value: string | undefined) => {
     onRoleTemplateChange?.(value ?? null);
@@ -134,10 +155,27 @@ export default function UserRoleAssigner({
             type="warning"
             showIcon
             message="הרשאות מותאמות אישית"
-            description="הרשאות אלו יתווספו מעל הרשאות התבנית (אם נבחרה). זמין רק למנהלי מערכת."
+            description={
+              <div>
+                <div>
+                  הרשאות אלו יתווספו מעל ההרשאות שמסופקות אוטומטית מהמחלקה,
+                  התפקיד במחלקה והתבנית (אם נבחרה). זמין רק למנהלי מערכת.
+                </div>
+                {effectivePresetPermissions.length > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    הרשאות שכבר מסופקות מהבחירות שלמעלה מסומנות בתגית{' '}
+                    <Tag color="purple" style={{ marginInlineStart: 0 }}>
+                      תבנית
+                    </Tag>{' '}
+                    ולא ניתן להסירן מכאן.
+                  </div>
+                )}
+              </div>
+            }
           />
           <PermissionPicker
             value={customPermissions}
+            presetValue={effectivePresetPermissions}
             onChange={onCustomPermissionsChange}
           />
         </div>

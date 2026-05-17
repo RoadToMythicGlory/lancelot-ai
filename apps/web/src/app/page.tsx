@@ -359,14 +359,30 @@ export default function Home() {
 
   const getRoleName = (role?: string) => {
     const roles: Record<string, string> = {
-      'IT_ADMIN': '👑 מנהל IT',
-      'SYSTEM_ADMIN': '⭐ מנהל מערכת',
+      'IT_ADMIN': 'מנהל IT',
+      'SYSTEM_ADMIN': 'מנהל מערכת',
       'admin': 'מנהל',
       'department_head': 'ראש מחלקה',
       'employee': 'עובד'
     };
     return roles[role || ''] || 'עובד';
   };
+
+  const userFirstName = user.displayName?.split(' ')[0] || user.email;
+  const formattedDate = currentTime.toLocaleDateString('he-IL', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
+  const formattedTime = currentTime.toLocaleTimeString('he-IL', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const headerMetaItems = [
+    getDepartmentName(user.department),
+    getRoleName(user.systemRole),
+    formattedDate,
+  ];
 
   const handleRefresh = async () => {
     try {
@@ -454,8 +470,8 @@ export default function Home() {
               <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-white text-lg font-bold shadow-lg shadow-blue-500/20">
                 {(user.displayName || user.email || '?')[0].toUpperCase()}
               </div>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900 leading-tight">
+              <div className="text-right" dir="rtl">
+                <h1 className="text-2xl font-bold text-gray-900 leading-tight" dir="rtl">
                   {(() => {
                     const hour = currentTime.getHours();
                     if (hour < 6) return 'לילה טוב';
@@ -463,22 +479,18 @@ export default function Home() {
                     if (hour < 17) return 'צהריים טובים';
                     if (hour < 21) return 'ערב טוב';
                     return 'לילה טוב';
-                  })()}, {user.displayName?.split(' ')[0] || user.email}
+                  })()}, <bdi dir="auto">{userFirstName}</bdi>
                 </h1>
-                <div className="flex items-center gap-2 mt-0.5 text-sm text-gray-500">
-                  <span>{getDepartmentName(user.department)}</span>
-                  <span className="w-1 h-1 rounded-full bg-gray-300" />
-                  <span>{getRoleName(user.systemRole)}</span>
-                  <span className="w-1 h-1 rounded-full bg-gray-300" />
-                  <span>
-                    {currentTime.toLocaleDateString('he-IL', { 
-                      weekday: 'long', 
-                      day: 'numeric',
-                      month: 'long',
-                    })}
-                  </span>
-                  <span className="font-medium text-gray-700">
-                    {currentTime.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5 text-sm text-gray-500" dir="rtl">
+                  {headerMetaItems.map((item, index) => (
+                    <React.Fragment key={`${item}-${index}`}>
+                      {index > 0 && <span className="w-1 h-1 rounded-full bg-gray-300" aria-hidden="true" />}
+                      <bdi dir="auto">{item}</bdi>
+                    </React.Fragment>
+                  ))}
+                  <span className="w-1 h-1 rounded-full bg-gray-300" aria-hidden="true" />
+                  <span className="font-medium text-gray-700" dir="ltr">
+                    {formattedTime}
                   </span>
                 </div>
               </div>

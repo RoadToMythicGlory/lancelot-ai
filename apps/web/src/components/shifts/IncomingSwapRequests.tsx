@@ -5,9 +5,7 @@ import { Card, Table, Button, Modal, Form, Input, Tag, message, Empty, Spin } fr
 import { CheckOutlined, CloseOutlined, CalendarOutlined } from '@ant-design/icons';
 import { gql, useQuery, useMutation } from '@apollo/client';
 import dayjs from 'dayjs';
-import 'dayjs/locale/he';
-
-dayjs.locale('he');
+import { useShiftsLiveRefresh } from './hooks/useShiftsLiveRefresh';
 
 const { TextArea } = Input;
 
@@ -61,8 +59,10 @@ export default function IncomingSwapRequests() {
   const [form] = Form.useForm();
 
   const { data, loading, refetch } = useQuery(INCOMING_SWAP_REQUESTS, {
-    fetchPolicy: 'cache-and-network'
+    fetchPolicy: 'cache-and-network',
   });
+
+  useShiftsLiveRefresh(refetch);
 
   const [respondToRequest] = useMutation(RESPOND_TO_SWAP_REQUEST, {
     onCompleted: () => {

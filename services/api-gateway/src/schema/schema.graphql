@@ -76,10 +76,156 @@ type Department {
   createdAt: DateTime!
   # New fields
   category: String!
+  # Legacy: list of role names. Prefer `departmentRoles` for full role definitions.
   roles: [String!]!
   description: String
   isActive: Boolean!
   updatedAt: DateTime!
+  # New richer role definitions with permission grants.
+  departmentRoles: [DepartmentRoleDef!]!
+  # Other department codes treated as part of this department for staffing/listing.
+  includesDepartmentCodes: [String!]!
+  # Free-form additional permission strings granted by the department itself.
+  permissions: [String!]!
+}
+
+# Definition of a role inside a department.
+type DepartmentRoleDef {
+  key: String!
+  name: String!
+  hebrewName: String
+  description: String
+  permissions: [String!]!
+  order: Int
+  isActive: Boolean!
+}
+
+input DepartmentRoleDefInput {
+  key: String!
+  name: String!
+  hebrewName: String
+  description: String
+  permissions: [String!]
+  order: Int
+  isActive: Boolean
+}
+
+input CreateDepartmentInput {
+  code: String!
+  name: String!
+  hebrewName: String
+  category: String
+  description: String
+  roles: [DepartmentRoleDefInput!]
+  includesDepartmentCodes: [String!]
+  permissions: [String!]
+  isActive: Boolean
+}
+
+input UpdateDepartmentInput {
+  name: String
+  hebrewName: String
+  category: String
+  description: String
+  roles: [DepartmentRoleDefInput!]
+  includesDepartmentCodes: [String!]
+  permissions: [String!]
+  isActive: Boolean
+}
+
+# Form configuration: which departments and roles are allowed in a given assignment form.
+type AssignmentFormDepartmentDef {
+  departmentCode: String!
+  allowedRoleKeys: [String!]!
+  requireUser: Boolean!
+  defaultCount: Int!
+  order: Int!
+}
+
+type AssignmentFormConfig {
+  id: ID!
+  formKey: String!
+  name: String!
+  hebrewName: String
+  description: String
+  departments: [AssignmentFormDepartmentDef!]!
+  allowUserPresets: Boolean!
+  isActive: Boolean!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+input AssignmentFormDepartmentDefInput {
+  departmentCode: String!
+  allowedRoleKeys: [String!]
+  requireUser: Boolean
+  defaultCount: Int
+  order: Int
+}
+
+input UpsertAssignmentFormConfigInput {
+  formKey: String!
+  name: String!
+  hebrewName: String
+  description: String
+  departments: [AssignmentFormDepartmentDefInput!]!
+  allowUserPresets: Boolean
+  isActive: Boolean
+}
+
+# Generic assignment preset (department + role + count + optional user) for any form.
+type AssignmentPresetJob {
+  departmentCode: String!
+  roleKey: String
+  roleLabel: String
+  count: Int!
+  userId: String
+  userName: String
+}
+
+type AssignmentPreset {
+  id: ID!
+  formKey: String!
+  name: String!
+  description: String
+  tags: [String!]!
+  jobs: [AssignmentPresetJob!]!
+  isDefault: Boolean!
+  isShared: Boolean!
+  createdBy: String
+  createdByName: String
+  isActive: Boolean!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+input AssignmentPresetJobInput {
+  departmentCode: String!
+  roleKey: String
+  roleLabel: String
+  count: Int!
+  userId: String
+  userName: String
+}
+
+input CreateAssignmentPresetInput {
+  formKey: String!
+  name: String!
+  description: String
+  tags: [String!]
+  jobs: [AssignmentPresetJobInput!]!
+  isDefault: Boolean
+  isShared: Boolean
+}
+
+input UpdateAssignmentPresetInput {
+  name: String
+  description: String
+  tags: [String!]
+  jobs: [AssignmentPresetJobInput!]
+  isDefault: Boolean
+  isShared: Boolean
+  isActive: Boolean
 }
 
 # Input types for user management
@@ -937,6 +1083,16 @@ type Query {
   
   # Departments
   departments: [Department!]!
+  department(code: String!): Department
+  departmentById(id: ID!): Department
+
+  # Assignment form configuration
+  assignmentFormConfigs: [AssignmentFormConfig!]!
+  assignmentFormConfig(formKey: String!): AssignmentFormConfig
+
+  # Assignment presets (shared, per-form)
+  assignmentPresets(formKey: String!): [AssignmentPreset!]!
+  assignmentPreset(id: ID!): AssignmentPreset
   
   # Warehouse Equipment
   warehouseEquipment(filter: WarehouseEquipmentFilter, limit: Int, offset: Int): [WarehouseEquipment!]!
@@ -1170,6 +1326,20 @@ type Mutation {
   createExternalBroadcastPreset(input: CreateExternalBroadcastPresetInput!): ExternalBroadcastPreset!
   updateExternalBroadcastPreset(id: ID!, input: UpdateExternalBroadcastPresetInput!): ExternalBroadcastPreset!
   deleteExternalBroadcastPreset(id: ID!): Boolean!
+
+  # Department management
+  createDepartment(input: CreateDepartmentInput!): Department!
+  updateDepartment(code: String!, input: UpdateDepartmentInput!): Department!
+  deleteDepartment(code: String!): Boolean!
+
+  # Assignment form configuration
+  upsertAssignmentFormConfig(input: UpsertAssignmentFormConfigInput!): AssignmentFormConfig!
+  deleteAssignmentFormConfig(formKey: String!): Boolean!
+
+  # Assignment presets
+  createAssignmentPreset(input: CreateAssignmentPresetInput!): AssignmentPreset!
+  updateAssignmentPreset(id: ID!, input: UpdateAssignmentPresetInput!): AssignmentPreset!
+  deleteAssignmentPreset(id: ID!): Boolean!
 }
 
 # Authentication types
@@ -2743,10 +2913,13 @@ type AIReindexResult {
 }
 
 # ========================================================================================
-# SAAS PLATFORM EXTENSIONS
+# ON-PREM PLATFORM EXTENSIONS
 # ========================================================================================
+# Single-tenant on-prem deployment: organization-scoped types are reused as
+# the local "company / site" record. Billing, subscription, invite, and
+# multi-tenant signup types have been removed.
 
-# ==================== ORGANIZATION / MULTI-TENANCY ====================
+# ==================== COMPANY / SITE SETTINGS ====================
 
 type Organization {
   id: ID!
@@ -2756,19 +2929,12 @@ type Organization {
   logo: String
   favicon: String
   domain: String
-  plan: SubscriptionPlan!
-  planExpiresAt: DateTime
-  maxUsers: Int!
-  maxBroadcastEvents: Int!
-  maxStorageGB: Int!
   settings: OrganizationSettings!
   contactEmail: String
   contactPhone: String
   address: String
   country: String
   isActive: Boolean!
-  isTrial: Boolean!
-  trialEndsAt: DateTime
   createdAt: DateTime!
   updatedAt: DateTime!
 }
@@ -2801,41 +2967,6 @@ type SecuritySettings {
   passwordMinLength: Int!
   sessionTimeoutMinutes: Int!
   ipWhitelist: [String!]!
-}
-
-type OrganizationInvite {
-  id: ID!
-  organizationId: ID!
-  email: String!
-  role: String!
-  departments: [JSON!]
-  invitedBy: String!
-  status: InviteStatus!
-  expiresAt: DateTime!
-  createdAt: DateTime!
-}
-
-enum InviteStatus {
-  PENDING
-  ACCEPTED
-  EXPIRED
-  CANCELLED
-}
-
-enum SubscriptionPlan {
-  FREE
-  PRO
-  ENTERPRISE
-}
-
-input CreateOrganizationInput {
-  name: String!
-  slug: String!
-  hebrewName: String
-  contactEmail: String
-  contactPhone: String
-  country: String
-  plan: SubscriptionPlan
 }
 
 input UpdateOrganizationInput {
@@ -2876,109 +3007,6 @@ input UpdateSecuritySettingsInput {
   passwordMinLength: Int
   sessionTimeoutMinutes: Int
   ipWhitelist: [String!]
-}
-
-input InviteUserInput {
-  email: String!
-  role: String!
-  departments: [UserDepartmentInput!]
-}
-
-# ==================== BILLING & SUBSCRIPTIONS ====================
-
-type SubscriptionInfo {
-  id: ID!
-  organizationId: ID!
-  plan: SubscriptionPlan!
-  status: SubscriptionStatus!
-  billingCycle: BillingCycle!
-  currentPeriodStart: DateTime!
-  currentPeriodEnd: DateTime!
-  trialStart: DateTime
-  trialEnd: DateTime
-  limits: SubscriptionLimits!
-  currentUsage: SubscriptionUsage!
-  cancelledAt: DateTime
-  createdAt: DateTime!
-}
-
-type SubscriptionLimits {
-  maxUsers: Int!
-  maxBroadcastEvents: Int!
-  maxStorageGB: Int!
-  maxDepartments: Int!
-  maxApiCalls: Int!
-}
-
-type SubscriptionUsage {
-  users: Int!
-  broadcastEvents: Int!
-  storageUsedGB: Float!
-  departments: Int!
-  apiCalls: Int!
-}
-
-type InvoiceRecord {
-  id: ID!
-  invoiceNumber: String!
-  status: InvoiceStatus!
-  currency: String!
-  subtotal: Float!
-  tax: Float!
-  total: Float!
-  amountPaid: Float!
-  amountDue: Float!
-  lineItems: [InvoiceLineItem!]!
-  periodStart: DateTime!
-  periodEnd: DateTime!
-  dueDate: DateTime
-  paidAt: DateTime
-  invoicePdfUrl: String
-  createdAt: DateTime!
-}
-
-type InvoiceLineItem {
-  description: String!
-  quantity: Int!
-  unitAmount: Float!
-  amount: Float!
-}
-
-type PaymentMethodInfo {
-  id: ID!
-  type: String!
-  brand: String
-  last4: String
-  expiryMonth: Int
-  expiryYear: Int
-  isDefault: Boolean!
-  createdAt: DateTime!
-}
-
-enum SubscriptionStatus {
-  ACTIVE
-  PAST_DUE
-  CANCELLED
-  TRIALING
-  PAUSED
-}
-
-enum BillingCycle {
-  MONTHLY
-  YEARLY
-}
-
-enum InvoiceStatus {
-  DRAFT
-  OPEN
-  PAID
-  VOID
-  UNCOLLECTIBLE
-}
-
-input ChangePlanInput {
-  plan: SubscriptionPlan!
-  billingCycle: BillingCycle
 }
 
 # ==================== AUDIT LOGGING ====================
@@ -3465,14 +3493,14 @@ type HelpArticleItem {
   updatedAt: DateTime!
 }
 
-type SupportTicketItem {
+type ItTicketItem {
   id: ID!
   ticketNumber: String!
   subject: String!
   description: String!
   category: String!
   priority: Priority!
-  status: SaasTicketStatus!
+  status: ItTicketStatus!
   createdByName: String!
   createdByEmail: String!
   assignedToName: String
@@ -3519,23 +3547,23 @@ type ChangelogChange {
   descriptionHe: String
 }
 
-enum SaasTicketStatus {
+enum ItTicketStatus {
   OPEN
   IN_PROGRESS
-  WAITING_ON_CUSTOMER
-  WAITING_ON_SUPPORT
+  WAITING_ON_USER
+  WAITING_ON_IT
   RESOLVED
   CLOSED
 }
 
-input CreateSupportTicketInput {
+input CreateItTicketInput {
   subject: String!
   description: String!
   category: String
   priority: Priority
 }
 
-input AddTicketMessageInput {
+input AddItTicketMessageInput {
   ticketId: ID!
   message: String!
 }
@@ -3668,90 +3696,75 @@ enum StreamHealthStatus {
   UNKNOWN
 }
 
-# ==================== SAAS QUERIES ====================
+# ==================== ON-PREM QUERIES ====================
 
 extend type Query {
-  # Organization
+  # Site / Company settings (single-tenant: returns the singleton site record)
   myOrganization: Organization
-  organization(id: ID!): Organization
-  organizationBySlug(slug: String!): Organization
-  organizationInvites: [OrganizationInvite!]!
-  
-  # Billing
-  mySubscription: SubscriptionInfo
-  invoices(limit: Int, offset: Int): [InvoiceRecord!]!
-  paymentMethods: [PaymentMethodInfo!]!
-  
+
   # Audit
   auditLogs(filter: AuditLogFilter, limit: Int, offset: Int): AuditLogConnection!
-  
+
   # Notifications
   notifications(limit: Int, offset: Int, unreadOnly: Boolean): NotificationConnection!
   notificationPreferences: NotificationPreferences
-  
+
   # Workflows
   workflowTemplates(resourceType: String): [WorkflowTemplateItem!]!
   workflowTemplate(id: ID!): WorkflowTemplateItem
   workflowInstances(status: WorkflowStatus, resourceType: String, limit: Int, offset: Int): [WorkflowInstanceItem!]!
   workflowInstance(id: ID!): WorkflowInstanceItem
   myPendingApprovals: [WorkflowInstanceItem!]!
-  
+
   # Media Assets
   mediaAssets(filter: MediaAssetFilter, limit: Int, offset: Int): MediaAssetConnection!
   mediaAsset(id: ID!): MediaAssetItem
   mediaFolders(parentFolderId: ID): [MediaFolderItem!]!
-  
+
   # Rights & Licensing
   broadcastRights(filter: BroadcastRightFilter, limit: Int, offset: Int): [BroadcastRightItem!]!
   broadcastRight(id: ID!): BroadcastRightItem
   expiringRights(days: Int!): [BroadcastRightItem!]!
-  
-  # Help & Support
+
+  # Help articles & changelog (local content)
   helpArticles(category: String, searchTerm: String): [HelpArticleItem!]!
   helpArticle(slug: String!): HelpArticleItem
-  saasTickets(status: SaasTicketStatus, limit: Int, offset: Int): [SupportTicketItem!]!
-  saasTicket(id: ID!): SupportTicketItem
-  mySaasTickets: [SupportTicketItem!]!
   changelog(limit: Int): [ChangelogItem!]!
-  
+
+  # Internal IT support tickets
+  itTickets(status: ItTicketStatus, limit: Int, offset: Int): [ItTicketItem!]!
+  itTicket(id: ID!): ItTicketItem
+  myItTickets: [ItTicketItem!]!
+
   # API Keys & Webhooks
   apiKeys: [ApiKeyItem!]!
   webhooks: [WebhookItem!]!
   webhookDeliveries(webhookId: ID!, limit: Int): [WebhookDeliveryItem!]!
-  
+
   # Live Monitoring
   liveStreams: [LiveStreamStatus!]!
   signalMonitor: [SignalMonitorEntry!]!
-  
+
   # Global Search
   globalSearch(query: String!, types: [String!], limit: Int): JSON!
 }
 
-# ==================== SAAS MUTATIONS ====================
+# ==================== ON-PREM MUTATIONS ====================
 
 extend type Mutation {
-  # Organization
-  createOrganization(input: CreateOrganizationInput!): Organization!
+  # Site / Company settings
   updateOrganization(input: UpdateOrganizationInput!): Organization!
   updateOrganizationSettings(input: UpdateOrganizationSettingsInput!): Organization!
   updateFeatureFlags(input: UpdateFeatureFlagsInput!): Organization!
   updateSecuritySettings(input: UpdateSecuritySettingsInput!): Organization!
-  inviteUserToOrganization(input: InviteUserInput!): OrganizationInvite!
-  acceptOrganizationInvite(token: String!): Boolean!
-  cancelOrganizationInvite(inviteId: ID!): Boolean!
-  
-  # Billing
-  changePlan(input: ChangePlanInput!): SubscriptionInfo!
-  cancelSubscription(reason: String): SubscriptionInfo!
-  resumeSubscription: SubscriptionInfo!
-  
+
   # Notifications
   markNotificationRead(id: ID!): NotificationItem!
   markAllNotificationsRead: Boolean!
   dismissNotification(id: ID!): Boolean!
   updateNotificationPreferences(input: UpdateNotificationPreferencesInput!): NotificationPreferences!
-  sendSaasNotification(recipientId: String!, type: NotificationType!, title: String!, message: String!, actionUrl: String): NotificationItem!
-  
+  sendInternalNotification(recipientId: String!, type: NotificationType!, title: String!, message: String!, actionUrl: String): NotificationItem!
+
   # Workflows
   createWorkflowTemplate(input: CreateWorkflowTemplateInput!): WorkflowTemplateItem!
   updateWorkflowTemplate(id: ID!, input: CreateWorkflowTemplateInput!): WorkflowTemplateItem!
@@ -3760,7 +3773,7 @@ extend type Mutation {
   startWorkflow(input: StartWorkflowInput!): WorkflowInstanceItem!
   processWorkflowAction(input: WorkflowActionInput!): WorkflowInstanceItem!
   cancelWorkflow(id: ID!, reason: String): WorkflowInstanceItem!
-  
+
   # Media Assets
   createMediaAsset(input: CreateMediaAssetInput!): MediaAssetItem!
   updateMediaAsset(id: ID!, input: UpdateMediaAssetInput!): MediaAssetItem!
@@ -3768,18 +3781,20 @@ extend type Mutation {
   archiveMediaAsset(id: ID!): MediaAssetItem!
   createMediaFolder(name: String!, nameHe: String, parentFolderId: ID): MediaFolderItem!
   deleteMediaFolder(id: ID!): Boolean!
-  
+
   # Rights & Licensing
   createBroadcastRight(input: CreateBroadcastRightInput!): BroadcastRightItem!
   updateBroadcastRight(id: ID!, input: UpdateBroadcastRightInput!): BroadcastRightItem!
   deleteBroadcastRight(id: ID!): Boolean!
-  
-  # Help & Support
-  createSaasTicket(input: CreateSupportTicketInput!): SupportTicketItem!
-  addTicketMessage(input: AddTicketMessageInput!): SupportTicketItem!
-  closeSupportTicket(id: ID!, satisfactionRating: Int, satisfactionComment: String): SupportTicketItem!
+
+  # Internal IT support tickets
+  createItTicket(input: CreateItTicketInput!): ItTicketItem!
+  addItTicketMessage(input: AddItTicketMessageInput!): ItTicketItem!
+  assignItTicket(id: ID!, assigneeId: ID): ItTicketItem!
+  updateItTicketStatus(id: ID!, status: ItTicketStatus!): ItTicketItem!
+  closeItTicket(id: ID!, satisfactionRating: Int, satisfactionComment: String): ItTicketItem!
   rateHelpArticle(articleId: ID!, helpful: Boolean!): HelpArticleItem!
-  
+
   # API Keys & Webhooks
   createApiKey(input: CreateApiKeyInput!): ApiKeyCreatedResponse!
   revokeApiKey(id: ID!): Boolean!
@@ -3789,7 +3804,7 @@ extend type Mutation {
   testWebhook(id: ID!): Boolean!
 }
 
-# ==================== SAAS SUBSCRIPTIONS ====================
+# ==================== ON-PREM SUBSCRIPTIONS ====================
 
 extend type Subscription {
   # Notification real-time
@@ -3801,492 +3816,6 @@ extend type Subscription {
   # Live monitoring
   liveStreamStatusChanged: LiveStreamStatus!
   signalMonitorUpdated: SignalMonitorEntry!
-}
-
-# ========================================================================================
-# STREAMER + PODCAST PLATFORM
-# ========================================================================================
-
-type StreamEventItem {
-  id: ID!
-  userId: String!
-  title: String!
-  description: String
-  platforms: [String!]!
-  scheduledDate: String!
-  startTime: String
-  endTime: String
-  category: String
-  tags: [String!]!
-  status: String!
-  streamType: String!
-  goLiveReminder: Int!
-  equipmentChecklist: [String!]!
-  collaborators: [StreamCollaborator!]
-  notes: String
-  thumbnailUrl: String
-  vodUrl: String
-  isRecurring: Boolean!
-  metrics: StreamMetrics
-  createdAt: DateTime!
-  updatedAt: DateTime!
-}
-
-type StreamCollaborator {
-  name: String!
-  platform: String
-  role: String
-}
-
-type StreamMetrics {
-  peakViewers: Int
-  avgViewers: Int
-  chatMessages: Int
-  newFollowers: Int
-  revenue: Float
-}
-
-type PodcastEpisodeItem {
-  id: ID!
-  userId: String!
-  title: String!
-  description: String
-  showName: String
-  showId: String
-  episodeNumber: Int
-  seasonNumber: Int
-  scheduledRecordDate: String
-  scheduledPublishDate: String
-  recordStartTime: String
-  recordEndTime: String
-  status: String!
-  format: String!
-  guests: [EpisodeGuest!]
-  topics: [String!]!
-  showNotes: String
-  script: String
-  recordingFileUrl: String
-  editedFileUrl: String
-  coverArtUrl: String
-  durationMinutes: Int
-  platformsPublished: [EpisodePlatform!]
-  tags: [String!]!
-  metrics: EpisodeMetrics
-  monetization: EpisodeMonetization
-  relatedStreamId: String
-  notes: String
-  createdAt: DateTime!
-  updatedAt: DateTime!
-}
-
-type EpisodeGuest {
-  name: String!
-  title: String
-  email: String
-  socialHandle: String
-  confirmed: Boolean!
-}
-
-type EpisodePlatform {
-  platform: String!
-  url: String
-  publishedAt: DateTime
-}
-
-type EpisodeMetrics {
-  downloads: Int
-  listens: Int
-  avgListenDuration: Float
-  completionRate: Float
-  reviews: Int
-  rating: Float
-}
-
-type EpisodeMonetization {
-  hasSponsor: Boolean!
-  sponsorName: String
-  sponsorReadType: String
-  sponsorAmount: Float
-  adRevenue: Float
-}
-
-type PodcastShowItem {
-  id: ID!
-  userId: String!
-  name: String!
-  description: String
-  coverArtUrl: String
-  category: String!
-  language: String!
-  authorName: String
-  websiteUrl: String
-  rssFeedUrl: String
-  platforms: [ShowPlatform!]
-  isActive: Boolean!
-  totalEpisodes: Int!
-  frequency: String!
-  averageDurationMinutes: Int
-  createdAt: DateTime!
-  updatedAt: DateTime!
-}
-
-type ShowPlatform {
-  platform: String!
-  profileUrl: String
-  subscriberCount: Int
-}
-
-type GuestContactItem {
-  id: ID!
-  userId: String!
-  name: String!
-  email: String
-  phone: String
-  title: String
-  company: String
-  bio: String
-  socialLinks: GuestSocialLinks
-  avatarUrl: String
-  topicsExpertise: [String!]!
-  previousAppearances: [GuestAppearance!]
-  status: String!
-  rating: Int
-  notes: String
-  createdAt: DateTime!
-  updatedAt: DateTime!
-}
-
-type GuestSocialLinks {
-  twitter: String
-  linkedin: String
-  instagram: String
-  website: String
-}
-
-type GuestAppearance {
-  episodeId: String
-  date: String
-  topic: String
-}
-
-type ClipItem {
-  id: ID!
-  userId: String!
-  title: String!
-  sourceType: String!
-  sourceStreamId: String
-  sourceEpisodeId: String
-  platform: String
-  clipUrl: String
-  thumbnailUrl: String
-  startTimestamp: Int
-  endTimestamp: Int
-  duration: Int
-  tags: [String!]!
-  status: String!
-  clipType: String!
-  publishedTo: [ClipPublish!]
-  viewCount: Int!
-  likeCount: Int!
-  createdAt: DateTime!
-  updatedAt: DateTime!
-}
-
-type ClipPublish {
-  platform: String!
-  url: String
-  publishedAt: DateTime
-}
-
-type RevenueEntryItem {
-  id: ID!
-  userId: String!
-  date: String!
-  source: String!
-  amount: Float!
-  currency: String!
-  platform: String
-  notes: String
-  relatedStreamId: String
-  relatedEpisodeId: String
-  createdAt: DateTime!
-}
-
-type StreamerActivityItem {
-  id: ID!
-  userId: String!
-  action: String!
-  entityType: String!
-  entityId: String
-  description: String!
-  metadata: JSON
-  createdAt: DateTime!
-}
-
-# ---- Inputs ----
-
-input CreateStreamEventInput {
-  title: String!
-  description: String
-  platforms: [String!]
-  scheduledDate: String!
-  startTime: String
-  endTime: String
-  category: String
-  tags: [String!]
-  status: String
-  streamType: String
-  goLiveReminder: Int
-  equipmentChecklist: [String!]
-  collaborators: [StreamCollaboratorInput!]
-  notes: String
-  thumbnailUrl: String
-  isRecurring: Boolean
-  recurringPattern: String
-}
-
-input UpdateStreamEventInput {
-  title: String
-  description: String
-  platforms: [String!]
-  scheduledDate: String
-  startTime: String
-  endTime: String
-  category: String
-  tags: [String!]
-  status: String
-  streamType: String
-  goLiveReminder: Int
-  equipmentChecklist: [String!]
-  collaborators: [StreamCollaboratorInput!]
-  notes: String
-  thumbnailUrl: String
-  vodUrl: String
-  metrics: StreamMetricsInput
-}
-
-input StreamCollaboratorInput {
-  name: String!
-  platform: String
-  role: String
-}
-
-input StreamMetricsInput {
-  peakViewers: Int
-  avgViewers: Int
-  chatMessages: Int
-  newFollowers: Int
-  revenue: Float
-}
-
-input CreatePodcastEpisodeInput {
-  title: String!
-  description: String
-  showName: String
-  showId: String
-  episodeNumber: Int
-  seasonNumber: Int
-  scheduledRecordDate: String
-  scheduledPublishDate: String
-  recordStartTime: String
-  recordEndTime: String
-  status: String
-  format: String
-  guests: [EpisodeGuestInput!]
-  topics: [String!]
-  showNotes: String
-  script: String
-  coverArtUrl: String
-  tags: [String!]
-  equipmentChecklist: [String!]
-  relatedStreamId: String
-  notes: String
-}
-
-input UpdatePodcastEpisodeInput {
-  title: String
-  description: String
-  showName: String
-  showId: String
-  episodeNumber: Int
-  seasonNumber: Int
-  scheduledRecordDate: String
-  scheduledPublishDate: String
-  recordStartTime: String
-  recordEndTime: String
-  status: String
-  format: String
-  guests: [EpisodeGuestInput!]
-  topics: [String!]
-  showNotes: String
-  script: String
-  recordingFileUrl: String
-  editedFileUrl: String
-  coverArtUrl: String
-  durationMinutes: Int
-  tags: [String!]
-  notes: String
-}
-
-input EpisodeGuestInput {
-  name: String!
-  title: String
-  email: String
-  socialHandle: String
-  confirmed: Boolean
-}
-
-input CreatePodcastShowInput {
-  name: String!
-  description: String
-  coverArtUrl: String
-  category: String
-  language: String
-  authorName: String
-  websiteUrl: String
-  rssFeedUrl: String
-  frequency: String
-}
-
-input UpdatePodcastShowInput {
-  name: String
-  description: String
-  coverArtUrl: String
-  category: String
-  language: String
-  authorName: String
-  websiteUrl: String
-  rssFeedUrl: String
-  frequency: String
-  isActive: Boolean
-}
-
-input CreateGuestContactInput {
-  name: String!
-  email: String
-  phone: String
-  title: String
-  company: String
-  bio: String
-  topicsExpertise: [String!]
-  status: String
-  notes: String
-}
-
-input UpdateGuestContactInput {
-  name: String
-  email: String
-  phone: String
-  title: String
-  company: String
-  bio: String
-  topicsExpertise: [String!]
-  status: String
-  rating: Int
-  notes: String
-}
-
-input CreateClipInput {
-  title: String!
-  sourceType: String
-  sourceStreamId: String
-  sourceEpisodeId: String
-  platform: String
-  clipUrl: String
-  thumbnailUrl: String
-  startTimestamp: Int
-  endTimestamp: Int
-  duration: Int
-  tags: [String!]
-  clipType: String
-}
-
-input UpdateClipInput {
-  title: String
-  status: String
-  tags: [String!]
-  clipUrl: String
-  thumbnailUrl: String
-}
-
-input CreateRevenueEntryInput {
-  date: String!
-  source: String!
-  amount: Float!
-  currency: String
-  platform: String
-  notes: String
-  relatedStreamId: String
-  relatedEpisodeId: String
-}
-
-# ---- Streamer Queries ----
-
-extend type Query {
-  # Stream events
-  streamerEvents(limit: Int, offset: Int, status: String): [StreamEventItem!]!
-  streamerEvent(id: ID!): StreamEventItem
-
-  # Podcast episodes
-  podcastEpisodes(limit: Int, offset: Int, status: String, showId: String): [PodcastEpisodeItem!]!
-  podcastEpisode(id: ID!): PodcastEpisodeItem
-
-  # Podcast shows
-  podcastShows: [PodcastShowItem!]!
-  podcastShow(id: ID!): PodcastShowItem
-
-  # Guest contacts
-  guestContacts(status: String, searchTerm: String): [GuestContactItem!]!
-  guestContact(id: ID!): GuestContactItem
-
-  # Clips
-  streamerClips(status: String, sourceType: String, limit: Int): [ClipItem!]!
-  streamerClip(id: ID!): ClipItem
-
-  # Revenue
-  revenueEntries(limit: Int, offset: Int): [RevenueEntryItem!]!
-
-  # Activity log
-  streamerActivities(limit: Int): [StreamerActivityItem!]!
-
-  # Streamer profile (me)
-  streamerMe: User
-}
-
-# ---- Streamer Mutations ----
-
-extend type Mutation {
-  # Stream events
-  createStreamEvent(input: CreateStreamEventInput!): StreamEventItem!
-  updateStreamEvent(id: ID!, input: UpdateStreamEventInput!): StreamEventItem!
-  deleteStreamEvent(id: ID!): Boolean!
-
-  # Podcast episodes
-  createPodcastEpisode(input: CreatePodcastEpisodeInput!): PodcastEpisodeItem!
-  updatePodcastEpisode(id: ID!, input: UpdatePodcastEpisodeInput!): PodcastEpisodeItem!
-  deletePodcastEpisode(id: ID!): Boolean!
-
-  # Podcast shows
-  createPodcastShow(input: CreatePodcastShowInput!): PodcastShowItem!
-  updatePodcastShow(id: ID!, input: UpdatePodcastShowInput!): PodcastShowItem!
-  deletePodcastShow(id: ID!): Boolean!
-
-  # Guest contacts
-  createGuestContact(input: CreateGuestContactInput!): GuestContactItem!
-  updateGuestContact(id: ID!, input: UpdateGuestContactInput!): GuestContactItem!
-  deleteGuestContact(id: ID!): Boolean!
-
-  # Clips
-  createClip(input: CreateClipInput!): ClipItem!
-  updateClip(id: ID!, input: UpdateClipInput!): ClipItem!
-  deleteClip(id: ID!): Boolean!
-
-  # Revenue
-  createRevenueEntry(input: CreateRevenueEntryInput!): RevenueEntryItem!
-  deleteRevenueEntry(id: ID!): Boolean!
-
-  # OAuth registration (streamer self-serve)
-  registerStreamer(email: String!, password: String!, displayName: String!): AuthPayload!
 }
 
 # ==================== BLE EQUIPMENT TRACKING ====================

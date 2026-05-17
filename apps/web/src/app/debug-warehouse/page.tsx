@@ -5,6 +5,8 @@ import { useQuery } from '@apollo/client';
 import { Card, Table, Tag, Space } from 'antd';
 import { GET_BROADCAST_EVENTS } from '../../graphql/queries';
 import dayjs from 'dayjs';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import { Permission } from '@/rbac';
 
 const DebugWarehousePage = () => {
   const { data, loading } = useQuery(GET_BROADCAST_EVENTS, {
@@ -134,6 +136,7 @@ const DebugWarehousePage = () => {
   if (loading) return <div>Loading...</div>;
 
   return (
+    <ProtectedRoute requires={Permission.SETTINGS_MANAGE}>
     <div style={{ padding: '20px' }}>
       <Card title="Debug Warehouse Status">
         <p>This page shows all locations where equipment data might be stored</p>
@@ -146,6 +149,7 @@ const DebugWarehousePage = () => {
         />
       </Card>
     </div>
+    </ProtectedRoute>
   );
 };
 

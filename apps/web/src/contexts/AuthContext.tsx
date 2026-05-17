@@ -37,7 +37,7 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
-  /** Check a global (non-scoped) permission. */
+  /** Check a permission granted globally or by any assigned department role. */
   hasPermission: (perm: Permission) => boolean;
   /** Check a permission scoped to a specific department. */
   hasPermissionForDept: (perm: Permission, deptId: string) => boolean;
@@ -59,7 +59,14 @@ interface AuthProviderProps {
 
 function decodeJwtPayload(token: string): Record<string, any> | null {
   try {
-    return JSON.parse(atob(token.split('.')[1]));
+    const base64Url = token.split('.')[1];
+    if (!base64Url) return null;
+
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+    const bytes = Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
+
+    return JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     return null;
   }

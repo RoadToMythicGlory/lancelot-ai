@@ -11,6 +11,7 @@ import {
 import { useQuery, useMutation } from '@apollo/client';
 import { GET_WAREHOUSE_EQUIPMENT, GET_EMPLOYEES_BY_DEPARTMENT, GET_DEPARTMENTS, GET_BROADCAST_EVENT } from '../../graphql/queries';
 import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA } from '../../graphql/mutations';
+import DynamicDepartmentJobsPanel, { AssignmentJob } from '../assignments/DynamicDepartmentJobsPanel';
 
 const { Option } = Select;
 
@@ -25,6 +26,8 @@ interface ExternalBroadcastsModalProps {
   event: BroadcastEvent;
   onClose: () => void;
   onDataSaved?: () => void;
+  /** When false, hides save / not-applicable buttons and disables form fields. */
+  canEdit?: boolean;
 }
 
 interface Equipment {
@@ -55,11 +58,12 @@ interface Employee {
   updatedAt?: string;
 }
 
-const ExternalBroadcastsModal: React.FC<ExternalBroadcastsModalProps> = ({ visible, event, onClose, onDataSaved }) => {
+const ExternalBroadcastsModal: React.FC<ExternalBroadcastsModalProps> = ({ visible, event, onClose, onDataSaved, canEdit = true }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [selectedEquipment, setSelectedEquipment] = useState<Array<{ id: string; quantity: number }>>([]);
   const [departmentIds, setDepartmentIds] = useState<Record<string, string>>({});
+  const [dynamicJobs, setDynamicJobs] = useState<AssignmentJob[]>([]);
 
   // GraphQL mutation for updating department data
   const [updateDepartmentData] = useMutation(UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA, {
@@ -161,6 +165,22 @@ const ExternalBroadcastsModal: React.FC<ExternalBroadcastsModalProps> = ({ visib
         // Clear form if no existing data
         form.resetFields();
       }
+
+      // Load admin-configurable jobs (new system)
+      const savedDynamicJobs: any[] = externalBroadcastsDept.customData?.dynamicJobs || externalBroadcastsDept.dynamicJobs || [];
+      setDynamicJobs(
+        Array.isArray(savedDynamicJobs)
+          ? savedDynamicJobs.map((j: any, i: number) => ({
+              uid: `loaded_${i}_${Date.now()}`,
+              departmentCode: j.departmentCode,
+              roleKey: j.roleKey,
+              roleLabel: j.roleLabel,
+              count: typeof j.count === 'number' ? j.count : 1,
+              userId: j.userId,
+              userName: j.userName,
+            }))
+          : [],
+      );
     }
   }, [visible, event, eventData, form]);
 
@@ -235,6 +255,10 @@ const ExternalBroadcastsModal: React.FC<ExternalBroadcastsModalProps> = ({ visib
   };
 
   const handleSubmit = async (values: any) => {
+    if (!canEdit) {
+      console.warn('Save attempted without BROADCAST_MANAGE permission');
+      return;
+    }
     setLoading(true);
     try {
       // Prepare production crew data
@@ -316,6 +340,14 @@ const ExternalBroadcastsModal: React.FC<ExternalBroadcastsModalProps> = ({ visib
         customData: {
           productionCrew: productionCrew,
           equipmentList: equipmentList,
+          dynamicJobs: dynamicJobs.map((j) => ({
+            departmentCode: j.departmentCode,
+            roleKey: j.roleKey,
+            roleLabel: j.roleLabel,
+            count: j.count || 1,
+            userId: j.userId,
+            userName: j.userName,
+          })),
           notApplicable: false // Clear the not applicable flag when saving data
         }
       };
@@ -385,7 +417,7 @@ const ExternalBroadcastsModal: React.FC<ExternalBroadcastsModalProps> = ({ visib
             max={record.quantityAvailable}
             value={selected?.quantity || 0}
             onChange={(value) => handleEquipmentChange(record.id, value || 0)}
-            disabled={record.quantityAvailable === 0}
+            disabled={record.quantityAvailable === 0 || !canEdit}
           />
         );
       }
@@ -411,12 +443,25 @@ const ExternalBroadcastsModal: React.FC<ExternalBroadcastsModalProps> = ({ visib
         <div className="flex items-center gap-2">
           <GlobalOutlined />
           <span>שידורי חוץ</span>
+          {!canEdit && (
+            <span style={{
+              padding: '2px 8px',
+              borderRadius: 4,
+              backgroundColor: '#fff7e6',
+              color: '#ad6800',
+              border: '1px solid #ffd591',
+              fontSize: 12,
+              fontWeight: 500,
+            }}>
+              לקריאה בלבד
+            </span>
+          )}
         </div>
       }
       open={visible}
       onCancel={onClose}
       width={1000}
-      footer={[
+      footer={canEdit ? [
         <Button key="cancel" onClick={onClose}>
           ביטול
         </Button>,
@@ -462,12 +507,17 @@ const ExternalBroadcastsModal: React.FC<ExternalBroadcastsModalProps> = ({ visib
         >
           שמור הגדרות
         </Button>
+      ] : [
+        <Button key="close" onClick={onClose}>
+          סגור
+        </Button>
       ]}
     >
       <Form
         form={form}
         layout="vertical"
         onFinish={handleSubmit}
+        disabled={!canEdit}
       >
         <div className="mb-4">
           <Card size="small" className="bg-orange-50">
@@ -555,6 +605,14 @@ const ExternalBroadcastsModal: React.FC<ExternalBroadcastsModalProps> = ({ visib
             </Space>
           </Card>
         )}
+
+        <Divider>משימות נוספות לפי הגדרת מחלקות</Divider>
+        <DynamicDepartmentJobsPanel
+          formKey="externalBroadcasts"
+          value={dynamicJobs}
+          onChange={canEdit ? setDynamicJobs : () => {}}
+          title="משימות שיוך"
+        />
       </Form>
     </Modal>
   );

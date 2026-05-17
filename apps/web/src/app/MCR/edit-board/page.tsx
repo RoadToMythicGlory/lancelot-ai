@@ -322,7 +322,7 @@ export default function EditBoardPage() {
   ];
 
   return (
-    <ProtectedRoute requires={Permission.MCR_VIEW}>
+    <ProtectedRoute requires={Permission.MCR_MANAGE}>
     <div className="min-h-screen bg-gray-50 p-4" dir="rtl">
       <style jsx global>{`
         .mcr-edit-board-table-wrapper .ant-table {

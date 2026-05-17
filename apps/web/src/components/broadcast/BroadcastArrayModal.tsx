@@ -5,6 +5,7 @@ import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA } from '../../graphql/mutations'
 import { GET_EMPLOYEES_BY_DEPARTMENT, GET_DEPARTMENTS, GET_BROADCAST_EVENT } from '../../graphql/queries';
 import dayjs from 'dayjs';
 import 'dayjs/locale/he';
+import DynamicDepartmentJobsPanel, { AssignmentJob } from '../assignments/DynamicDepartmentJobsPanel';
 
 const { Option } = Select;
 
@@ -23,6 +24,8 @@ interface BroadcastArrayModalProps {
   onClose: () => void;
   onSave?: (data: any) => Promise<void>;
   onDataSaved?: () => void; // Add callback for when data is saved
+  /** When false, hides save / not-applicable buttons and disables form fields. */
+  canEdit?: boolean;
 }
 
 interface Employee {
@@ -45,10 +48,11 @@ interface Employee {
   updatedAt?: string;
 }
 
-const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, event, onClose, onSave, onDataSaved }) => {
+const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, event, onClose, onSave, onDataSaved, canEdit = true }) => {
   const { message } = App.useApp();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
+  const [dynamicJobs, setDynamicJobs] = useState<AssignmentJob[]>([]);
 
   // GraphQL mutation for updating department data
   const [updateDepartmentData] = useMutation(UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA, {
@@ -209,10 +213,32 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
         שדר: getCrewMemberByRole('שדר'),
         שדרקוים: getCrewMemberByRole('שדר קוים')
       });
+
+      // Pre-fill dynamic jobs (the new admin-configurable list) from saved data.
+      const savedJobs: any[] = broadcastArrayData?.dynamicJobs || [];
+      if (Array.isArray(savedJobs) && savedJobs.length > 0) {
+        setDynamicJobs(
+          savedJobs.map((j: any, i: number) => ({
+            uid: `loaded_${i}_${Date.now()}`,
+            departmentCode: j.departmentCode,
+            roleKey: j.roleKey,
+            roleLabel: j.roleLabel,
+            count: typeof j.count === 'number' ? j.count : 1,
+            userId: j.userId,
+            userName: j.userName,
+          })),
+        );
+      } else {
+        setDynamicJobs([]);
+      }
     }
   }, [visible, event, form, existingData]);
 
   const handleSubmit = async (values: any) => {
+    if (!canEdit) {
+      message.error('אין לך הרשאת עריכה');
+      return;
+    }
     setLoading(true);
     try {
       console.log('📤 BroadcastArrayModal - Form values:', values);
@@ -266,7 +292,16 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
           ].filter(Boolean), // Remove null values
           specialInstructions: values.שידור || '',
           setupTime: null,
-          breakdownTime: null
+          breakdownTime: null,
+          // New admin-configurable jobs list (saved alongside legacy fields).
+          dynamicJobs: dynamicJobs.map((j) => ({
+            departmentCode: j.departmentCode,
+            roleKey: j.roleKey,
+            roleLabel: j.roleLabel,
+            count: j.count || 1,
+            userId: j.userId,
+            userName: j.userName,
+          }))
         },
         // Custom fields go in customData
         customData: {
@@ -330,11 +365,29 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
 
   return (
     <Modal
-      title="מערך שידורים"
+      title={
+        <span>
+          מערך שידורים
+          {!canEdit && (
+            <span style={{
+              marginInlineStart: 8,
+              padding: '2px 8px',
+              borderRadius: 4,
+              backgroundColor: '#fff7e6',
+              color: '#ad6800',
+              border: '1px solid #ffd591',
+              fontSize: 12,
+              fontWeight: 500,
+            }}>
+              לקריאה בלבד
+            </span>
+          )}
+        </span>
+      }
       open={visible}
       onCancel={onClose}
       width={1000}
-      footer={[
+      footer={canEdit ? [
         <Button key="cancel" onClick={onClose}>
           ביטול
         </Button>,
@@ -381,6 +434,10 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
         >
           שמור
         </Button>
+      ] : [
+        <Button key="close" onClick={onClose}>
+          סגור
+        </Button>
       ]}
     >
       <Alert
@@ -395,6 +452,7 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
         form={form}
         layout="vertical"
         onFinish={handleSubmit}
+        disabled={!canEdit}
       >
         {/* Read-only fields from Broadcast Planning */}
         <Row gutter={16}>
@@ -569,6 +627,20 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
             </Form.Item>
           </Col>
         </Row>
+
+        <Divider>משימות נוספות לפי הגדרות מחלקות</Divider>
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="כאן ניתן להוסיף משימות נוספות לפי המחלקות שמנהל המערכת הגדיר לטופס מערך השידורים. ניתן גם לשמור פריסטים משותפים לאירועים חוזרים."
+        />
+        <DynamicDepartmentJobsPanel
+          formKey="broadcastArray"
+          value={dynamicJobs}
+          onChange={canEdit ? setDynamicJobs : () => {}}
+          title="משימות מערך שידורים"
+        />
       </Form>
     </Modal>
   );

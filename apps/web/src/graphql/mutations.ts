@@ -754,6 +754,147 @@ export const DELETE_EXTERNAL_BROADCAST_PRESET = gql`
   }
 `;
 
+// ─── Department management mutations ──────────────────────────────────
+
+export const CREATE_DEPARTMENT = gql`
+  mutation CreateDepartment($input: CreateDepartmentInput!) {
+    createDepartment(input: $input) {
+      id
+      code
+      name
+      hebrewName
+      category
+      description
+      isActive
+      includesDepartmentCodes
+      permissions
+      departmentRoles {
+        key
+        name
+        hebrewName
+        description
+        permissions
+        order
+        isActive
+      }
+    }
+  }
+`;
+
+export const UPDATE_DEPARTMENT = gql`
+  mutation UpdateDepartment($code: String!, $input: UpdateDepartmentInput!) {
+    updateDepartment(code: $code, input: $input) {
+      id
+      code
+      name
+      hebrewName
+      category
+      description
+      isActive
+      includesDepartmentCodes
+      permissions
+      departmentRoles {
+        key
+        name
+        hebrewName
+        description
+        permissions
+        order
+        isActive
+      }
+    }
+  }
+`;
+
+export const DELETE_DEPARTMENT = gql`
+  mutation DeleteDepartment($code: String!) {
+    deleteDepartment(code: $code)
+  }
+`;
+
+// ─── Assignment form configuration ────────────────────────────────────
+
+export const UPSERT_ASSIGNMENT_FORM_CONFIG = gql`
+  mutation UpsertAssignmentFormConfig($input: UpsertAssignmentFormConfigInput!) {
+    upsertAssignmentFormConfig(input: $input) {
+      id
+      formKey
+      name
+      hebrewName
+      description
+      allowUserPresets
+      isActive
+      departments {
+        departmentCode
+        allowedRoleKeys
+        requireUser
+        defaultCount
+        order
+      }
+    }
+  }
+`;
+
+export const DELETE_ASSIGNMENT_FORM_CONFIG = gql`
+  mutation DeleteAssignmentFormConfig($formKey: String!) {
+    deleteAssignmentFormConfig(formKey: $formKey)
+  }
+`;
+
+// ─── Shared assignment presets ────────────────────────────────────────
+
+export const CREATE_ASSIGNMENT_PRESET = gql`
+  mutation CreateAssignmentPreset($input: CreateAssignmentPresetInput!) {
+    createAssignmentPreset(input: $input) {
+      id
+      formKey
+      name
+      description
+      tags
+      isDefault
+      isShared
+      isActive
+      jobs {
+        departmentCode
+        roleKey
+        roleLabel
+        count
+        userId
+        userName
+      }
+    }
+  }
+`;
+
+export const UPDATE_ASSIGNMENT_PRESET = gql`
+  mutation UpdateAssignmentPreset($id: ID!, $input: UpdateAssignmentPresetInput!) {
+    updateAssignmentPreset(id: $id, input: $input) {
+      id
+      formKey
+      name
+      description
+      tags
+      isDefault
+      isShared
+      isActive
+      jobs {
+        departmentCode
+        roleKey
+        roleLabel
+        count
+        userId
+        userName
+      }
+    }
+  }
+`;
+
+export const DELETE_ASSIGNMENT_PRESET = gql`
+  mutation DeleteAssignmentPreset($id: ID!) {
+    deleteAssignmentPreset(id: $id)
+  }
+`;
+
 // Equipment Set Mutations
 export const CREATE_EQUIPMENT_SET = gql`
   mutation CreateEquipmentSet($input: CreateEquipmentSetInput!) {

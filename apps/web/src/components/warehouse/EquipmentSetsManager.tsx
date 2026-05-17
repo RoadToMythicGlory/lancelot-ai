@@ -30,7 +30,11 @@ interface SetItem {
   required: boolean;
 }
 
-const EquipmentSetsManager: React.FC = () => {
+interface EquipmentSetsManagerProps {
+  canManage?: boolean;
+}
+
+const EquipmentSetsManager: React.FC<EquipmentSetsManagerProps> = ({ canManage = false }) => {
   const { message } = App.useApp();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingSet, setEditingSet] = useState<any | null>(null);
@@ -193,7 +197,7 @@ const EquipmentSetsManager: React.FC = () => {
     {
       title: 'פעולות',
       key: 'actions',
-      render: (_: any, record: any) => (
+      render: (_: any, record: any) => canManage ? (
         <Space>
           <Button
             size="small"
@@ -213,7 +217,7 @@ const EquipmentSetsManager: React.FC = () => {
             </Button>
           </Popconfirm>
         </Space>
-      ),
+      ) : null,
     },
   ];
 
@@ -232,9 +236,11 @@ const EquipmentSetsManager: React.FC = () => {
           onChange={(e) => setSearchText(e.target.value)}
           allowClear
         />
-        <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenCreate}>
-          צור סט חדש
-        </Button>
+        {canManage && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenCreate}>
+            צור סט חדש
+          </Button>
+        )}
       </div>
 
       <Table

@@ -1,22 +1,22 @@
 import { gql } from '@apollo/client';
 
-// ==================== ORGANIZATION ====================
+// NOTE: This file historically held multi-tenant SaaS GraphQL operations.
+// The product is now deployed on-prem for a single company, so org/billing/
+// subscription/invite operations have been removed. The remaining operations
+// are local on-prem features. New IT-support ticket queries live in
+// `./itSupportQueries.ts`.
+
+// ==================== ORGANIZATION (single-tenant settings) ====================
 
 export const GET_MY_ORGANIZATION = gql`
   query GetMyOrganization {
     myOrganization {
       id
       name
-      slug
       hebrewName
       logo
       favicon
       domain
-      plan
-      planExpiresAt
-      maxUsers
-      maxBroadcastEvents
-      maxStorageGB
       settings {
         timezone
         locale
@@ -47,72 +47,6 @@ export const GET_MY_ORGANIZATION = gql`
       address
       country
       isActive
-      isTrial
-      trialEndsAt
-      createdAt
-    }
-  }
-`;
-
-export const GET_ORGANIZATION_INVITES = gql`
-  query GetOrganizationInvites {
-    organizationInvites {
-      id
-      email
-      role
-      status
-      expiresAt
-      createdAt
-    }
-  }
-`;
-
-// ==================== BILLING ====================
-
-export const GET_MY_SUBSCRIPTION = gql`
-  query GetMySubscription {
-    mySubscription {
-      id
-      plan
-      status
-      billingCycle
-      currentPeriodStart
-      currentPeriodEnd
-      trialStart
-      trialEnd
-      limits {
-        maxUsers
-        maxBroadcastEvents
-        maxStorageGB
-        maxDepartments
-        maxApiCalls
-      }
-      currentUsage {
-        users
-        broadcastEvents
-        storageUsedGB
-        departments
-        apiCalls
-      }
-      cancelledAt
-    }
-  }
-`;
-
-export const GET_INVOICES = gql`
-  query GetInvoices($limit: Int, $offset: Int) {
-    invoices(limit: $limit, offset: $offset) {
-      id
-      invoiceNumber
-      status
-      currency
-      total
-      amountPaid
-      amountDue
-      periodStart
-      periodEnd
-      paidAt
-      invoicePdfUrl
       createdAt
     }
   }
@@ -344,7 +278,7 @@ export const GET_EXPIRING_RIGHTS = gql`
   }
 `;
 
-// ==================== HELP & SUPPORT ====================
+// ==================== HELP ARTICLES ====================
 
 export const GET_HELP_ARTICLES = gql`
   query GetHelpArticles($category: String, $searchTerm: String) {
@@ -379,48 +313,6 @@ export const GET_HELP_ARTICLE = gql`
       authorName
       createdAt
       updatedAt
-    }
-  }
-`;
-
-export const GET_MY_SUPPORT_TICKETS = gql`
-  query GetMySupportTickets {
-    mySaasTickets {
-      id
-      ticketNumber
-      subject
-      category
-      priority
-      status
-      createdAt
-      updatedAt
-    }
-  }
-`;
-
-export const GET_SUPPORT_TICKET = gql`
-  query GetSupportTicket($id: ID!) {
-    saasTicket(id: $id) {
-      id
-      ticketNumber
-      subject
-      description
-      category
-      priority
-      status
-      createdByName
-      createdByEmail
-      assignedToName
-      messages {
-        senderId
-        senderName
-        senderType
-        message
-        createdAt
-      }
-      resolvedAt
-      closedAt
-      createdAt
     }
   }
 `;
@@ -489,3 +381,9 @@ export const GLOBAL_SEARCH = gql`
     globalSearch(query: $query, types: $types, limit: $limit)
   }
 `;
+
+// ==================== BACKWARDS-COMPAT EXPORTS ====================
+// `apps/web/src/app/help/page.tsx` still imports `GET_MY_SUPPORT_TICKETS` and
+// `GET_SUPPORT_TICKET`; redirect them to the new IT-support operations so
+// callers can be migrated at their own pace.
+export { GET_MY_IT_TICKETS as GET_MY_SUPPORT_TICKETS, GET_IT_TICKET as GET_SUPPORT_TICKET } from './itSupportQueries';

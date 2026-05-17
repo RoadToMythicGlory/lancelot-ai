@@ -178,17 +178,32 @@ function FlightBoardPageInner() {
   };
 
   const handleCreate = () => {
+    if (!canManage) {
+      message.error('אין לך הרשאה לערוך לוחות טיסה');
+      return;
+    }
+
     setBuilderTarget(null);
     setBuilderOpen(true);
   };
 
   const handleEdit = () => {
+    if (!canManage) {
+      message.error('אין לך הרשאה לערוך לוחות טיסה');
+      return;
+    }
+
     if (!selectedBoard) return;
     setBuilderTarget(selectedBoard);
     setBuilderOpen(true);
   };
 
   const handleDelete = () => {
+    if (!canManage) {
+      message.error('אין לך הרשאה למחוק לוחות טיסה');
+      return;
+    }
+
     if (!selectedBoard) return;
     modal.confirm({
       title: 'מחיקת לוח',
@@ -209,6 +224,11 @@ function FlightBoardPageInner() {
   };
 
   const handleSubmitBuilder = async (input: any) => {
+    if (!canManage) {
+      message.error('אין לך הרשאה לערוך לוחות טיסה');
+      return;
+    }
+
     try {
       if (builderTarget) {
         const res = await updateBoard({

@@ -18,70 +18,30 @@ const ALL_PERMS = Object.values(Permission);
 const SYSTEM_ADMIN_PERMS: Permission[] = ALL_PERMS;
 
 const IT_ADMIN_PERMS: Permission[] = ALL_PERMS.filter(
-  (p) => p !== Permission.ORG_MANAGE && p !== Permission.ROLE_TEMPLATES_MANAGE,
+  (p) => p !== Permission.ROLE_TEMPLATES_MANAGE,
 );
 
 const IT_USER_PERMS: Permission[] = [
   Permission.DASHBOARD_VIEW,
-  Permission.USERS_VIEW,
-  Permission.BROADCAST_VIEW,
-  Permission.WAREHOUSE_VIEW,
   Permission.SHIFTS_VIEW_OWN,
-  Permission.SHIFTS_VIEW_ALL,
-  Permission.MCR_VIEW,
-  Permission.VIZRT_VIEW,
-  Permission.BILLING_VIEW,
-  Permission.AUDIT_VIEW,
   Permission.CHAT_USE,
-  Permission.MEDIA_VIEW,
-  Permission.RIGHTS_VIEW,
-  Permission.WORKFLOWS_VIEW,
-  Permission.SETTINGS_VIEW,
-  Permission.SETTINGS_MANAGE,
-  Permission.INTEGRATIONS_VIEW,
-  Permission.INTEGRATIONS_MANAGE,
-  Permission.ORG_VIEW,
-  Permission.FLIGHT_BOARD_VIEW,
+  Permission.IT_SUPPORT_VIEW,
 ];
 
 const DEPARTMENT_ADMIN_PERMS: Permission[] = [
   Permission.DASHBOARD_VIEW,
-  Permission.DASHBOARD_MANAGE,
   Permission.USERS_VIEW,
   Permission.USERS_MANAGE_DEPT,
-  Permission.BROADCAST_VIEW,
-  Permission.BROADCAST_MANAGE,
-  Permission.WAREHOUSE_VIEW,
-  Permission.WAREHOUSE_MANAGE,
   Permission.SHIFTS_VIEW_OWN,
   Permission.SHIFTS_VIEW_ALL,
   Permission.SHIFTS_MANAGE,
-  Permission.MCR_VIEW,
-  Permission.MCR_MANAGE,
-  Permission.VIZRT_VIEW,
   Permission.CHAT_USE,
-  Permission.MEDIA_VIEW,
-  Permission.RIGHTS_VIEW,
-  Permission.WORKFLOWS_VIEW,
-  Permission.SETTINGS_VIEW,
-  Permission.INTEGRATIONS_VIEW,
-  Permission.FLIGHT_BOARD_VIEW,
-  Permission.FLIGHT_BOARD_MANAGE,
 ];
 
 const DEPARTMENT_USER_PERMS: Permission[] = [
   Permission.DASHBOARD_VIEW,
-  Permission.USERS_VIEW,
-  Permission.BROADCAST_VIEW,
-  Permission.WAREHOUSE_VIEW,
   Permission.SHIFTS_VIEW_OWN,
-  Permission.MCR_VIEW,
-  Permission.VIZRT_VIEW,
   Permission.CHAT_USE,
-  Permission.MEDIA_VIEW,
-  Permission.RIGHTS_VIEW,
-  Permission.WORKFLOWS_VIEW,
-  Permission.FLIGHT_BOARD_VIEW,
 ];
 
 const ROLE_PERMISSIONS: Record<SystemRole, Permission[]> = {
@@ -96,24 +56,103 @@ const ROLE_PERMISSIONS: Record<SystemRole, Permission[]> = {
 // Department-role strings → extra permissions (additive per-department)
 // ---------------------------------------------------------------------------
 
+/**
+ * Hardcoded fallback used before departments were admin-managed. Kept for
+ * backwards compatibility with users whose `departments[].roles[]` still
+ * carries free-form English role titles. Prefer the runtime registry below
+ * (populated from the Department collection) for new departments.
+ */
 const DEPT_ROLE_EXTRAS: Record<string, Permission[]> = {
   'Department Admin': [
+    Permission.USERS_VIEW,
     Permission.USERS_MANAGE_DEPT,
+    Permission.SHIFTS_VIEW_OWN,
+    Permission.SHIFTS_VIEW_ALL,
     Permission.SHIFTS_MANAGE,
-    Permission.BROADCAST_MANAGE,
-    Permission.WAREHOUSE_MANAGE,
-    Permission.MCR_MANAGE,
   ],
-  'MCR Supervisor': [Permission.MCR_MANAGE, Permission.MCR_ADMIN],
-  'MCR Operator': [Permission.MCR_MANAGE],
-  'Senior Playout Operator': [Permission.MCR_MANAGE],
-  'Senior Ingest Operator': [Permission.MCR_MANAGE],
+  'MCR Supervisor': [
+    Permission.MCR_VIEW,
+    Permission.MCR_MANAGE,
+    Permission.MCR_ADMIN,
+    Permission.BROADCAST_VIEW,
+    Permission.BROADCAST_MANAGE,
+    Permission.WAREHOUSE_VIEW,
+    Permission.SHIFTS_VIEW_OWN,
+    Permission.SHIFTS_VIEW_ALL,
+    Permission.SHIFTS_MANAGE,
+  ],
+  'MCR Operator': [
+    Permission.MCR_VIEW,
+    Permission.MCR_MANAGE,
+    Permission.BROADCAST_VIEW,
+    Permission.WAREHOUSE_VIEW,
+    Permission.SHIFTS_VIEW_OWN,
+  ],
+  'Senior Playout Operator': [Permission.MCR_VIEW, Permission.MCR_MANAGE],
+  'Senior Ingest Operator': [Permission.MCR_VIEW, Permission.MCR_MANAGE],
   'Warehouse Manager': [
+    Permission.WAREHOUSE_VIEW,
     Permission.WAREHOUSE_MANAGE,
     Permission.WAREHOUSE_FORCE_RELEASE,
     Permission.WAREHOUSE_DISABLE_EQUIPMENT,
+    Permission.BROADCAST_VIEW,
+    Permission.SHIFTS_VIEW_OWN,
+  ],
+  'Equipment Handler': [
+    Permission.WAREHOUSE_VIEW,
+    Permission.BROADCAST_VIEW,
+    Permission.SHIFTS_VIEW_OWN,
   ],
 };
+
+/**
+ * Runtime registry of department-role permission grants populated from
+ * Department documents (see services/departmentRegistry.ts). Keyed by
+ * department code, then role key. Empty until the bootstrap loads it.
+ */
+const DEPT_ROLE_REGISTRY: Map<string, Map<string, Permission[]>> = new Map();
+
+/**
+ * Replace the runtime registry with a freshly-loaded snapshot from the
+ * Department collection. Called from bootstrap and whenever an admin
+ * mutates a department.
+ */
+export function setDepartmentRoleRegistry(
+  entries: Array<{ departmentCode: string; roleKey: string; roleName?: string; permissions: Permission[] }>,
+): void {
+  DEPT_ROLE_REGISTRY.clear();
+  for (const e of entries) {
+    if (!e.departmentCode || !e.roleKey) continue;
+    let bucket = DEPT_ROLE_REGISTRY.get(e.departmentCode);
+    if (!bucket) {
+      bucket = new Map();
+      DEPT_ROLE_REGISTRY.set(e.departmentCode, bucket);
+    }
+    bucket.set(e.roleKey, e.permissions);
+    // Also register under the role's display name so legacy users carrying
+    // English titles in `departments[].roles[]` keep their permissions.
+    if (e.roleName) bucket.set(e.roleName, e.permissions);
+  }
+}
+
+export function clearDepartmentRoleRegistry(): void {
+  DEPT_ROLE_REGISTRY.clear();
+}
+
+/**
+ * Resolve permissions for a single role assignment within a department. Looks
+ * up the runtime registry first (admin-managed) then falls back to the legacy
+ * hardcoded map keyed by role title.
+ */
+function resolveDeptRolePermissions(deptId: string, roleName: string): Permission[] {
+  const bucket = DEPT_ROLE_REGISTRY.get(deptId);
+  if (bucket) {
+    const fromRegistry = bucket.get(roleName);
+    if (fromRegistry && fromRegistry.length > 0) return fromRegistry;
+  }
+  const legacy = DEPT_ROLE_EXTRAS[roleName];
+  return legacy ? legacy : [];
+}
 
 // ---------------------------------------------------------------------------
 // Computed permission result
@@ -156,18 +195,17 @@ export function computePermissions(user: UserForPermissions): ComputedPermission
     global.add(p);
   }
 
-  // 2. Department role extras
+  // 2. Department role extras (from admin-managed registry + legacy fallback)
   if (Array.isArray(user.departments)) {
     for (const dept of user.departments) {
       if (!dept.departmentId) continue;
       const deptPerms = new Set<Permission>();
       if (Array.isArray(dept.roles)) {
         for (const roleName of dept.roles) {
-          const extras = DEPT_ROLE_EXTRAS[roleName];
-          if (extras) {
-            for (const p of extras) {
-              deptPerms.add(p);
-            }
+          if (!roleName) continue;
+          const perms = resolveDeptRolePermissions(dept.departmentId, roleName);
+          for (const p of perms) {
+            deptPerms.add(p);
           }
         }
       }
@@ -192,12 +230,17 @@ export function computePermissions(user: UserForPermissions): ComputedPermission
   return { global, byDept };
 }
 
-/** Check a global (non-scoped) permission. */
+/** Check whether the user has this permission globally or through any department role. */
 export function hasPermission(
   computed: ComputedPermissions,
   perm: Permission,
 ): boolean {
-  return computed.global.has(perm);
+  if (computed.global.has(perm)) return true;
+  let allowed = false;
+  computed.byDept.forEach((deptPerms) => {
+    if (deptPerms.has(perm)) allowed = true;
+  });
+  return allowed;
 }
 
 /** Check a permission in the context of a specific department. */

@@ -17,8 +17,15 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }) 
         return;
       }
       
-      // Quietly ignore unauthorized to view users in chat - expected for non-admin users
-      if (message.includes('Unauthorized to view users') && operation.operationName === 'GetUsers') {
+      // Quietly ignore unauthorized to view users in chat - expected for non-admin users.
+      // The server's wording moved from "Unauthorized to view users" to the
+      // generic "Missing permission: USERS_VIEW" — accept both so callers like
+      // ChatManager / WorkerPicker stay silent for roles without USERS_VIEW.
+      if (
+        operation.operationName === 'GetUsers' &&
+        (message.includes('Unauthorized to view users') ||
+          message.includes('Missing permission: USERS_VIEW'))
+      ) {
         return;
       }
       

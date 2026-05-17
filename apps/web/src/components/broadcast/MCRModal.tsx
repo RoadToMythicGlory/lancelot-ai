@@ -29,6 +29,8 @@ interface MCRModalProps {
   event: BroadcastEvent;
   onClose: () => void;
   onDataSaved?: () => void;
+  /** When false, hides save / not-applicable buttons and disables form fields. */
+  canEdit?: boolean;
 }
 
 interface WarehouseEquipmentItem {
@@ -49,7 +51,7 @@ const statusOptions = [
   { value: 'ERROR', label: 'תקלה' },
 ];
 
-const MCRModal: React.FC<MCRModalProps> = ({ visible, event, onClose, onDataSaved }) => {
+const MCRModal: React.FC<MCRModalProps> = ({ visible, event, onClose, onDataSaved, canEdit = true }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [activityRowId, setActivityRowId] = useState<string | null>(null);
@@ -123,6 +125,10 @@ const MCRModal: React.FC<MCRModalProps> = ({ visible, event, onClose, onDataSave
   }, [visible, activityData, event, form]);
 
   const handleSubmit = async (values: any) => {
+    if (!canEdit) {
+      message.error('אין לך הרשאת עריכה');
+      return;
+    }
     if (!activityRowId) {
       message.error('שגיאה: לא נמצאה שורת פעילות');
       return;
@@ -162,12 +168,25 @@ const MCRModal: React.FC<MCRModalProps> = ({ visible, event, onClose, onDataSave
         <div className="flex items-center gap-2">
           <ControlOutlined />
           <span>MCR - מכשירים וניתוב</span>
+          {!canEdit && (
+            <span style={{
+              padding: '2px 8px',
+              borderRadius: 4,
+              backgroundColor: '#fff7e6',
+              color: '#ad6800',
+              border: '1px solid #ffd591',
+              fontSize: 12,
+              fontWeight: 500,
+            }}>
+              לקריאה בלבד
+            </span>
+          )}
         </div>
       }
       open={visible}
       onCancel={onClose}
       width={800}
-      footer={[
+      footer={canEdit ? [
         <Button key="cancel" onClick={onClose}>
           ביטול
         </Button>,
@@ -220,6 +239,10 @@ const MCRModal: React.FC<MCRModalProps> = ({ visible, event, onClose, onDataSave
         >
           שמור
         </Button>
+      ] : [
+        <Button key="close" onClick={onClose}>
+          סגור
+        </Button>
       ]}
     >
       {activityLoading ? (
@@ -231,6 +254,7 @@ const MCRModal: React.FC<MCRModalProps> = ({ visible, event, onClose, onDataSave
             layout="vertical"
             onFinish={handleSubmit}
             dir="rtl"
+            disabled={!canEdit}
           >
             <Row gutter={16}>
               <Col span={8}>

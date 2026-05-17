@@ -85,6 +85,7 @@ import BatchEventCreator from '../../components/broadcast/BatchEventCreator';
 import BroadcastEventModal from '../../components/broadcast/BroadcastEventModal';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { Permission } from '@/rbac';
+import { useAuth } from '@/contexts/AuthContext';
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -165,6 +166,15 @@ interface FilterPreset {
 
 const BroadcastPlanningPage: React.FC = () => {
   const { message: messageApi, modal } = App.useApp();
+  const { hasPermission } = useAuth();
+
+  // Real RBAC gates. MCR Operators / anyone without BROADCAST_MANAGE see the
+  // page but in read-only mode (no create / edit / delete and the
+  // department modals are non-savable).
+  const canWrite = hasPermission(Permission.BROADCAST_MANAGE);
+  const canEdit = canWrite;
+  const canDelete = hasPermission(Permission.BROADCAST_DELETE) || canWrite;
+
   const [viewMode, setViewMode] = useState<ViewMode>('weekly');
   const [currentDate, setCurrentDate] = useState(dayjs());
   const [searchText, setSearchText] = useState('');
@@ -231,11 +241,6 @@ const BroadcastPlanningPage: React.FC = () => {
   const [departmentModal, setDepartmentModal] = useState(false);
   
   const [form] = Form.useForm();
-
-  // Remove permissions - simplified access
-  const canWrite = true;
-  const canEdit = true; 
-  const canDelete = true;
 
   // Get date range
   const getDateRange = () => {
@@ -525,6 +530,10 @@ const BroadcastPlanningPage: React.FC = () => {
 
   // Handle create event
   const handleCreateEvent = async (values: any, forceCreate: boolean = false) => {
+    if (!canWrite) {
+      messageApi.error('אין לך הרשאה ליצור אירועים');
+      return;
+    }
     try {
       // Auto-generate title from teams if not provided
       const title = values.title || 
@@ -590,6 +599,10 @@ const BroadcastPlanningPage: React.FC = () => {
 
   // Handle update event
   const handleUpdateEvent = async (values: any) => {
+    if (!canEdit) {
+      messageApi.error('אין לך הרשאה לערוך אירועים');
+      return;
+    }
     console.log('handleUpdateEvent called with values:', values);
     if (!selectedEvent) {
       console.error('No selected event!');
@@ -654,6 +667,10 @@ const BroadcastPlanningPage: React.FC = () => {
 
   // Handle delete event
   const handleDeleteEvent = async (eventId: string) => {
+    if (!canDelete) {
+      messageApi.error('אין לך הרשאה למחוק אירועים');
+      return;
+    }
     try {
       await deleteBroadcastEvent({ 
         variables: { id: eventId },
@@ -674,6 +691,10 @@ const BroadcastPlanningPage: React.FC = () => {
 
   // Handle batch save from Excel-like UI
   const handleBatchSave = async (events: any[], forceCreate: boolean = false) => {
+    if (!canWrite) {
+      messageApi.error('אין לך הרשאה ליצור אירועים');
+      return;
+    }
     try {
       // Track events that were NOT created because of overlap (need user confirmation to force-create).
       // The server-side mutation creates the event only when there is no overlap, or when forceCreate=true.
@@ -961,87 +982,76 @@ const BroadcastPlanningPage: React.FC = () => {
       key: 'actions',
       width: 80,
       fixed: 'right',
-      render: (_, record) => (
+      render: (_, record) => {
+        const dropdownItems: any[] = [
+          {
+            key: 'departments',
+            icon: <AppstoreOutlined />,
+            label: canEdit ? 'ניהול מחלקות' : 'צפייה במחלקות',
+            onClick: (info: any) => {
+              info.domEvent?.stopPropagation();
+              setSelectedEvent(record);
+              setDepartmentModal(true);
+            }
+          },
+        ];
+
+        if (canEdit) {
+          dropdownItems.push({
+            key: 'edit',
+            icon: <EditOutlined />,
+            label: 'עריכת אירוע',
+            onClick: (info: any) => {
+              info.domEvent?.stopPropagation();
+              setSelectedEvent(record);
+              setEditEventModal(true);
+              setTimeout(() => {
+                form.setFieldsValue({
+                  title: record.title,
+                  startTime: dayjs(record.startTime),
+                  endTime: dayjs(record.endTime),
+                  koTime: record.koTime ? dayjs(record.koTime) : null,
+                  contentType: record.sport || record.contentType,
+                  league: record.league,
+                  stage: record.stage,
+                  homeTeam: record.homeTeam,
+                  awayTeam: record.awayTeam,
+                  channel: record.channel,
+                  parallelChannel: record.parallelChannel,
+                  channel1_4k: record.channel1_4k || false,
+                  live: record.live || false,
+                  notes: record.notes,
+                  eventType: record.eventType || 'recorded',
+                });
+              }, 100);
+            }
+          });
+        }
+
+        if (canDelete) {
+          dropdownItems.push({ type: 'divider' });
+          dropdownItems.push({
+            key: 'delete',
+            icon: <DeleteOutlined />,
+            label: 'מחיקה',
+            danger: true,
+            onClick: (info: any) => {
+              info.domEvent?.stopPropagation();
+              modal.confirm({
+                title: 'האם אתה בטוח?',
+                content: 'פעולה זו תמחק את האירוע לצמיתות',
+                okText: 'מחק',
+                cancelText: 'ביטול',
+                okButtonProps: { danger: true },
+                onOk: () => handleDeleteEvent(record.id)
+              });
+            }
+          });
+        }
+
+        return (
         <Dropdown
-          menu={{
-            items: [
-              {
-                key: 'departments',
-                icon: <AppstoreOutlined />,
-                label: 'ניהול מחלקות',
-                onClick: (info) => {
-                  info.domEvent?.stopPropagation();
-                  setSelectedEvent(record);
-                  setDepartmentModal(true);
-                }
-              },
-              {
-                key: 'edit',
-                icon: <EditOutlined />,
-                label: 'עריכת אירוע',
-                onClick: (info) => {
-                  // Stop event propagation to prevent row click
-                  info.domEvent?.stopPropagation();
-                  console.log('Edit button clicked for record:', record);
-                  console.log('Record sport fields:', {
-                    sport: record.sport,
-                    league: record.league,
-                    stage: record.stage,
-                    homeTeam: record.homeTeam,
-                    awayTeam: record.awayTeam,
-                    parallelChannel: record.parallelChannel,
-                    channel1_4k: record.channel1_4k,
-                    live: record.live,
-                    notes: record.notes,
-                  });
-                  setSelectedEvent(record);
-                  setEditEventModal(true);
-                  // Set form values after a small delay to ensure modal is open
-                  setTimeout(() => {
-                    const formValues = {
-                      title: record.title,
-                      startTime: dayjs(record.startTime),
-                      endTime: dayjs(record.endTime),
-                      koTime: record.koTime ? dayjs(record.koTime) : null,
-                      contentType: record.sport || record.contentType,
-                      league: record.league,
-                      stage: record.stage,
-                      homeTeam: record.homeTeam,
-                      awayTeam: record.awayTeam,
-                      channel: record.channel,
-                      parallelChannel: record.parallelChannel,
-                      channel1_4k: record.channel1_4k || false,
-                      live: record.live || false,
-                      notes: record.notes,
-                      eventType: record.eventType || 'recorded',
-                    };
-                    console.log('Setting form values:', formValues);
-                    form.setFieldsValue(formValues);
-                  }, 100);
-                }
-              },
-              {
-                type: 'divider'
-              },
-              {
-                key: 'delete',
-                icon: <DeleteOutlined />,
-                label: 'מחיקה',
-                danger: true,
-                onClick: (info) => {
-                  info.domEvent?.stopPropagation();
-                  modal.confirm({
-                    title: 'האם אתה בטוח?',
-                    content: 'פעולה זו תמחק את האירוע לצמיתות',
-                    okText: 'מחק',
-                    cancelText: 'ביטול',
-                    okButtonProps: { danger: true },
-                    onOk: () => handleDeleteEvent(record.id)
-                  });
-                }
-              }
-            ]
-          }}
+          menu={{ items: dropdownItems }}
           trigger={['click']}
         >
           <Button 
@@ -1052,7 +1062,8 @@ const BroadcastPlanningPage: React.FC = () => {
             onMouseDown={(e) => e.stopPropagation()}
           />
         </Dropdown>
-      ),
+        );
+      },
     },
   ];
 
@@ -1366,12 +1377,14 @@ const BroadcastPlanningPage: React.FC = () => {
                   אירוע חדש
                 </Button>
               )}
-              <Button 
-                icon={<TableOutlined />}
-                onClick={() => setFileImportSelectionModal(true)}
-              >
-                יצירה בקבצים
-              </Button>
+              {canWrite && (
+                <Button 
+                  icon={<TableOutlined />}
+                  onClick={() => setFileImportSelectionModal(true)}
+                >
+                  יצירה בקבצים
+                </Button>
+              )}
               <Button 
                 icon={<PlaySquareOutlined />}
                 onClick={() => {
@@ -1585,13 +1598,14 @@ const BroadcastPlanningPage: React.FC = () => {
         <BroadcastEventModal
           visible={departmentModal}
           event={selectedEvent}
+          canEdit={canEdit}
           onClose={async () => {
             setDepartmentModal(false);
             setSelectedEvent(null);
             await refetch(); // Refresh data when modal closes
           }}
           onUpdate={async (updateData) => {
-            // Handle department data update
+            if (!canEdit) return;
             await updateBroadcastEvent({
               variables: {
                 id: selectedEvent.id,

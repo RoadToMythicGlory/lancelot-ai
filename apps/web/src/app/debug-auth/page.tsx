@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Button, Typography, Space, Tag, Divider, message } from 'antd';
 import { ReloadOutlined, DeleteOutlined, CopyOutlined } from '@ant-design/icons';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import { Permission } from '@/rbac';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -79,6 +81,7 @@ export default function DebugAuthPage() {
   };
 
   return (
+    <ProtectedRoute requires={Permission.SETTINGS_MANAGE}>
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-6xl mx-auto">
         <Title level={1}>🔍 Auth Debug Logs</Title>
@@ -238,5 +241,6 @@ export default function DebugAuthPage() {
         </Card>
       </div>
     </div>
+    </ProtectedRoute>
   );
 }

@@ -625,6 +625,22 @@ html.dark .ant-select-item-option-selected {
   color: #ffffff;
 }
 
+/* Keep Ant Design overlay interactions snappy. Global theme transitions are
+   expensive when a portal renders many dropdown/menu items at once. */
+.ant-select-dropdown,
+.ant-select-dropdown *,
+.ant-dropdown,
+.ant-dropdown *,
+.ant-cascader-dropdown,
+.ant-cascader-dropdown *,
+.ant-tree-select-dropdown,
+.ant-tree-select-dropdown *,
+.ant-picker-dropdown,
+.ant-picker-dropdown * {
+  animation: none !important;
+  transition: none !important;
+}
+
 /* Enhanced modal dark mode */
 html.dark .ant-modal-mask {
   background-color: rgba(0, 0, 0, 0.65);

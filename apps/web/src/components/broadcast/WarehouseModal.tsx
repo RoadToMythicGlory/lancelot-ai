@@ -27,6 +27,8 @@ interface WarehouseModalProps {
   event: BroadcastEvent;
   onClose: () => void;
   onDataSaved?: () => void;
+  /** When false, hides save / not-applicable buttons and disables interactive controls. */
+  canEdit?: boolean;
 }
 
 interface Equipment {
@@ -55,7 +57,7 @@ interface ScannedItem {
   category: string;
 }
 
-const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose, onDataSaved }) => {
+const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose, onDataSaved, canEdit = true }) => {
   const { message } = App.useApp();
   const [scannedBarcode, setScannedBarcode] = useState('');
   const [requestedItems, setRequestedItems] = useState<RequestedEquipment[]>([]);
@@ -167,6 +169,10 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
   }, [eventData, visible]);
 
   const handleBarcodeScan = async () => {
+    if (!canEdit) {
+      message.error('אין לך הרשאת עריכה');
+      return;
+    }
     const trimmedBarcode = scannedBarcode.trim();
     
     if (!trimmedBarcode) {
@@ -294,6 +300,10 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
   };
 
   const handleSave = async () => {
+    if (!canEdit) {
+      message.error('אין לך הרשאת עריכה');
+      return;
+    }
     setLoading(true);
     try {
       // Get existing warehouse data to preserve history
@@ -449,12 +459,25 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
         <div className="flex items-center gap-2">
           <InboxOutlined />
           <span>מחסן - סריקת ציוד</span>
+          {!canEdit && (
+            <span style={{
+              padding: '2px 8px',
+              borderRadius: 4,
+              backgroundColor: '#fff7e6',
+              color: '#ad6800',
+              border: '1px solid #ffd591',
+              fontSize: 12,
+              fontWeight: 500,
+            }}>
+              לקריאה בלבד
+            </span>
+          )}
         </div>
       }
       open={visible}
       onCancel={onClose}
       width={1000}
-      footer={[
+      footer={canEdit ? [
         <Button key="cancel" onClick={onClose}>
           ביטול
         </Button>,
@@ -502,6 +525,10 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
         >
           שמור ({assignedItems.length} פריטים נסרקו)
         </Button>
+      ] : [
+        <Button key="close" onClick={onClose}>
+          סגור
+        </Button>
       ]}
     >
       <div className="mb-4">
@@ -525,14 +552,16 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
         className="mb-4"
       />
 
-      <div className="mb-4 text-center">
-        <Button
-          icon={<FilePdfOutlined />}
-          onClick={() => setIsPdfImportVisible(true)}
-        >
-          ייבוא ציוד מ-PDF
-        </Button>
-      </div>
+      {canEdit && (
+        <div className="mb-4 text-center">
+          <Button
+            icon={<FilePdfOutlined />}
+            onClick={() => setIsPdfImportVisible(true)}
+          >
+            ייבוא ציוד מ-PDF
+          </Button>
+        </div>
+      )}
 
       {/* Barcode Scanner Input */}
       <div className="mb-6 text-center">
@@ -558,13 +587,14 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
                 prefix={<BarcodeOutlined />}
                 size="large"
                 style={{ flex: 1 }}
+                disabled={!canEdit}
               />
               <Button 
                 type="primary" 
                 onClick={handleBarcodeScan}
                 size="large"
                 loading={equipmentLookupLoading}
-                disabled={!scannedBarcode || equipmentLoading || equipmentLookupLoading}
+                disabled={!canEdit || !scannedBarcode || equipmentLoading || equipmentLookupLoading}
               >
                 סרוק
               </Button>

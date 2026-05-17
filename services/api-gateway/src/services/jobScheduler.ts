@@ -1,10 +1,7 @@
 import { createLogger } from '../utils/logger';
 import { BroadcastRightManaged } from '../models/rights.models';
 import { Notification } from '../models/notification.models';
-import { Subscription } from '../models/billing.models';
-import { AuditLog } from '../models/audit.models';
 import { Equipment } from '../models/equipment.models';
-import { sendEmail } from './emailService';
 
 const logger = createLogger('job-scheduler');
 
@@ -81,46 +78,6 @@ async function checkExpiringRights() {
   }
 }
 
-async function checkSubscriptionExpiry() {
-  logger.info('Running job: checkSubscriptionExpiry');
-  try {
-    const now = new Date();
-    const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-
-    // Find trialing subscriptions about to expire
-    const expiringSubs = await Subscription.find({
-      status: 'trialing',
-      trialEnd: { $lte: sevenDaysFromNow, $gte: now },
-    });
-
-    for (const sub of expiringSubs) {
-      const daysRemaining = Math.ceil((sub.trialEnd!.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
-      
-      logger.info(`Trial expiring in ${daysRemaining} days for org ${sub.organizationId}`);
-
-      // Create notification (would need to find org admin)
-      await Notification.create({
-        organizationId: sub.organizationId,
-        recipientId: 'system', // Would be resolved to org admin
-        type: 'warning',
-        title: `תקופת הניסיון מסתיימת בעוד ${daysRemaining} ימים`,
-        message: 'שדרג לתוכנית בתשלום כדי להמשיך להשתמש בכל התכונות',
-        actionUrl: '/billing',
-        channels: ['in_app', 'email'],
-        priority: daysRemaining <= 3 ? 'high' : 'normal',
-      });
-    }
-
-    // Auto-downgrade expired trials
-    await Subscription.updateMany(
-      { status: 'trialing', trialEnd: { $lt: now } },
-      { $set: { status: 'cancelled', plan: 'free' } }
-    );
-  } catch (error) {
-    logger.error('Error in checkSubscriptionExpiry job', { error });
-  }
-}
-
 async function cleanupOldData() {
   logger.info('Running job: cleanupOldData');
   try {
@@ -137,39 +94,6 @@ async function cleanupOldData() {
     }
   } catch (error) {
     logger.error('Error in cleanupOldData job', { error });
-  }
-}
-
-async function updateUsageStats() {
-  logger.info('Running job: updateUsageStats');
-  try {
-    const subscriptions = await Subscription.find({ status: { $in: ['active', 'trialing'] } });
-    
-    const { connectMongoDB } = await import('../config/mongodb');
-    const db = await connectMongoDB();
-
-    for (const sub of subscriptions) {
-      const orgId = sub.organizationId;
-      
-      const [userCount, broadcastCount, departmentCount] = await Promise.all([
-        db.collection('users').countDocuments({ organizationId: orgId, isActive: true }),
-        db.collection('broadcastevents').countDocuments({ organizationId: orgId }),
-        db.collection('departments').countDocuments({ organizationId: orgId }),
-      ]);
-
-      await Subscription.updateOne(
-        { _id: sub._id },
-        {
-          $set: {
-            'currentUsage.users': userCount,
-            'currentUsage.broadcastEvents': broadcastCount,
-            'currentUsage.departments': departmentCount,
-          },
-        }
-      );
-    }
-  } catch (error) {
-    logger.error('Error in updateUsageStats job', { error });
   }
 }
 
@@ -258,12 +182,10 @@ export function registerJob(name: string, intervalMs: number, handler: () => Pro
 }
 
 export function startScheduler() {
-  // Register default jobs
+  // Register default jobs (on-prem: no billing/subscription/trial jobs)
   registerJob('checkExpiringRights', 6 * 60 * 60 * 1000, checkExpiringRights);     // Every 6 hours
-  registerJob('checkSubscriptionExpiry', 12 * 60 * 60 * 1000, checkSubscriptionExpiry); // Every 12 hours
   registerJob('cleanupOldData', 24 * 60 * 60 * 1000, cleanupOldData);              // Daily
-  registerJob('updateUsageStats', 1 * 60 * 60 * 1000, updateUsageStats);           // Every hour
-  registerJob('checkStaleEquipment', 24 * 60 * 60 * 1000, checkStaleEquipment);   // Daily
+  registerJob('checkStaleEquipment', 24 * 60 * 60 * 1000, checkStaleEquipment);    // Daily
 
   // Check every minute if any job needs to run
   intervalId = setInterval(async () => {

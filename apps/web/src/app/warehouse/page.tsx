@@ -41,6 +41,7 @@ import dayjs from 'dayjs';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { Permission } from '@/rbac';
 import { useDebouncedValue } from '@/hooks/useDebounce';
+import { useAuth } from '@/contexts/AuthContext';
 
 const { RangePicker } = DatePicker;
 
@@ -95,6 +96,10 @@ function legacyEquipmentStrings(equipmentList: unknown): string[] {
 
 const WarehousePage: React.FC = () => {
   const { message } = App.useApp();
+  const { hasPermission } = useAuth();
+  const canManageWarehouse = hasPermission(Permission.WAREHOUSE_MANAGE);
+  const canDisableEquipment = hasPermission(Permission.WAREHOUSE_DISABLE_EQUIPMENT);
+  const canForceReleaseEquipment = hasPermission(Permission.WAREHOUSE_FORCE_RELEASE);
   const [searchText, setSearchText] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
@@ -550,7 +555,7 @@ const WarehousePage: React.FC = () => {
               <List.Item
                 className="hover:bg-gray-50 transition-colors"
                 actions={[
-                  ...(item.isQuantityBased ? [<Button
+                  ...(canManageWarehouse && item.isQuantityBased ? [<Button
                     key="adjust"
                     size="small"
                     icon={<PlusOutlined />}
@@ -562,7 +567,7 @@ const WarehousePage: React.FC = () => {
                   >
                     התאם כמות
                   </Button>] : []),
-                  <Button
+                  ...(canManageWarehouse ? [<Button
                     key="edit"
                     size="small"
                     onClick={(e) => {
@@ -572,8 +577,8 @@ const WarehousePage: React.FC = () => {
                     }}
                   >
                     עריכה
-                  </Button>,
-                  <Button
+                  </Button>] : []),
+                  ...(canDisableEquipment ? [<Button
                     key="disable"
                     size="small"
                     danger={item.isDisabled}
@@ -584,7 +589,7 @@ const WarehousePage: React.FC = () => {
                     }}
                   >
                     {item.isDisabled ? 'הפעל' : 'השבת'}
-                  </Button>,
+                  </Button>] : []),
                   <Button
                     key="details"
                     size="small"
@@ -961,7 +966,7 @@ const WarehousePage: React.FC = () => {
               </h1>
               <p className="text-gray-600 mt-2">ניהול ציוד וצפייה בהיסטוריית הקצאות</p>
             </div>
-            {activeTab === 'equipment' && (
+            {activeTab === 'equipment' && canManageWarehouse && (
               <Space>
                 <Button 
                   type="primary" 
@@ -1026,7 +1031,7 @@ const WarehousePage: React.FC = () => {
                   הקצאות פנימיות
                 </span>
               ),
-              children: <InternalAssignmentsTab />,
+              children: <InternalAssignmentsTab canManage={canManageWarehouse} />,
             },
             {
               key: 'vendors',
@@ -1036,7 +1041,7 @@ const WarehousePage: React.FC = () => {
                   ניהול ספקים
                 </span>
               ),
-              children: <VendorManagement />,
+              children: <VendorManagement canManage={canManageWarehouse} />,
             },
             {
               key: 'upcoming-events',
@@ -1056,7 +1061,7 @@ const WarehousePage: React.FC = () => {
                   סטים / פריסטים
                 </span>
               ),
-              children: <EquipmentSetsManager />,
+              children: <EquipmentSetsManager canManage={canManageWarehouse} />,
             },
             {
               key: 'external-requests',
@@ -1066,7 +1071,7 @@ const WarehousePage: React.FC = () => {
                   בקשות שידורי חוץ
                 </span>
               ),
-              children: <ExternalBroadcastRequests message={message} />,
+              children: <ExternalBroadcastRequests message={message} canManage={canManageWarehouse} />,
             },
             {
               key: 'tracking',
@@ -1109,9 +1114,12 @@ const WarehousePage: React.FC = () => {
             setSelectedEquipment(null);
           }}
           onEdit={() => {
+            if (!canManageWarehouse) return;
             setIsDetailsModalVisible(false);
             setIsEditModalVisible(true);
           }}
+          canManage={canManageWarehouse}
+          canForceRelease={canForceReleaseEquipment}
         />
 
         {/* Equipment Edit Modal */}

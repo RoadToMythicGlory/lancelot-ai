@@ -22,7 +22,6 @@ import { mcrResolvers } from './resolvers/mcrResolvers';
 import { aiResolvers } from './resolvers/ai';
 import { authResolvers } from './resolvers/auth';
 import { saasResolvers } from './resolvers/saas';
-import { streamerResolvers } from './resolvers/streamer';
 import { apiLimiter, graphqlLimiter, websocketLimiter } from './middleware/rateLimiter';
 import { sanitizeError, expressErrorHandler } from './middleware/errorHandler';
 import { createGraphqlLoggingPlugin } from './middleware/graphqlLogging';
@@ -34,7 +33,6 @@ import { buildGraphQLContext, buildContextFromToken } from './middleware/context
 import { pubsub } from './utils/pubsub';
 import { startScheduler, stopScheduler } from './services/jobScheduler';
 import { metrics } from './services/metrics';
-import { oauthRouter } from './services/oauthService';
 import { warehouseRoutes } from './routes/warehouseRoutes';
 import { trackingRoutes } from './routes/trackingRoutes';
 import { equipmentSetsResolvers } from './resolvers/equipmentSets';
@@ -42,10 +40,18 @@ import { internalAssignmentsResolvers } from './resolvers/internalAssignments';
 import { trackingResolvers } from './resolvers/tracking';
 import { roleTemplateResolvers } from './resolvers/roleTemplate';
 import { flightBoardResolvers } from './resolvers/flightBoard';
+import { departmentManagementResolvers } from './resolvers/departmentManagement';
+import { reloadDepartmentRoleRegistry } from './services/departmentRegistry';
+import { shiftSetupResolvers } from './resolvers/shiftSetup';
 import { startTrackerIngest, stopTrackerIngest } from './services/trackerIngestService';
 
-// Load GraphQL schema
-const typeDefs = readFileSync(join(__dirname, 'schema/schema.graphql'), 'utf8');
+// Load GraphQL schema. The shifts sub-app extends the root types in a separate
+// file so the new APL / ShiftTypeDef / Preference / SchedulingRule types live
+// alongside their resolvers without bloating the main schema.
+const typeDefs = [
+  readFileSync(join(__dirname, 'schema/schema.graphql'), 'utf8'),
+  readFileSync(join(__dirname, 'schema/shiftSetup.graphql'), 'utf8'),
+].join('\n');
 
 // Merge only broadcast-related resolvers
 const resolvers = {
@@ -87,14 +93,16 @@ const resolvers = {
     ...aiResolvers.Query,
     // Add SaaS Platform queries
     ...saasResolvers.Query,
-    // Add Streamer + Podcast queries
-    ...streamerResolvers.Query,
     // BLE Tracking queries
     ...trackingResolvers.Query,
     // Role Templates
     ...roleTemplateResolvers.Query,
     // Flight Board queries
     ...flightBoardResolvers.Query,
+    // Department management & assignment form configuration
+    ...departmentManagementResolvers.Query,
+    // Shifts sub-app first-class concepts (APL, ShiftTypeDef, Categories, Rules, Preferences, AI)
+    ...shiftSetupResolvers.Query,
     health: () => ({
       status: 'OK',
       timestamp: new Date().toISOString(),
@@ -152,14 +160,16 @@ const resolvers = {
     ...authResolvers.Mutation,
     // SaaS Platform mutations
     ...saasResolvers.Mutation,
-    // Streamer + Podcast mutations
-    ...streamerResolvers.Mutation,
     // BLE Tracking mutations
     ...trackingResolvers.Mutation,
     // Role Templates
     ...roleTemplateResolvers.Mutation,
     // Flight Board mutations
     ...flightBoardResolvers.Mutation,
+    // Department management & assignment form configuration
+    ...departmentManagementResolvers.Mutation,
+    // Shifts sub-app first-class concepts (APL, ShiftTypeDef, Categories, Rules, Preferences, AI)
+    ...shiftSetupResolvers.Mutation,
   },
   Subscription: {
     ...enhancedBroadcastResolvers.Subscription,
@@ -191,6 +201,14 @@ const resolvers = {
   VacationRequest: shiftsResolvers.VacationRequest,
   AvailabilityConstraint: shiftsResolvers.AvailabilityConstraint,
   EmployeeSettings: shiftsResolvers.EmployeeSettings,
+  // Shifts sub-app field resolvers (id coercion + nested fetches)
+  APL: shiftSetupResolvers.APL,
+  ShiftTypeDef: shiftSetupResolvers.ShiftTypeDef,
+  ShiftCategory: shiftSetupResolvers.ShiftCategory,
+  ConstraintRule: shiftSetupResolvers.ConstraintRule,
+  SchedulingRule: shiftSetupResolvers.SchedulingRule,
+  Preference: shiftSetupResolvers.Preference,
+  DepartmentShiftSetup: shiftSetupResolvers.DepartmentShiftSetup,
   // Add user field resolver
   User: userResolvers.User,
   // Role template field resolver
@@ -218,6 +236,11 @@ async function startServer() {
   try {
     // Connect to MongoDB first
     await connectMongoose();
+
+    // Load admin-managed department role permissions into the RBAC matrix
+    // before serving traffic. Subsequent admin mutations call the same
+    // helper so changes are picked up without a restart.
+    await reloadDepartmentRoleRegistry();
     
     const app = express();
     const PORT = process.env.PORT || config.PORT || 4000;
@@ -238,9 +261,6 @@ async function startServer() {
           : undefined,
       });
     });
-
-    // OAuth routes for Streamer app (social login)
-    app.use('/auth', oauthRouter);
 
     // Prometheus metrics endpoint
     app.get('/metrics', (req, res) => {

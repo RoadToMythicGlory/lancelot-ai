@@ -1,12 +1,13 @@
 import './globals.css'
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
+import { Heebo, Inter } from 'next/font/google'
 import ClientProviders from './client-providers'
 import { Toaster } from 'react-hot-toast'
 import Sidebar from '@/components/Sidebar'
 import ChatWrapper from '@/components/ChatWrapper'
 
-const inter = Inter({ subsets: ['latin'] })
+const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
+const heebo = Heebo({ subsets: ['hebrew'], variable: '--font-heebo' })
 
 export const metadata: Metadata = {
   title: 'Lancelot - Broadcast Operations Platform',
@@ -32,7 +33,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="he" dir="rtl">
-      <body className={inter.className}>
+      <body className={`${inter.variable} ${heebo.variable}`} dir="rtl">
         <ClientProviders>
           <div className="flex h-screen">
             <Sidebar />

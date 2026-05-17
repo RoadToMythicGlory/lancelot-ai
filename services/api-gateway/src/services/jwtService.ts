@@ -8,9 +8,10 @@ export interface JWTPayload {
   /** @deprecated Use systemRole instead. Kept for backward compat with old tokens. */
   role?: string;
   systemRole?: string;
-  accountType?: string; // 'streamer' for B2C users, undefined for ERP users
+  accountType?: string;
   departmentId?: string;
   departments?: any[];
+  permissions?: string[];
   firstName?: string;
   lastName?: string;
   displayName?: string;

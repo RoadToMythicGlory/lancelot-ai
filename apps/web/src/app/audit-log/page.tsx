@@ -17,8 +17,6 @@ const actionLabels: Record<string, string> = {
   DELETE: 'מחיקה',
   LOGIN: 'כניסה',
   LOGOUT: 'יציאה',
-  INVITE: 'הזמנה',
-  CHANGE_PLAN: 'שינוי תוכנית',
   REVOKE: 'ביטול',
 }
 
@@ -27,11 +25,10 @@ const resourceLabels: Record<string, string> = {
   shift: 'משמרת',
   user: 'משתמש',
   equipment: 'ציוד',
-  organization: 'ארגון',
+  organization: 'חברה',
   security_settings: 'הגדרות אבטחה',
   api_key: 'מפתח API',
   broadcast_right: 'זכויות שידור',
-  subscription: 'מנוי',
 }
 
 const severityColors: Record<string, string> = {

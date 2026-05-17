@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt';
 import { connectMongoDB } from '../config/mongodb';
 import { jwtService } from '../services/jwtService';
 import { createLogger } from '../utils/logger';
+import { computePermissions } from '../rbac';
 
 const logger = createLogger('auth');
 
@@ -65,8 +66,24 @@ export const authResolvers = {
         { $set: { lastLogin: new Date() } }
       );
 
-      // JWT carries identity + role tier — actual permissions are computed
-      // server-side from the DB on each request (see context.ts).
+      const computed = computePermissions({
+        systemRole: user.systemRole,
+        departments: user.departments,
+        permissions: user.permissions,
+      });
+      const effectivePermissions = Array.from(
+        (() => {
+          const set = new Set(computed.global);
+          computed.byDept.forEach((deptPerms) => {
+            deptPerms.forEach((perm) => set.add(perm));
+          });
+          return set;
+        })(),
+      );
+
+      // JWT carries identity plus effective permissions for client-side UI gates.
+      // Server-side authorization still recomputes permissions from the DB on
+      // each request (see context.ts), so stale tokens cannot grant API access.
       const token = jwtService.sign({
         userId: user._id.toString(),
         email: user.email,
@@ -75,6 +92,7 @@ export const authResolvers = {
         displayName: `${user.firstName || 'User'} ${user.lastName || ''}`.trim(),
         systemRole: user.systemRole || 'DEPARTMENT_USER',
         departments: user.departments || [],
+        permissions: effectivePermissions,
       });
 
       logger.info('Login successful', { email: user.email, userId: user._id.toString() });
@@ -89,6 +107,7 @@ export const authResolvers = {
           email: user.email,
           systemRole: user.systemRole || 'DEPARTMENT_USER',
           departments: user.departments || [],
+          permissions: effectivePermissions,
         },
       };
     },

@@ -1,10 +1,8 @@
 import { ObjectId } from 'mongodb';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
-import bcrypt from 'bcrypt';
 import { connectMongoDB } from '../config/mongodb';
-import { Organization, OrganizationInvite } from '../models/organization.models';
-import { Subscription, Invoice, PaymentMethod } from '../models/billing.models';
+import { Organization } from '../models/organization.models';
 import { AuditLog } from '../models/audit.models';
 import { Notification, NotificationPreference } from '../models/notification.models';
 import { WorkflowTemplate, WorkflowInstance } from '../models/workflow.models';
@@ -14,8 +12,12 @@ import { HelpArticle, SupportTicket, Changelog } from '../models/help.models';
 import { ApiKey, Webhook, WebhookDelivery } from '../models/apiKey.models';
 import { withFilter } from 'graphql-subscriptions';
 import { pubsub } from '../utils/pubsub';
-import { requireAuth as requireAuthMiddleware, requirePermission } from '../middleware/auth';
-import { Permission } from '../rbac';
+import { requireAuth as requireAuthMiddleware } from '../middleware/auth';
+
+// NOTE: This module is the ex-SaaS resolver bundle. The product is now
+// deployed on-prem for a single company, so multi-tenant signup, billing,
+// invoicing, and subscription operations were removed. We keep the
+// `saasResolvers` export name for compatibility with `index.ts` wiring.
 
 function assertValidObjectId(id: string, resourceName: string) {
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -39,6 +41,30 @@ function requireSystemAdmin(user: any) {
   }
 }
 
+/**
+ * Singleton site/company settings record. On-prem deployments don't have
+ * organization signup; we lazily create a default doc the first time it's
+ * accessed and cache the id in-process so writes always update the same row.
+ */
+let cachedSiteOrgId: mongoose.Types.ObjectId | null = null;
+async function getOrCreateSiteOrg() {
+  if (cachedSiteOrgId) {
+    const cached = await Organization.findById(cachedSiteOrgId);
+    if (cached) return cached;
+    cachedSiteOrgId = null;
+  }
+  let org = await Organization.findOne().sort({ createdAt: 1 });
+  if (!org) {
+    org = await Organization.create({
+      name: 'Site',
+      slug: 'site',
+      isActive: true,
+    });
+  }
+  cachedSiteOrgId = org._id;
+  return org;
+}
+
 async function createAuditEntry(params: {
   userId: string;
   userEmail: string;
@@ -50,7 +76,6 @@ async function createAuditEntry(params: {
   changes?: any[];
   severity?: string;
   metadata?: any;
-  organizationId?: string;
 }) {
   try {
     await AuditLog.create({
@@ -70,71 +95,15 @@ function generateTicketNumber(): string {
   return `${prefix}-${random}`;
 }
 
-function generateInvoiceNumber(): string {
-  const date = new Date();
-  const prefix = `INV-${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}`;
-  const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-  return `${prefix}-${random}`;
-}
-
 // ==================== RESOLVERS ====================
 
 export const saasResolvers = {
   Query: {
-    // ---- Organization ----
+    // ---- Site / Company settings (single-tenant) ----
     myOrganization: async (_: any, __: any, context: any) => {
-      const user = await requireAuth(context);
-      if (!user.organizationId) return null;
-      const org = await Organization.findById(user.organizationId);
-      return org ? { ...org.toObject(), id: org._id.toString() } : null;
-    },
-
-    organization: async (_: any, { id }: { id: string }, context: any) => {
       await requireAuth(context);
-      assertValidObjectId(id, 'organization');
-      const org = await Organization.findById(id);
-      return org ? { ...org.toObject(), id: org._id.toString() } : null;
-    },
-
-    organizationBySlug: async (_: any, { slug }: { slug: string }, context: any) => {
-      await requireAuth(context);
-      const org = await Organization.findOne({ slug, isActive: true });
-      return org ? { ...org.toObject(), id: org._id.toString() } : null;
-    },
-
-    organizationInvites: async (_: any, __: any, context: any) => {
-      const user = await requireAuth(context);
-      requireSystemAdmin(user);
-      const invites = await OrganizationInvite.find({
-        organizationId: user.organizationId,
-        status: 'pending',
-      }).sort({ createdAt: -1 });
-      return invites.map(i => ({ ...i.toObject(), id: i._id.toString() }));
-    },
-
-    // ---- Billing ----
-    mySubscription: async (_: any, __: any, context: any) => {
-      const user = await requireAuth(context);
-      if (!user.organizationId) return null;
-      const sub = await Subscription.findOne({ organizationId: user.organizationId });
-      return sub ? { ...sub.toObject(), id: sub._id.toString() } : null;
-    },
-
-    invoices: async (_: any, { limit = 20, offset = 0 }: any, context: any) => {
-      const user = await requireAuth(context);
-      if (!user.organizationId) return [];
-      const items = await Invoice.find({ organizationId: user.organizationId })
-        .sort({ createdAt: -1 })
-        .skip(offset)
-        .limit(limit);
-      return items.map(i => ({ ...i.toObject(), id: i._id.toString() }));
-    },
-
-    paymentMethods: async (_: any, __: any, context: any) => {
-      const user = await requireAuth(context);
-      if (!user.organizationId) return [];
-      const methods = await PaymentMethod.find({ organizationId: user.organizationId }).sort({ createdAt: -1 }).limit(200);
-      return methods.map(m => ({ ...m.toObject(), id: m._id.toString() }));
+      const org = await getOrCreateSiteOrg();
+      return { ...org.toObject(), id: org._id.toString() };
     },
 
     // ---- Audit Logs ----
@@ -143,7 +112,6 @@ export const saasResolvers = {
       requireSystemAdmin(user);
 
       const query: any = {};
-      if (user.organizationId) query.organizationId = user.organizationId;
       if (filter) {
         if (filter.userId) query.userId = filter.userId;
         if (filter.action) query.action = filter.action;
@@ -207,9 +175,8 @@ export const saasResolvers = {
 
     // ---- Workflows ----
     workflowTemplates: async (_: any, { resourceType, limit = 200, offset = 0 }: any, context: any) => {
-      const user = await requireAuth(context);
+      await requireAuth(context);
       const query: any = {};
-      if (user.organizationId) query.organizationId = user.organizationId;
       if (resourceType) query.resourceType = resourceType;
       const boundedLimit = Math.min(Math.max(Number(limit) || 200, 1), 500);
       const boundedOffset = Math.max(Number(offset) || 0, 0);
@@ -225,9 +192,8 @@ export const saasResolvers = {
     },
 
     workflowInstances: async (_: any, { status, resourceType, limit = 20, offset = 0 }: any, context: any) => {
-      const user = await requireAuth(context);
+      await requireAuth(context);
       const query: any = {};
-      if (user.organizationId) query.organizationId = user.organizationId;
       if (status) query.status = status.toLowerCase();
       if (resourceType) query.resourceType = resourceType;
       const boundedLimit = Math.min(Math.max(Number(limit) || 20, 1), 500);
@@ -255,9 +221,8 @@ export const saasResolvers = {
 
     // ---- Media Assets ----
     mediaAssets: async (_: any, { filter, limit = 20, offset = 0 }: any, context: any) => {
-      const user = await requireAuth(context);
+      await requireAuth(context);
       const query: any = { status: { $ne: 'deleted' } };
-      if (user.organizationId) query.organizationId = user.organizationId;
 
       if (filter) {
         if (filter.type) query.type = filter.type.toLowerCase();
@@ -295,9 +260,8 @@ export const saasResolvers = {
     },
 
     mediaFolders: async (_: any, { parentFolderId }: any, context: any) => {
-      const user = await requireAuth(context);
+      await requireAuth(context);
       const query: any = {};
-      if (user.organizationId) query.organizationId = user.organizationId;
       if (parentFolderId) {
         query.parentFolderId = parentFolderId;
       } else {
@@ -309,9 +273,8 @@ export const saasResolvers = {
 
     // ---- Rights & Licensing ----
     broadcastRights: async (_: any, { filter, limit = 20, offset = 0 }: any, context: any) => {
-      const user = await requireAuth(context);
+      await requireAuth(context);
       const query: any = {};
-      if (user.organizationId) query.organizationId = user.organizationId;
 
       if (filter) {
         if (filter.contentType) query.contentType = filter.contentType;
@@ -345,19 +308,18 @@ export const saasResolvers = {
     },
 
     expiringRights: async (_: any, { days }: any, context: any) => {
-      const user = await requireAuth(context);
+      await requireAuth(context);
       const futureDate = new Date();
       futureDate.setDate(futureDate.getDate() + days);
       const query: any = {
         endDate: { $lte: futureDate, $gte: new Date() },
         status: { $ne: 'expired' },
       };
-      if (user.organizationId) query.organizationId = user.organizationId;
       const items = await BroadcastRightManaged.find(query).sort({ endDate: 1 }).limit(500);
       return items.map(i => ({ ...i.toObject(), id: i._id.toString() }));
     },
 
-    // ---- Help & Support ----
+    // ---- Help articles & changelog ----
     helpArticles: async (_: any, { category, searchTerm }: any) => {
       const query: any = { isPublished: true };
       if (category) query.category = category;
@@ -381,50 +343,52 @@ export const saasResolvers = {
       return article ? { ...article.toObject(), id: article._id.toString() } : null;
     },
 
-    saasTickets: async (_: any, { status, limit = 20, offset = 0 }: any, context: any) => {
+    changelog: async (_: any, { limit = 20 }: any) => {
+      const items = await Changelog.find({ isPublished: true }).sort({ publishedAt: -1 }).limit(limit);
+      return items.map(c => ({ ...c.toObject(), id: c._id.toString() }));
+    },
+
+    // ---- Internal IT support tickets ----
+    itTickets: async (_: any, { status, limit = 20, offset = 0 }: any, context: any) => {
       const user = await requireAuth(context);
       requireSystemAdmin(user);
       const query: any = {};
-      if (user.organizationId) query.organizationId = user.organizationId;
       if (status) query.status = status.toLowerCase();
       const tickets = await SupportTicket.find(query).sort({ createdAt: -1 }).skip(offset).limit(limit);
       return tickets.map(t => ({ ...t.toObject(), id: t._id.toString() }));
     },
 
-    saasTicket: async (_: any, { id }: any, context: any) => {
-      await requireAuth(context);
+    itTicket: async (_: any, { id }: any, context: any) => {
+      const user = await requireAuth(context);
       assertValidObjectId(id, 'support ticket');
       const ticket = await SupportTicket.findById(id);
-      return ticket ? { ...ticket.toObject(), id: ticket._id.toString() } : null;
+      if (!ticket) return null;
+      // Non-admins may only read their own tickets.
+      const isStaff = ['SYSTEM_ADMIN', 'IT_ADMIN'].includes(user.systemRole);
+      if (!isStaff && String(ticket.createdBy) !== String(user._id)) {
+        throw new Error('Unauthorized: You can only view your own tickets');
+      }
+      return { ...ticket.toObject(), id: ticket._id.toString() };
     },
 
-    mySaasTickets: async (_: any, __: any, context: any) => {
+    myItTickets: async (_: any, __: any, context: any) => {
       const user = await requireAuth(context);
       const tickets = await SupportTicket.find({ createdBy: user._id.toString() }).sort({ createdAt: -1 }).limit(500);
       return tickets.map(t => ({ ...t.toObject(), id: t._id.toString() }));
-    },
-
-    changelog: async (_: any, { limit = 20 }: any) => {
-      const items = await Changelog.find({ isPublished: true }).sort({ publishedAt: -1 }).limit(limit);
-      return items.map(c => ({ ...c.toObject(), id: c._id.toString() }));
     },
 
     // ---- API Keys & Webhooks ----
     apiKeys: async (_: any, __: any, context: any) => {
       const user = await requireAuth(context);
       requireSystemAdmin(user);
-      const query: any = {};
-      if (user.organizationId) query.organizationId = user.organizationId;
-      const keys = await ApiKey.find(query).sort({ createdAt: -1 }).limit(500);
+      const keys = await ApiKey.find().sort({ createdAt: -1 }).limit(500);
       return keys.map(k => ({ ...k.toObject(), id: k._id.toString() }));
     },
 
     webhooks: async (_: any, __: any, context: any) => {
       const user = await requireAuth(context);
       requireSystemAdmin(user);
-      const query: any = {};
-      if (user.organizationId) query.organizationId = user.organizationId;
-      const hooks = await Webhook.find(query).sort({ createdAt: -1 }).limit(500);
+      const hooks = await Webhook.find().sort({ createdAt: -1 }).limit(500);
       return hooks.map(h => ({ ...h.toObject(), id: h._id.toString() }));
     },
 
@@ -440,19 +404,17 @@ export const saasResolvers = {
     // ---- Live Monitoring ----
     liveStreams: async (_: any, __: any, context: any) => {
       await requireAuth(context);
-      // Returns mock data structure - actual integration with monitoring systems
       return [];
     },
 
     signalMonitor: async (_: any, __: any, context: any) => {
       await requireAuth(context);
-      // Returns mock data structure - actual integration with signal monitoring hardware
       return [];
     },
 
     // ---- Global Search ----
     globalSearch: async (_: any, { query, types, limit = 10 }: any, context: any) => {
-      const user = await requireAuth(context);
+      await requireAuth(context);
       const db = await connectMongoDB();
       const results: any = {};
       const searchTypes = types || ['broadcasts', 'users', 'equipment', 'shifts', 'media'];
@@ -506,68 +468,13 @@ export const saasResolvers = {
   },
 
   Mutation: {
-    // ---- Organization ----
-    createOrganization: async (_: any, { input }: any, context: any) => {
-      const user = await requireAuth(context);
-
-      // Check if slug is available
-      const existing = await Organization.findOne({ slug: input.slug });
-      if (existing) throw new Error('Organization slug already taken');
-
-      const org = await Organization.create({
-        ...input,
-        plan: input.plan?.toLowerCase() || 'free',
-        isActive: true,
-        isTrial: true,
-        trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 14 days trial
-        createdBy: user._id.toString(),
-      });
-
-      // Assign org to user
-      const db = await connectMongoDB();
-      await db.collection('users').updateOne(
-        { _id: new ObjectId(user._id) },
-        { $set: { organizationId: org._id } }
-      );
-
-      // Create default subscription
-      await Subscription.create({
-        organizationId: org._id,
-        plan: input.plan?.toLowerCase() || 'free',
-        status: 'trialing',
-        billingCycle: 'monthly',
-        currentPeriodStart: new Date(),
-        currentPeriodEnd: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
-        trialStart: new Date(),
-        trialEnd: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
-        limits: getPlanLimits(input.plan?.toLowerCase() || 'free'),
-        currentUsage: { users: 1, broadcastEvents: 0, storageUsedGB: 0, departments: 0, apiCalls: 0 },
-      });
-
-      await createAuditEntry({
-        userId: user._id.toString(),
-        userEmail: user.email,
-        userName: `${user.firstName} ${user.lastName}`,
-        action: 'CREATE',
-        resource: 'organization',
-        resourceId: org._id.toString(),
-        resourceName: org.name,
-      });
-
-      return { ...org.toObject(), id: org._id.toString() };
-    },
-
+    // ---- Site / Company settings ----
     updateOrganization: async (_: any, { input }: any, context: any) => {
       const user = await requireAuth(context);
       requireSystemAdmin(user);
-      if (!user.organizationId) throw new Error('No organization found');
-
-      const org = await Organization.findByIdAndUpdate(
-        user.organizationId,
-        { $set: input },
-        { new: true }
-      );
-      if (!org) throw new Error('Organization not found');
+      const org = await getOrCreateSiteOrg();
+      Object.assign(org, input);
+      await org.save();
 
       await createAuditEntry({
         userId: user._id.toString(),
@@ -585,57 +492,48 @@ export const saasResolvers = {
     updateOrganizationSettings: async (_: any, { input }: any, context: any) => {
       const user = await requireAuth(context);
       requireSystemAdmin(user);
-      if (!user.organizationId) throw new Error('No organization found');
-
+      const org = await getOrCreateSiteOrg();
       const updateFields: any = {};
       for (const [key, value] of Object.entries(input)) {
         updateFields[`settings.${key}`] = value;
       }
-
-      const org = await Organization.findByIdAndUpdate(
-        user.organizationId,
+      const updated = await Organization.findByIdAndUpdate(
+        org._id,
         { $set: updateFields },
         { new: true }
       );
-      if (!org) throw new Error('Organization not found');
-      return { ...org.toObject(), id: org._id.toString() };
+      return { ...updated!.toObject(), id: updated!._id.toString() };
     },
 
     updateFeatureFlags: async (_: any, { input }: any, context: any) => {
       const user = await requireAuth(context);
       requireSystemAdmin(user);
-      if (!user.organizationId) throw new Error('No organization found');
-
+      const org = await getOrCreateSiteOrg();
       const updateFields: any = {};
       for (const [key, value] of Object.entries(input)) {
         if (value !== undefined) updateFields[`settings.features.${key}`] = value;
       }
-
-      const org = await Organization.findByIdAndUpdate(
-        user.organizationId,
+      const updated = await Organization.findByIdAndUpdate(
+        org._id,
         { $set: updateFields },
         { new: true }
       );
-      if (!org) throw new Error('Organization not found');
-      return { ...org.toObject(), id: org._id.toString() };
+      return { ...updated!.toObject(), id: updated!._id.toString() };
     },
 
     updateSecuritySettings: async (_: any, { input }: any, context: any) => {
       const user = await requireAuth(context);
       requireSystemAdmin(user);
-      if (!user.organizationId) throw new Error('No organization found');
-
+      const org = await getOrCreateSiteOrg();
       const updateFields: any = {};
       for (const [key, value] of Object.entries(input)) {
         if (value !== undefined) updateFields[`settings.security.${key}`] = value;
       }
-
-      const org = await Organization.findByIdAndUpdate(
-        user.organizationId,
+      const updated = await Organization.findByIdAndUpdate(
+        org._id,
         { $set: updateFields },
         { new: true }
       );
-      if (!org) throw new Error('Organization not found');
 
       await createAuditEntry({
         userId: user._id.toString(),
@@ -646,125 +544,7 @@ export const saasResolvers = {
         severity: 'warning',
       });
 
-      return { ...org.toObject(), id: org._id.toString() };
-    },
-
-    inviteUserToOrganization: async (_: any, { input }: any, context: any) => {
-      const user = await requireAuth(context);
-      requireSystemAdmin(user);
-      if (!user.organizationId) throw new Error('No organization found');
-
-      const token = crypto.randomBytes(32).toString('hex');
-      const invite = await OrganizationInvite.create({
-        organizationId: user.organizationId,
-        email: input.email,
-        role: input.role,
-        departments: input.departments || [],
-        invitedBy: user._id.toString(),
-        token,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-        status: 'pending',
-      });
-
-      await createAuditEntry({
-        userId: user._id.toString(),
-        userEmail: user.email,
-        userName: `${user.firstName} ${user.lastName}`,
-        action: 'INVITE',
-        resource: 'user',
-        resourceName: input.email,
-      });
-
-      return { ...invite.toObject(), id: invite._id.toString() };
-    },
-
-    acceptOrganizationInvite: async (_: any, { token }: any) => {
-      const invite = await OrganizationInvite.findOne({ token, status: 'pending' });
-      if (!invite) throw new Error('Invalid or expired invite');
-      if (invite.expiresAt < new Date()) {
-        await OrganizationInvite.updateOne({ _id: invite._id }, { $set: { status: 'expired' } });
-        throw new Error('Invite has expired');
-      }
-      await OrganizationInvite.updateOne(
-        { _id: invite._id },
-        { $set: { status: 'accepted', acceptedAt: new Date() } }
-      );
-      return true;
-    },
-
-    cancelOrganizationInvite: async (_: any, { inviteId }: any, context: any) => {
-      const user = await requireAuth(context);
-      requireSystemAdmin(user);
-      assertValidObjectId(inviteId, 'invite');
-      await OrganizationInvite.updateOne(
-        { _id: new ObjectId(inviteId) },
-        { $set: { status: 'cancelled' } }
-      );
-      return true;
-    },
-
-    // ---- Billing ----
-    changePlan: async (_: any, { input }: any, context: any) => {
-      const user = await requireAuth(context);
-      requireSystemAdmin(user);
-      if (!user.organizationId) throw new Error('No organization found');
-
-      const newPlan = input.plan.toLowerCase();
-      const limits = getPlanLimits(newPlan);
-
-      const sub = await Subscription.findOneAndUpdate(
-        { organizationId: user.organizationId },
-        {
-          $set: {
-            plan: newPlan,
-            billingCycle: input.billingCycle?.toLowerCase() || 'monthly',
-            limits,
-            status: 'active',
-          }
-        },
-        { new: true, upsert: true }
-      );
-
-      await Organization.updateOne(
-        { _id: user.organizationId },
-        { $set: { plan: newPlan, ...limits } }
-      );
-
-      await createAuditEntry({
-        userId: user._id.toString(),
-        userEmail: user.email,
-        userName: `${user.firstName} ${user.lastName}`,
-        action: 'CHANGE_PLAN',
-        resource: 'subscription',
-        resourceName: newPlan,
-        severity: 'warning',
-      });
-
-      return { ...sub!.toObject(), id: sub!._id.toString() };
-    },
-
-    cancelSubscription: async (_: any, { reason }: any, context: any) => {
-      const user = await requireAuth(context);
-      requireSystemAdmin(user);
-      const sub = await Subscription.findOneAndUpdate(
-        { organizationId: user.organizationId },
-        { $set: { status: 'cancelled', cancelledAt: new Date(), cancelReason: reason } },
-        { new: true }
-      );
-      if (!sub) throw new Error('Subscription not found');
-      return { ...sub.toObject(), id: sub._id.toString() };
-    },
-
-    resumeSubscription: async (_: any, __: any, context: any) => {
-      const user = await requireAuth(context);
-      requireSystemAdmin(user);
-      const sub = await Subscription.findOneAndUpdate(
-        { organizationId: user.organizationId },
-        { $set: { status: 'active', cancelledAt: null, cancelReason: null } },
-        { new: true }
-      );
-      if (!sub) throw new Error('Subscription not found');
-      return { ...sub.toObject(), id: sub._id.toString() };
+      return { ...updated!.toObject(), id: updated!._id.toString() };
     },
 
     // ---- Notifications ----
@@ -809,7 +589,7 @@ export const saasResolvers = {
       return { ...prefs.toObject(), id: prefs._id.toString() };
     },
 
-    sendSaasNotification: async (_: any, { recipientId, type, title, message, actionUrl }: any, context: any) => {
+    sendInternalNotification: async (_: any, { recipientId, type, title, message, actionUrl }: any, context: any) => {
       const user = await requireAuth(context);
       const notif = await Notification.create({
         recipientId,
@@ -823,7 +603,6 @@ export const saasResolvers = {
         priority: 'normal',
       });
 
-      // Publish for real-time subscription
       pubsub.publish('NOTIFICATION_RECEIVED', {
         notificationReceived: { ...notif.toObject(), id: notif._id.toString() },
       });
@@ -837,7 +616,6 @@ export const saasResolvers = {
       requireSystemAdmin(user);
       const template = await WorkflowTemplate.create({
         ...input,
-        organizationId: user.organizationId,
         createdBy: user._id.toString(),
       });
       return { ...template.toObject(), id: template._id.toString() };
@@ -876,7 +654,6 @@ export const saasResolvers = {
       if (!template) throw new Error('Workflow template not found');
 
       const instance = await WorkflowInstance.create({
-        organizationId: user.organizationId,
         templateId: template._id,
         templateName: template.name,
         resourceType: input.resourceType,
@@ -905,14 +682,13 @@ export const saasResolvers = {
 
       const currentStep = instance.stepHistory[instance.currentStepIndex];
       if (currentStep) {
-        currentStep.status = input.action; // 'approved', 'rejected', etc.
+        currentStep.status = input.action;
         currentStep.assigneeId = user._id.toString();
         currentStep.assigneeName = `${user.firstName} ${user.lastName}`;
         currentStep.completedAt = new Date();
         currentStep.comment = input.comment;
       }
 
-      // Move to next step or complete
       if (input.action === 'rejected') {
         instance.status = 'failed';
       } else if (instance.currentStepIndex >= instance.stepHistory.length - 1) {
@@ -926,7 +702,7 @@ export const saasResolvers = {
       return { ...instance.toObject(), id: instance._id.toString() };
     },
 
-    cancelWorkflow: async (_: any, { id, reason }: any, context: any) => {
+    cancelWorkflow: async (_: any, { id }: any, context: any) => {
       await requireAuth(context);
       assertValidObjectId(id, 'workflow instance');
       const instance = await WorkflowInstance.findByIdAndUpdate(
@@ -944,7 +720,6 @@ export const saasResolvers = {
       const asset = await MediaAsset.create({
         ...input,
         type: input.type.toLowerCase(),
-        organizationId: user.organizationId,
         uploadedBy: user._id.toString(),
         uploadedByName: `${user.firstName} ${user.lastName}`,
         status: 'ready',
@@ -997,7 +772,6 @@ export const saasResolvers = {
         nameHe,
         parentFolderId,
         path,
-        organizationId: user.organizationId,
         createdBy: user._id.toString(),
       });
       return { ...folder.toObject(), id: folder._id.toString() };
@@ -1017,7 +791,6 @@ export const saasResolvers = {
         ...input,
         exclusivity: input.exclusivity || 'non_exclusive',
         status: 'active',
-        organizationId: user.organizationId,
         createdBy: user._id.toString(),
       });
 
@@ -1035,7 +808,7 @@ export const saasResolvers = {
     },
 
     updateBroadcastRight: async (_: any, { id, input }: any, context: any) => {
-      const user = await requireAuth(context);
+      await requireAuth(context);
       assertValidObjectId(id, 'broadcast right');
       if (input.status) input.status = input.status.toLowerCase();
       const right = await BroadcastRightManaged.findByIdAndUpdate(id, { $set: input }, { new: true });
@@ -1050,8 +823,8 @@ export const saasResolvers = {
       return true;
     },
 
-    // ---- Help & Support ----
-    createSaasTicket: async (_: any, { input }: any, context: any) => {
+    // ---- Internal IT support tickets ----
+    createItTicket: async (_: any, { input }: any, context: any) => {
       const user = await requireAuth(context);
       const ticket = await SupportTicket.create({
         ticketNumber: generateTicketNumber(),
@@ -1060,7 +833,6 @@ export const saasResolvers = {
         category: input.category || 'question',
         priority: input.priority?.toLowerCase() || 'normal',
         status: 'open',
-        organizationId: user.organizationId,
         createdBy: user._id.toString(),
         createdByName: `${user.firstName} ${user.lastName}`,
         createdByEmail: user.email,
@@ -1076,7 +848,7 @@ export const saasResolvers = {
       return { ...ticket.toObject(), id: ticket._id.toString() };
     },
 
-    addTicketMessage: async (_: any, { input }: any, context: any) => {
+    addItTicketMessage: async (_: any, { input }: any, context: any) => {
       const user = await requireAuth(context);
       assertValidObjectId(input.ticketId, 'support ticket');
       const ticket = await SupportTicket.findByIdAndUpdate(
@@ -1099,7 +871,51 @@ export const saasResolvers = {
       return { ...ticket.toObject(), id: ticket._id.toString() };
     },
 
-    closeSupportTicket: async (_: any, { id, satisfactionRating, satisfactionComment }: any, context: any) => {
+    assignItTicket: async (_: any, { id, assigneeId }: any, context: any) => {
+      const user = await requireAuth(context);
+      requireSystemAdmin(user);
+      assertValidObjectId(id, 'support ticket');
+      const update: any = {};
+      if (assigneeId) {
+        assertValidObjectId(assigneeId, 'assignee');
+        const db = await connectMongoDB();
+        const assignee = await db.collection('users').findOne({ _id: new ObjectId(assigneeId) });
+        if (!assignee) throw new Error('Assignee not found');
+        update.assignedTo = assigneeId;
+        update.assignedToName = `${assignee.firstName} ${assignee.lastName}`;
+      } else {
+        update.assignedTo = null;
+        update.assignedToName = null;
+      }
+      const ticket = await SupportTicket.findByIdAndUpdate(
+        id,
+        { $set: update },
+        { new: true }
+      );
+      if (!ticket) throw new Error('Support ticket not found');
+      return { ...ticket.toObject(), id: ticket._id.toString() };
+    },
+
+    updateItTicketStatus: async (_: any, { id, status }: any, context: any) => {
+      const user = await requireAuth(context);
+      requireSystemAdmin(user);
+      assertValidObjectId(id, 'support ticket');
+      const set: any = { status: String(status).toLowerCase() };
+      if (set.status === 'resolved') set.resolvedAt = new Date();
+      if (set.status === 'closed') {
+        set.closedAt = new Date();
+        if (!set.resolvedAt) set.resolvedAt = new Date();
+      }
+      const ticket = await SupportTicket.findByIdAndUpdate(
+        id,
+        { $set: set },
+        { new: true }
+      );
+      if (!ticket) throw new Error('Support ticket not found');
+      return { ...ticket.toObject(), id: ticket._id.toString() };
+    },
+
+    closeItTicket: async (_: any, { id, satisfactionRating, satisfactionComment }: any, context: any) => {
       await requireAuth(context);
       assertValidObjectId(id, 'support ticket');
       const ticket = await SupportTicket.findByIdAndUpdate(
@@ -1139,7 +955,6 @@ export const saasResolvers = {
 
       const apiKey = await ApiKey.create({
         ...input,
-        organizationId: user.organizationId,
         keyHash,
         keyPrefix,
         createdBy: user._id.toString(),
@@ -1158,7 +973,7 @@ export const saasResolvers = {
 
       return {
         apiKey: { ...apiKey.toObject(), id: apiKey._id.toString() },
-        secret: rawKey, // Only returned once!
+        secret: rawKey,
       };
     },
 
@@ -1188,7 +1003,6 @@ export const saasResolvers = {
       const secret = crypto.randomBytes(32).toString('hex');
       const webhook = await Webhook.create({
         ...input,
-        organizationId: user.organizationId,
         secret,
         createdBy: user._id.toString(),
       });
@@ -1219,10 +1033,8 @@ export const saasResolvers = {
       const webhook = await Webhook.findById(id);
       if (!webhook) throw new Error('Webhook not found');
 
-      // Create a test delivery
       await WebhookDelivery.create({
         webhookId: webhook._id,
-        organizationId: webhook.organizationId,
         event: 'test.ping',
         payload: { type: 'test', timestamp: new Date().toISOString() },
         status: 'pending',
@@ -1233,11 +1045,6 @@ export const saasResolvers = {
   },
 
   Subscription: {
-    // Scoped to the authenticated recipient — even if other clients are
-    // listening on the same global topic, the resolver only forwards
-    // notifications whose recipientId matches the connected user. This avoids
-    // leaking another tenant's / user's notifications across the WS bus while
-    // we still publish to a single channel.
     notificationReceived: {
       subscribe: withFilter(
         (_: any, __: any, context: any) => {
@@ -1272,35 +1079,3 @@ export const saasResolvers = {
     },
   },
 };
-
-// ==================== PLAN LIMITS HELPER ====================
-
-function getPlanLimits(plan: string) {
-  switch (plan) {
-    case 'enterprise':
-      return {
-        maxUsers: 999,
-        maxBroadcastEvents: 99999,
-        maxStorageGB: 1000,
-        maxDepartments: 50,
-        maxApiCalls: 100000,
-      };
-    case 'pro':
-      return {
-        maxUsers: 50,
-        maxBroadcastEvents: 5000,
-        maxStorageGB: 100,
-        maxDepartments: 15,
-        maxApiCalls: 10000,
-      };
-    case 'free':
-    default:
-      return {
-        maxUsers: 5,
-        maxBroadcastEvents: 50,
-        maxStorageGB: 1,
-        maxDepartments: 3,
-        maxApiCalls: 1000,
-      };
-  }
-}

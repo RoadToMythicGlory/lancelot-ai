@@ -30,7 +30,11 @@ interface Vendor {
   updatedAt: string;
 }
 
-const VendorManagement: React.FC = () => {
+interface VendorManagementProps {
+  canManage?: boolean;
+}
+
+const VendorManagement: React.FC<VendorManagementProps> = ({ canManage = false }) => {
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
   const [form] = Form.useForm();
@@ -216,7 +220,7 @@ const VendorManagement: React.FC = () => {
     {
       title: 'פעולות',
       key: 'actions',
-      render: (_: any, record: Vendor) => (
+      render: (_: any, record: Vendor) => canManage ? (
         <Space>
           <Button
             type="link"
@@ -242,7 +246,7 @@ const VendorManagement: React.FC = () => {
             </Button>
           </Popconfirm>
         </Space>
-      )
+      ) : null
     }
   ];
 
@@ -274,15 +278,17 @@ const VendorManagement: React.FC = () => {
               <Option value="both">משולב</Option>
             </Select>
           </Col>
-          <Col span={6} style={{ textAlign: 'left' }}>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => setIsModalVisible(true)}
-            >
-              הוסף ספק חדש
-            </Button>
-          </Col>
+          {canManage && (
+            <Col span={6} style={{ textAlign: 'left' }}>
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => setIsModalVisible(true)}
+              >
+                הוסף ספק חדש
+              </Button>
+            </Col>
+          )}
         </Row>
       </div>
 

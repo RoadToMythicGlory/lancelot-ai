@@ -288,12 +288,18 @@ function ErrorText({ msg }: { msg?: string }) {
 // Data hooks using Apollo Client
 // ---------------------
 import { useQuery as useApolloQuery } from '@apollo/client';
+import { useAuth } from '@/contexts/AuthContext';
+import { Permission } from '@/rbac';
 
 
 
 function usePresenters() {
+  const { hasPermission } = useAuth();
+  const canList = hasPermission(Permission.USERS_VIEW);
   const { data, loading, error } = useApolloQuery(GET_PRESENTERS, {
-    variables: { isActive: true }
+    variables: { isActive: true },
+    skip: !canList,
+    errorPolicy: 'all',
   });
   return { 
     data: data?.users?.map((user: any) => ({ id: user.id, name: user.displayName || `${user.firstName} ${user.lastName}` })) || [], 
@@ -303,8 +309,12 @@ function usePresenters() {
 }
 
 function useAnchors() {
+  const { hasPermission } = useAuth();
+  const canList = hasPermission(Permission.USERS_VIEW);
   const { data, loading, error } = useApolloQuery(GET_ANCHORS, {
-    variables: { isActive: true }
+    variables: { isActive: true },
+    skip: !canList,
+    errorPolicy: 'all',
   });
   return { 
     data: data?.users?.map((user: any) => ({ id: user.id, name: user.displayName || `${user.firstName} ${user.lastName}` })) || [], 
@@ -1019,7 +1029,7 @@ function normalizeForAPI(input: EntityInput) {
 // ---------------------
 // Main Panel
 // ---------------------
-function CorePanel({ event }: { event?: any }) {
+function CorePanel({ event, canEdit = true }: { event?: any; canEdit?: boolean }) {
   const category = useUI((s) => s.category);
   const setCategory = useUI((s) => s.setCategory);
   const draft = useUI((s) => s.draft);
@@ -1037,6 +1047,10 @@ function CorePanel({ event }: { event?: any }) {
   const [updateDepartmentData] = useApolloMutation(UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA);
 
   const onSubmit = methods.handleSubmit(async (values) => {
+    if (!canEdit) {
+      console.warn('Save attempted without BROADCAST_MANAGE permission');
+      return;
+    }
     try {
       const normalizedData = normalizeForAPI(values);
       await updateDepartmentData({
@@ -1112,12 +1126,16 @@ function CorePanel({ event }: { event?: any }) {
         {/* Bottom Action Buttons */}
         <div className="mt-8 pt-6 border-t border-gray-700/50">
           <div className="flex items-center justify-end gap-4">
-            <Button type="button" variant="ghost" onClick={() => methods.reset(createDefaults(event))}>
-              איפוס
-            </Button>
-            <Button type="button" onClick={onSubmit}>
-              שמור
-            </Button>
+            {canEdit && (
+              <>
+                <Button type="button" variant="ghost" onClick={() => methods.reset(createDefaults(event))}>
+                  איפוס
+                </Button>
+                <Button type="button" onClick={onSubmit}>
+                  שמור
+                </Button>
+              </>
+            )}
           </div>
         </div>
 
@@ -1131,11 +1149,11 @@ function CorePanel({ event }: { event?: any }) {
 // ---------------------
 // Provider Wrapper
 // ---------------------
-function LancelotAdvancedIngestPanel({ event }: { event?: any }) {
+function LancelotAdvancedIngestPanel({ event, canEdit = true }: { event?: any; canEdit?: boolean }) {
   return (
     <QueryClientProvider client={queryClient}>
       <div className="min-h-full" dir="rtl">
-        <CorePanel event={event} />
+        <CorePanel event={event} canEdit={canEdit} />
       </div>
     </QueryClientProvider>
   );
@@ -1149,9 +1167,11 @@ interface RundownModalProps {
   event: any;
   onClose: () => void;
   onDataSaved: () => void;
+  /** When false, hides graphics creator and save controls. */
+  canEdit?: boolean;
 }
 
-export default function RundownModal({ visible, event, onClose, onDataSaved }: RundownModalProps) {
+export default function RundownModal({ visible, event, onClose, onDataSaved, canEdit = true }: RundownModalProps) {
   const [updateDepartmentData] = useApolloMutation(UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA);
   
   // Graphics Creation System State
@@ -1237,6 +1257,20 @@ export default function RundownModal({ visible, event, onClose, onDataSaved }: R
             
             {/* Graphics Creation System */}
             <div className="flex items-center gap-2">
+              {!canEdit && (
+                <span style={{
+                  padding: '4px 12px',
+                  borderRadius: 6,
+                  backgroundColor: '#fff7e6',
+                  color: '#ad6800',
+                  border: '1px solid #ffd591',
+                  fontSize: 13,
+                  fontWeight: 500,
+                }}>
+                  לקריאה בלבד
+                </span>
+              )}
+              {canEdit && (
               <button
                 onClick={() => setGraphicsCreatorVisible(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600/20 to-purple-600/20 hover:from-blue-600/40 hover:to-purple-600/40 text-blue-200 hover:text-white rounded-lg border border-blue-500/30 transition-all duration-200"
@@ -1250,12 +1284,13 @@ export default function RundownModal({ visible, event, onClose, onDataSaved }: R
                   <path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z" />
                 </svg>
               </button>
+              )}
             </div>
           </div>
           
           {/* Content Area */}
           <div className="h-[calc(100%-80px)] overflow-auto">
-            <LancelotAdvancedIngestPanel event={event} />
+            <LancelotAdvancedIngestPanel event={event} canEdit={canEdit} />
           </div>
         </div>
       </div>

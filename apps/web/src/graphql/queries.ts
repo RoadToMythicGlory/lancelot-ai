@@ -137,7 +137,122 @@ export const GET_DEPARTMENTS = gql`
       name
       hebrewName
       code
+      category
+      description
+      isActive
+      roles
+      includesDepartmentCodes
+      permissions
+      departmentRoles {
+        key
+        name
+        hebrewName
+        description
+        permissions
+        order
+        isActive
+      }
       createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const GET_DEPARTMENT = gql`
+  query GetDepartment($code: String!) {
+    department(code: $code) {
+      id
+      name
+      hebrewName
+      code
+      category
+      description
+      isActive
+      roles
+      includesDepartmentCodes
+      permissions
+      departmentRoles {
+        key
+        name
+        hebrewName
+        description
+        permissions
+        order
+        isActive
+      }
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const GET_ASSIGNMENT_FORM_CONFIGS = gql`
+  query GetAssignmentFormConfigs {
+    assignmentFormConfigs {
+      id
+      formKey
+      name
+      hebrewName
+      description
+      allowUserPresets
+      isActive
+      departments {
+        departmentCode
+        allowedRoleKeys
+        requireUser
+        defaultCount
+        order
+      }
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const GET_ASSIGNMENT_FORM_CONFIG = gql`
+  query GetAssignmentFormConfig($formKey: String!) {
+    assignmentFormConfig(formKey: $formKey) {
+      id
+      formKey
+      name
+      hebrewName
+      description
+      allowUserPresets
+      isActive
+      departments {
+        departmentCode
+        allowedRoleKeys
+        requireUser
+        defaultCount
+        order
+      }
+    }
+  }
+`;
+
+export const GET_ASSIGNMENT_PRESETS = gql`
+  query GetAssignmentPresets($formKey: String!) {
+    assignmentPresets(formKey: $formKey) {
+      id
+      formKey
+      name
+      description
+      tags
+      isDefault
+      isShared
+      isActive
+      createdBy
+      createdByName
+      jobs {
+        departmentCode
+        roleKey
+        roleLabel
+        count
+        userId
+        userName
+      }
+      createdAt
+      updatedAt
     }
   }
 `;
@@ -152,6 +267,11 @@ export const GET_USERS = gql`
       displayName
       email
       department
+      departments {
+        departmentId
+        departmentName
+        roles
+      }
       lastLogin
       publicKey
       publicKeyFingerprint

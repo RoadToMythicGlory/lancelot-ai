@@ -19,7 +19,6 @@ import {
   ChartBarIcon,
   PresentationChartLineIcon,
   Cog6ToothIcon,
-  CreditCardIcon,
   ShieldCheckIcon,
   PhotoIcon,
   DocumentCheckIcon,
@@ -27,6 +26,7 @@ import {
   QuestionMarkCircleIcon,
   UserCircleIcon,
   GlobeAltIcon,
+  LifebuoyIcon,
 } from '@heroicons/react/24/outline'
 import NotificationCenter from './NotificationCenter'
 import InboxCenter from './InboxCenter'
@@ -37,6 +37,8 @@ interface NavItem {
   href: string
   icon: React.ForwardRefExoticComponent<any>
   requires?: Permission
+  /** If set, the user needs at least one of these to see the link. */
+  requiresAny?: Permission[]
 }
 
 export default function Sidebar() {
@@ -53,7 +55,14 @@ export default function Sidebar() {
 
   const mainNavigation: NavItem[] = [
     { name: 'דף הבית', href: '/', icon: HomeIcon, requires: Permission.DASHBOARD_VIEW },
-    { name: 'משתמשים', href: '/users', icon: UsersIcon, requires: Permission.USERS_VIEW },
+    {
+      name: 'משתמשים',
+      href: '/users',
+      icon: UsersIcon,
+      // Only show to admins who can actually manage users. Plain USERS_VIEW
+      // (e.g. an MCR Operator with a stale token) no longer surfaces the link.
+      requiresAny: [Permission.USERS_MANAGE_DEPT, Permission.USERS_MANAGE_ALL],
+    },
     { name: 'משמרות', href: '/shifts', icon: CalendarIcon, requires: Permission.SHIFTS_VIEW_OWN },
     { name: 'תכנונית', href: '/broadcast-planning', icon: CalendarIcon, requires: Permission.BROADCAST_VIEW },
     { name: 'שידורי חוץ', href: '/external-broadcasts', icon: GlobeAltIcon, requires: Permission.BROADCAST_VIEW },
@@ -62,7 +71,7 @@ export default function Sidebar() {
     { name: 'מחסן', href: '/warehouse', icon: CubeIcon, requires: Permission.WAREHOUSE_VIEW },
   ]
 
-  const saasNavigation: NavItem[] = [
+  const managementNavigation: NavItem[] = [
     { name: 'מדיה (DAM)', href: '/media', icon: PhotoIcon, requires: Permission.MEDIA_VIEW },
     { name: 'זכויות שידור', href: '/rights', icon: DocumentCheckIcon, requires: Permission.RIGHTS_VIEW },
     { name: 'תהליכים', href: '/workflows', icon: ArrowPathIcon, requires: Permission.WORKFLOWS_VIEW },
@@ -70,21 +79,27 @@ export default function Sidebar() {
 
   const bottomNavigation: NavItem[] = [
     { name: 'הגדרות', href: '/settings', icon: Cog6ToothIcon, requires: Permission.SETTINGS_VIEW },
-    { name: 'חיוב', href: '/billing', icon: CreditCardIcon, requires: Permission.BILLING_VIEW },
+    { name: 'תמיכת IT', href: '/it-support', icon: LifebuoyIcon, requires: Permission.IT_SUPPORT_MANAGE },
     { name: 'יומן ביקורת', href: '/audit-log', icon: ShieldCheckIcon, requires: Permission.AUDIT_VIEW },
     { name: 'עזרה', href: '/help', icon: QuestionMarkCircleIcon },
   ]
 
+  const passesGate = (item: NavItem) => {
+    if (item.requires && !hasPermission(item.requires)) return false
+    if (item.requiresAny && !item.requiresAny.some((p) => hasPermission(p))) return false
+    return true
+  }
+
   const filteredMain = useMemo(
-    () => mainNavigation.filter((item) => !item.requires || hasPermission(item.requires)),
+    () => mainNavigation.filter(passesGate),
     [hasPermission],
   )
-  const filteredSaas = useMemo(
-    () => saasNavigation.filter((item) => !item.requires || hasPermission(item.requires)),
+  const filteredManagement = useMemo(
+    () => managementNavigation.filter(passesGate),
     [hasPermission],
   )
   const filteredBottom = useMemo(
-    () => bottomNavigation.filter((item) => !item.requires || hasPermission(item.requires)),
+    () => bottomNavigation.filter(passesGate),
     [hasPermission],
   )
 
@@ -192,15 +207,15 @@ export default function Sidebar() {
             {/* Main navigation */}
             {filteredMain.map(renderNavItem)}
 
-            {/* SaaS Features separator */}
-            {filteredSaas.length > 0 && !isCollapsed && (
+            {/* Management features separator */}
+            {filteredManagement.length > 0 && !isCollapsed && (
               <div className="pt-3 pb-1">
                 <p className="px-3 text-xs font-semibold text-gray-400 uppercase">ניהול</p>
               </div>
             )}
 
-            {/* SaaS navigation */}
-            {filteredSaas.map(renderNavItem)}
+            {/* Management navigation */}
+            {filteredManagement.map(renderNavItem)}
 
             {/* Bottom separator */}
             {filteredBottom.length > 0 && !isCollapsed && (

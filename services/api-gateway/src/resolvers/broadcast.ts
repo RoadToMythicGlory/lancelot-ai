@@ -155,6 +155,27 @@ export const broadcastResolvers = {
           .map((d: any) => {
             const code = d.code ? String(d.code) : null;
             const now = new Date();
+
+            // Roles can be either an array of strings (legacy) or an array of
+            // role definitions ({ key, name, permissions, ... }). Normalize
+            // both shapes into the legacy `roles: [String!]` field plus the
+            // richer `departmentRoles: [DepartmentRoleDef!]` list.
+            const rawRoles = Array.isArray(d.roles) ? d.roles : [];
+            const legacyRoleNames = rawRoles
+              .map((r: any) => (typeof r === 'string' ? r : r?.name || r?.key))
+              .filter(Boolean);
+            const departmentRoles = rawRoles
+              .filter((r: any) => r && typeof r === 'object' && r.key)
+              .map((r: any) => ({
+                key: String(r.key),
+                name: String(r.name || r.key),
+                hebrewName: r.hebrewName ?? null,
+                description: r.description ?? null,
+                permissions: Array.isArray(r.permissions) ? r.permissions : [],
+                order: typeof r.order === 'number' ? r.order : 0,
+                isActive: r.isActive !== false,
+              }));
+
             return {
               id: code || d._id.toString(),
               name: d.name ? String(d.name) : (code || 'Unknown'),
@@ -162,10 +183,15 @@ export const broadcastResolvers = {
               code: code,
               createdAt: d.createdAt || now,
               category: d.category ? String(d.category) : 'General',
-              roles: Array.isArray(d.roles) ? d.roles : [],
+              roles: legacyRoleNames,
               description: d.description ?? null,
               isActive: d.isActive !== false,
               updatedAt: d.updatedAt || d.createdAt || now,
+              departmentRoles,
+              includesDepartmentCodes: Array.isArray(d.includesDepartmentCodes)
+                ? d.includesDepartmentCodes
+                : [],
+              permissions: Array.isArray(d.permissions) ? d.permissions : [],
             };
           });
       } catch (error) {

@@ -82,7 +82,11 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   cancelled: { label: 'בוטל', color: 'red' },
 };
 
-const InternalAssignmentsTab: React.FC = () => {
+interface InternalAssignmentsTabProps {
+  canManage?: boolean;
+}
+
+const InternalAssignmentsTab: React.FC<InternalAssignmentsTabProps> = ({ canManage = false }) => {
   const { message, modal } = App.useApp();
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
@@ -184,7 +188,7 @@ const InternalAssignmentsTab: React.FC = () => {
       <List.Item
         key={a.id}
         actions={
-          isActive
+          canManage && isActive
             ? [
                 <Button
                   key="transfer"
@@ -342,7 +346,7 @@ const InternalAssignmentsTab: React.FC = () => {
             )}
           </Space>
         }
-        extra={
+        extra={canManage ? (
           <Button
             type="primary"
             icon={<PlusOutlined />}
@@ -351,7 +355,7 @@ const InternalAssignmentsTab: React.FC = () => {
           >
             הקצה ציוד לעובד
           </Button>
-        }
+        ) : undefined}
       >
         {loading && !data ? (
           <div className="text-center py-8">
@@ -368,7 +372,7 @@ const InternalAssignmentsTab: React.FC = () => {
                 : 'לא נמצאו הקצאות תואמות לסינון'
             }
           >
-            {statusFilter === 'active' && (
+            {canManage && statusFilter === 'active' && (
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setDispatchOpen(true)}>
                 הקצאה חדשה
               </Button>
@@ -387,22 +391,26 @@ const InternalAssignmentsTab: React.FC = () => {
         )}
       </Card>
 
-      <InternalAssignmentDispatchModal
-        visible={dispatchOpen}
-        onClose={() => setDispatchOpen(false)}
-        onSuccess={() => {
-          refetch();
-        }}
-      />
+      {canManage && (
+        <>
+          <InternalAssignmentDispatchModal
+            visible={dispatchOpen}
+            onClose={() => setDispatchOpen(false)}
+            onSuccess={() => {
+              refetch();
+            }}
+          />
 
-      <InternalAssignmentTransferModal
-        visible={transferTarget !== null}
-        assignment={transferTarget}
-        onClose={() => setTransferTarget(null)}
-        onSuccess={() => {
-          refetch();
-        }}
-      />
+          <InternalAssignmentTransferModal
+            visible={transferTarget !== null}
+            assignment={transferTarget}
+            onClose={() => setTransferTarget(null)}
+            onSuccess={() => {
+              refetch();
+            }}
+          />
+        </>
+      )}
     </>
   );
 };

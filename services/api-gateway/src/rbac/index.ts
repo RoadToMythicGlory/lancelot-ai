@@ -12,6 +12,8 @@ export {
   hasPermission,
   hasPermissionForDept,
   canManageUser,
+  setDepartmentRoleRegistry,
+  clearDepartmentRoleRegistry,
   type ComputedPermissions,
   type UserForPermissions,
 } from './matrix';

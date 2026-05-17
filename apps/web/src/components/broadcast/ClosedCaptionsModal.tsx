@@ -17,6 +17,8 @@ interface ClosedCaptionsModalProps {
   event: BroadcastEvent;
   onClose: () => void;
   onDataSaved?: () => void;
+  /** When false, hides save / not-applicable buttons and disables form fields. */
+  canEdit?: boolean;
 }
 
 const ClosedCaptionsModal: React.FC<ClosedCaptionsModalProps> = ({
@@ -24,6 +26,7 @@ const ClosedCaptionsModal: React.FC<ClosedCaptionsModalProps> = ({
   event,
   onClose,
   onDataSaved,
+  canEdit = true,
 }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
@@ -84,6 +87,7 @@ const ClosedCaptionsModal: React.FC<ClosedCaptionsModalProps> = ({
   ];
 
   const handleSubmit = async (values: any) => {
+    if (!canEdit) return;
     setLoading(true);
     try {
       // Map form value to display value
@@ -142,12 +146,25 @@ const ClosedCaptionsModal: React.FC<ClosedCaptionsModalProps> = ({
         <div className="flex items-center gap-2">
           <MessageOutlined />
           <span>כתוביות סמויות</span>
+          {!canEdit && (
+            <span style={{
+              padding: '2px 8px',
+              borderRadius: 4,
+              backgroundColor: '#fff7e6',
+              color: '#ad6800',
+              border: '1px solid #ffd591',
+              fontSize: 12,
+              fontWeight: 500,
+            }}>
+              לקריאה בלבד
+            </span>
+          )}
         </div>
       }
       open={visible}
       onCancel={onClose}
       width={600}
-      footer={[
+      footer={canEdit ? [
         <Button key="cancel" onClick={onClose}>
           ביטול
         </Button>,
@@ -194,6 +211,10 @@ const ClosedCaptionsModal: React.FC<ClosedCaptionsModalProps> = ({
         >
           שמור
         </Button>,
+      ] : [
+        <Button key="close" onClick={onClose}>
+          סגור
+        </Button>,
       ]}
     >
       <Form
@@ -201,6 +222,7 @@ const ClosedCaptionsModal: React.FC<ClosedCaptionsModalProps> = ({
         layout="vertical"
         onFinish={handleSubmit}
         initialValues={{ captionType: 'none' }}
+        disabled={!canEdit}
       >
         <div className="mb-4">
           <Card size="small" className="bg-purple-50">

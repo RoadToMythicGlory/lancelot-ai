@@ -5,6 +5,22 @@ import { ConfigProvider, App, unstableSetRender } from 'antd';
 import { createRoot, type Root } from 'react-dom/client';
 import heIL from 'antd/lib/locale/he_IL';
 
+// Register dayjs Hebrew locale globally so every component renders weekday/
+// month names in Hebrew without needing local imports. This must happen before
+// any dayjs() call in the React tree.
+import dayjs from 'dayjs';
+import 'dayjs/locale/he';
+import weekday from 'dayjs/plugin/weekday';
+import localeData from 'dayjs/plugin/localeData';
+import isoWeek from 'dayjs/plugin/isoWeek';
+import customParseFormat from 'dayjs/plugin/customParseFormat';
+
+dayjs.extend(weekday);
+dayjs.extend(localeData);
+dayjs.extend(isoWeek);
+dayjs.extend(customParseFormat);
+dayjs.locale('he');
+
 // React 19 compatibility shim for antd v5.
 // Next.js 15 ships a bundled React 19 that antd v5 detects at runtime, which
 // produces the "[antd: compatible] antd v5 support React is 16 ~ 18" warning
@@ -28,12 +44,9 @@ unstableSetRender((node, container) => {
 // Apollo Client Provider
 import { ApolloProvider } from '@apollo/client';
 import { apolloClient } from '../lib/apollo-client';
-import { Heebo } from 'next/font/google';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { WebSocketProvider } from '@/contexts/WebSocketContext';
 import { ChatProvider } from '@/contexts/ChatContext';
-
-const heebo = Heebo({ subsets: ['hebrew'] });
 
 export default function ClientProviders({
   children,
@@ -50,9 +63,10 @@ export default function ClientProviders({
           direction="rtl"
           theme={{
             token: {
-              fontFamily: heebo.style.fontFamily,
+              fontFamily: 'var(--font-heebo), var(--font-inter), system-ui, sans-serif',
               borderRadius: 8,
               colorPrimary: '#1890ff',
+              motion: false,
             },
             components: {
               Card: {

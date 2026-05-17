@@ -30,6 +30,8 @@ interface BroadcastEventModalProps {
   onClose: () => void;
   onUpdate?: (departmentData: any) => Promise<void>;
   onDataSaved?: () => void;
+  /** When false, all child department modals render in read-only mode (no save). */
+  canEdit?: boolean;
 }
 
 type Department = 
@@ -48,6 +50,7 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
   onClose,
   onUpdate,
   onDataSaved,
+  canEdit = false,
 }) => {
   const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
   const [saving, setSaving] = useState(false);
@@ -344,14 +347,34 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
   return (
     <>
       <Modal
-        title={`ניהול אירוע: ${event?.hebrewTitle || event?.title || 'אירוע שידור'}`}
+        title={
+          <span>
+            {`${canEdit ? 'ניהול' : 'צפייה ב'}אירוע: ${event?.hebrewTitle || event?.title || 'אירוע שידור'}`}
+            {!canEdit && (
+              <span style={{
+                marginInlineStart: 8,
+                padding: '2px 8px',
+                borderRadius: 4,
+                backgroundColor: '#fff7e6',
+                color: '#ad6800',
+                border: '1px solid #ffd591',
+                fontSize: 12,
+                fontWeight: 500,
+              }}>
+                לקריאה בלבד
+              </span>
+            )}
+          </span>
+        }
         open={visible && selectedDepartment !== 'rundown'}
         onCancel={onClose}
         footer={null}
         width={800}
       >
         <div className="text-center mb-4">
-          <p className="text-gray-600">בחר מחלקה לעדכון פרטי האירוע</p>
+          <p className="text-gray-600">
+            {canEdit ? 'בחר מחלקה לעדכון פרטי האירוע' : 'בחר מחלקה לצפייה בפרטי האירוע (אין לך הרשאת עריכה)'}
+          </p>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -444,6 +467,7 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
           event={event}
           onClose={handleDepartmentModalClose}
           onDataSaved={onDataSaved}
+          canEdit={canEdit}
         />
       )}
 
@@ -453,6 +477,7 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
           event={event}
           onClose={handleDepartmentModalClose}
           onDataSaved={onDataSaved}
+          canEdit={canEdit}
         />
       )}
 
@@ -462,6 +487,7 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
           event={event}
           onClose={handleDepartmentModalClose}
           onDataSaved={onDataSaved}
+          canEdit={canEdit}
         />
       )}
 
@@ -471,6 +497,7 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
           event={event}
           onClose={handleDepartmentModalClose}
           onDataSaved={onDataSaved}
+          canEdit={canEdit}
         />
       )}
 
@@ -480,6 +507,7 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
           event={event}
           onClose={handleDepartmentModalClose}
           onDataSaved={onDataSaved}
+          canEdit={canEdit}
         />
       )}
 
@@ -489,6 +517,7 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
           event={event}
           onClose={handleDepartmentModalClose}
           onDataSaved={onDataSaved}
+          canEdit={canEdit}
         />
       )}
     </>

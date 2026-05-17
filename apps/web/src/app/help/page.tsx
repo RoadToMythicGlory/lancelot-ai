@@ -19,16 +19,16 @@ import { Permission } from '@/rbac'
 import {
   GET_HELP_ARTICLES,
   GET_HELP_ARTICLE,
-  GET_MY_SUPPORT_TICKETS,
   GET_CHANGELOG,
-  GET_SUPPORT_TICKET,
 } from '@/graphql/saasQueries'
+import { GET_MY_IT_TICKETS, GET_IT_TICKET } from '@/graphql/itSupportQueries'
+import {
+  CREATE_IT_TICKET,
+  ADD_IT_TICKET_MESSAGE,
+} from '@/graphql/itSupportMutations'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
-  CREATE_SUPPORT_TICKET,
-  ADD_TICKET_MESSAGE,
-  CLOSE_SUPPORT_TICKET,
   RATE_HELP_ARTICLE,
   REINDEX_AI_KNOWLEDGE,
 } from '@/graphql/saasMutations'
@@ -42,7 +42,6 @@ const categoryLabels: Record<string, string> = {
   chat: 'צ\'אט',
   ai: 'AI',
   admin: 'ניהול',
-  billing: 'חיוב',
   api: 'API',
   troubleshooting: 'פתרון בעיות',
 }
@@ -50,8 +49,8 @@ const categoryLabels: Record<string, string> = {
 const ticketStatusLabels: Record<string, { label: string; color: string }> = {
   open: { label: 'פתוח', color: 'blue' },
   in_progress: { label: 'בטיפול', color: 'processing' },
-  waiting_on_customer: { label: 'ממתין לתגובתך', color: 'orange' },
-  waiting_on_support: { label: 'ממתין לתמיכה', color: 'purple' },
+  waiting_on_user: { label: 'ממתין לתגובתך', color: 'orange' },
+  waiting_on_it: { label: 'ממתין לצוות IT', color: 'purple' },
   resolved: { label: 'נפתר', color: 'green' },
   closed: { label: 'סגור', color: 'default' },
 }
@@ -90,11 +89,11 @@ export default function HelpPage() {
   const { data: articlesData, loading: aLoading } = useQuery(GET_HELP_ARTICLES, {
     variables: { category: selectedCategory, searchTerm: searchTerm || undefined },
   })
-  const { data: ticketsData, loading: tLoading, refetch: refetchTickets } = useQuery(GET_MY_SUPPORT_TICKETS)
+  const { data: ticketsData, loading: tLoading, refetch: refetchTickets } = useQuery(GET_MY_IT_TICKETS)
   const { data: changelogData, loading: cLoading } = useQuery(GET_CHANGELOG, {
     variables: { limit: 20 },
   })
-  const { data: ticketDetailData } = useQuery(GET_SUPPORT_TICKET, {
+  const { data: ticketDetailData } = useQuery(GET_IT_TICKET, {
     variables: { id: selectedTicketId },
     skip: !selectedTicketId,
   })
@@ -103,14 +102,14 @@ export default function HelpPage() {
     skip: !selectedArticleSlug,
   })
 
-  const [createTicket] = useMutation(CREATE_SUPPORT_TICKET)
-  const [addMessage] = useMutation(ADD_TICKET_MESSAGE)
+  const [createTicket] = useMutation(CREATE_IT_TICKET)
+  const [addMessage] = useMutation(ADD_IT_TICKET_MESSAGE)
   const [rateArticle] = useMutation(RATE_HELP_ARTICLE)
 
   const articles = articlesData?.helpArticles || []
-  const tickets = ticketsData?.mySaasTickets || []
+  const tickets = ticketsData?.myItTickets || []
   const changelog = changelogData?.changelog || []
-  const ticketDetail = ticketDetailData?.saasTicket
+  const ticketDetail = ticketDetailData?.itTicket
   const articleDetail = articleDetailData?.helpArticle
 
   const handleCreateTicket = async (values: any) => {
@@ -137,9 +136,9 @@ export default function HelpPage() {
         <div>
           <div className="flex items-center gap-3 mb-2">
             <QuestionMarkCircleIcon className="h-7 w-7 text-blue-600" />
-            <h1 className="text-2xl font-bold text-gray-900">מרכז עזרה ותמיכה</h1>
+            <h1 className="text-2xl font-bold text-gray-900">מרכז עזרה ותמיכת IT פנימית</h1>
           </div>
-          <p className="text-gray-500">מאמרי עזרה, פניות תמיכה ולוג שינויים</p>
+          <p className="text-gray-500">מאמרי עזרה, פניות לצוות ה-IT הפנימי ולוג שינויי מערכת</p>
         </div>
         {canManageAIKnowledge && (
           <Tooltip
@@ -243,7 +242,7 @@ export default function HelpPage() {
             label: (
               <span className="flex items-center gap-2">
                 <TicketIcon className="h-4 w-4" />
-                פניות תמיכה
+                פניות תמיכת IT
                 {tickets.filter((t: any) => t.status !== 'closed').length > 0 && (
                   <Badge count={tickets.filter((t: any) => t.status !== 'closed').length} />
                 )}
@@ -252,7 +251,7 @@ export default function HelpPage() {
             children: (
               <div>
                 <div className="flex justify-between mb-4">
-                  <h3 className="text-lg font-semibold">הפניות שלי</h3>
+                  <h3 className="text-lg font-semibold">פניות תמיכה שלי לצוות ה-IT</h3>
                   <Button
                     type="primary"
                     icon={<PlusIcon className="h-4 w-4" />}
@@ -350,7 +349,7 @@ export default function HelpPage() {
 
       {/* Create Ticket Modal */}
       <Modal
-        title="פנייה חדשה"
+        title="פנייה חדשה לצוות ה-IT"
         open={createTicketModal}
         onCancel={() => setCreateTicketModal(false)}
         footer={null}
@@ -360,11 +359,12 @@ export default function HelpPage() {
             <Input />
           </Form.Item>
           <Form.Item name="category" label="קטגוריה">
-            <Select defaultValue="question">
-              <Select.Option value="bug">באג</Select.Option>
+            <Select defaultValue="technical">
+              <Select.Option value="bug">תקלה / באג</Select.Option>
               <Select.Option value="feature_request">בקשת תכונה</Select.Option>
               <Select.Option value="question">שאלה</Select.Option>
-              <Select.Option value="billing">חיוב</Select.Option>
+              <Select.Option value="hardware">חומרה / ציוד</Select.Option>
+              <Select.Option value="access">גישה / הרשאות</Select.Option>
               <Select.Option value="technical">טכני</Select.Option>
               <Select.Option value="other">אחר</Select.Option>
             </Select>

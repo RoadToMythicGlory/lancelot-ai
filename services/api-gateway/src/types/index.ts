@@ -16,7 +16,7 @@ export interface AuthUser {
   permissions: string[];
   /** Computed permission sets. */
   computed: ComputedPermissions;
-  /** Check a global permission. */
+  /** Check a permission granted globally or by any assigned department role. */
   has(perm: Permission): boolean;
   /** Check a permission scoped to a department. */
   hasForDept(perm: Permission, deptId: string): boolean;

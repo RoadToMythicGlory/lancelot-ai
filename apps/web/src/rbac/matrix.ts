@@ -18,70 +18,30 @@ const ALL_PERMS = Object.values(Permission);
 const SYSTEM_ADMIN_PERMS: Permission[] = ALL_PERMS;
 
 const IT_ADMIN_PERMS: Permission[] = ALL_PERMS.filter(
-  (p) => p !== Permission.ORG_MANAGE && p !== Permission.ROLE_TEMPLATES_MANAGE,
+  (p) => p !== Permission.ROLE_TEMPLATES_MANAGE,
 );
 
 const IT_USER_PERMS: Permission[] = [
   Permission.DASHBOARD_VIEW,
-  Permission.USERS_VIEW,
-  Permission.BROADCAST_VIEW,
-  Permission.WAREHOUSE_VIEW,
   Permission.SHIFTS_VIEW_OWN,
-  Permission.SHIFTS_VIEW_ALL,
-  Permission.MCR_VIEW,
-  Permission.VIZRT_VIEW,
-  Permission.BILLING_VIEW,
-  Permission.AUDIT_VIEW,
   Permission.CHAT_USE,
-  Permission.MEDIA_VIEW,
-  Permission.RIGHTS_VIEW,
-  Permission.WORKFLOWS_VIEW,
-  Permission.SETTINGS_VIEW,
-  Permission.SETTINGS_MANAGE,
-  Permission.INTEGRATIONS_VIEW,
-  Permission.INTEGRATIONS_MANAGE,
-  Permission.ORG_VIEW,
-  Permission.FLIGHT_BOARD_VIEW,
+  Permission.IT_SUPPORT_VIEW,
 ];
 
 const DEPARTMENT_ADMIN_PERMS: Permission[] = [
   Permission.DASHBOARD_VIEW,
-  Permission.DASHBOARD_MANAGE,
   Permission.USERS_VIEW,
   Permission.USERS_MANAGE_DEPT,
-  Permission.BROADCAST_VIEW,
-  Permission.BROADCAST_MANAGE,
-  Permission.WAREHOUSE_VIEW,
-  Permission.WAREHOUSE_MANAGE,
   Permission.SHIFTS_VIEW_OWN,
   Permission.SHIFTS_VIEW_ALL,
   Permission.SHIFTS_MANAGE,
-  Permission.MCR_VIEW,
-  Permission.MCR_MANAGE,
-  Permission.VIZRT_VIEW,
   Permission.CHAT_USE,
-  Permission.MEDIA_VIEW,
-  Permission.RIGHTS_VIEW,
-  Permission.WORKFLOWS_VIEW,
-  Permission.SETTINGS_VIEW,
-  Permission.INTEGRATIONS_VIEW,
-  Permission.FLIGHT_BOARD_VIEW,
-  Permission.FLIGHT_BOARD_MANAGE,
 ];
 
 const DEPARTMENT_USER_PERMS: Permission[] = [
   Permission.DASHBOARD_VIEW,
-  Permission.USERS_VIEW,
-  Permission.BROADCAST_VIEW,
-  Permission.WAREHOUSE_VIEW,
   Permission.SHIFTS_VIEW_OWN,
-  Permission.MCR_VIEW,
-  Permission.VIZRT_VIEW,
   Permission.CHAT_USE,
-  Permission.MEDIA_VIEW,
-  Permission.RIGHTS_VIEW,
-  Permission.WORKFLOWS_VIEW,
-  Permission.FLIGHT_BOARD_VIEW,
 ];
 
 const ROLE_PERMISSIONS: Record<SystemRole, Permission[]> = {
@@ -96,24 +56,84 @@ const ROLE_PERMISSIONS: Record<SystemRole, Permission[]> = {
 // Department-role strings -> extra permissions (additive per-department)
 // ---------------------------------------------------------------------------
 
+/**
+ * Legacy hardcoded fallback. Admin-managed departments populate the runtime
+ * registry via setDepartmentRoleRegistry().
+ */
 const DEPT_ROLE_EXTRAS: Record<string, Permission[]> = {
   'Department Admin': [
+    Permission.USERS_VIEW,
     Permission.USERS_MANAGE_DEPT,
+    Permission.SHIFTS_VIEW_OWN,
+    Permission.SHIFTS_VIEW_ALL,
     Permission.SHIFTS_MANAGE,
-    Permission.BROADCAST_MANAGE,
-    Permission.WAREHOUSE_MANAGE,
-    Permission.MCR_MANAGE,
   ],
-  'MCR Supervisor': [Permission.MCR_MANAGE, Permission.MCR_ADMIN],
-  'MCR Operator': [Permission.MCR_MANAGE],
-  'Senior Playout Operator': [Permission.MCR_MANAGE],
-  'Senior Ingest Operator': [Permission.MCR_MANAGE],
+  'MCR Supervisor': [
+    Permission.MCR_VIEW,
+    Permission.MCR_MANAGE,
+    Permission.MCR_ADMIN,
+    Permission.BROADCAST_VIEW,
+    Permission.BROADCAST_MANAGE,
+    Permission.WAREHOUSE_VIEW,
+    Permission.SHIFTS_VIEW_OWN,
+    Permission.SHIFTS_VIEW_ALL,
+    Permission.SHIFTS_MANAGE,
+  ],
+  'MCR Operator': [
+    Permission.MCR_VIEW,
+    Permission.MCR_MANAGE,
+    Permission.BROADCAST_VIEW,
+    Permission.WAREHOUSE_VIEW,
+    Permission.SHIFTS_VIEW_OWN,
+  ],
+  'Senior Playout Operator': [Permission.MCR_VIEW, Permission.MCR_MANAGE],
+  'Senior Ingest Operator': [Permission.MCR_VIEW, Permission.MCR_MANAGE],
   'Warehouse Manager': [
+    Permission.WAREHOUSE_VIEW,
     Permission.WAREHOUSE_MANAGE,
     Permission.WAREHOUSE_FORCE_RELEASE,
     Permission.WAREHOUSE_DISABLE_EQUIPMENT,
+    Permission.BROADCAST_VIEW,
+    Permission.SHIFTS_VIEW_OWN,
+  ],
+  'Equipment Handler': [
+    Permission.WAREHOUSE_VIEW,
+    Permission.BROADCAST_VIEW,
+    Permission.SHIFTS_VIEW_OWN,
   ],
 };
+
+const DEPT_ROLE_REGISTRY: Map<string, Map<string, Permission[]>> = new Map();
+
+export function setDepartmentRoleRegistry(
+  entries: Array<{ departmentCode: string; roleKey: string; roleName?: string; permissions: Permission[] }>,
+): void {
+  DEPT_ROLE_REGISTRY.clear();
+  for (const e of entries) {
+    if (!e.departmentCode || !e.roleKey) continue;
+    let bucket = DEPT_ROLE_REGISTRY.get(e.departmentCode);
+    if (!bucket) {
+      bucket = new Map();
+      DEPT_ROLE_REGISTRY.set(e.departmentCode, bucket);
+    }
+    bucket.set(e.roleKey, e.permissions);
+    if (e.roleName) bucket.set(e.roleName, e.permissions);
+  }
+}
+
+export function clearDepartmentRoleRegistry(): void {
+  DEPT_ROLE_REGISTRY.clear();
+}
+
+function resolveDeptRolePermissions(deptId: string, roleName: string): Permission[] {
+  const bucket = DEPT_ROLE_REGISTRY.get(deptId);
+  if (bucket) {
+    const fromRegistry = bucket.get(roleName);
+    if (fromRegistry && fromRegistry.length > 0) return fromRegistry;
+  }
+  const legacy = DEPT_ROLE_EXTRAS[roleName];
+  return legacy ? legacy : [];
+}
 
 // ---------------------------------------------------------------------------
 // Computed permission result
@@ -150,12 +170,9 @@ export function computePermissions(user: UserForPermissions): ComputedPermission
       const deptPerms = new Set<Permission>();
       if (Array.isArray(dept.roles)) {
         for (const roleName of dept.roles) {
-          const extras = DEPT_ROLE_EXTRAS[roleName];
-          if (extras) {
-            for (const p of extras) {
-              deptPerms.add(p);
-            }
-          }
+          if (!roleName) continue;
+          const perms = resolveDeptRolePermissions(dept.departmentId, roleName);
+          for (const p of perms) deptPerms.add(p);
         }
       }
       if (deptPerms.size > 0) {
@@ -181,7 +198,12 @@ export function hasPermission(
   computed: ComputedPermissions,
   perm: Permission,
 ): boolean {
-  return computed.global.has(perm);
+  if (computed.global.has(perm)) return true;
+  let allowed = false;
+  computed.byDept.forEach((deptPerms) => {
+    if (deptPerms.has(perm)) allowed = true;
+  });
+  return allowed;
 }
 
 export function hasPermissionForDept(

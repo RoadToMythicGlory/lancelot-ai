@@ -1,19 +1,12 @@
 import { gql } from '@apollo/client';
 
-// ==================== ORGANIZATION ====================
+// NOTE: This file historically held multi-tenant SaaS GraphQL mutations.
+// The product is now deployed on-prem for a single company, so org signup,
+// invites, and billing/subscription operations have been removed. The
+// remaining mutations are local on-prem features. New IT-support ticket
+// mutations live in `./itSupportMutations.ts`.
 
-export const CREATE_ORGANIZATION = gql`
-  mutation CreateOrganization($input: CreateOrganizationInput!) {
-    createOrganization(input: $input) {
-      id
-      name
-      slug
-      plan
-      isTrial
-      trialEndsAt
-    }
-  }
-`;
+// ==================== ORGANIZATION (single-tenant settings) ====================
 
 export const UPDATE_ORGANIZATION = gql`
   mutation UpdateOrganization($input: UpdateOrganizationInput!) {
@@ -74,52 +67,6 @@ export const UPDATE_SECURITY_SETTINGS = gql`
           sessionTimeoutMinutes
         }
       }
-    }
-  }
-`;
-
-export const INVITE_USER = gql`
-  mutation InviteUser($input: InviteUserInput!) {
-    inviteUserToOrganization(input: $input) {
-      id
-      email
-      role
-      status
-      expiresAt
-    }
-  }
-`;
-
-export const CANCEL_INVITE = gql`
-  mutation CancelInvite($inviteId: ID!) {
-    cancelOrganizationInvite(inviteId: $inviteId)
-  }
-`;
-
-// ==================== BILLING ====================
-
-export const CHANGE_PLAN = gql`
-  mutation ChangePlan($input: ChangePlanInput!) {
-    changePlan(input: $input) {
-      id
-      plan
-      status
-      billingCycle
-      limits {
-        maxUsers
-        maxBroadcastEvents
-        maxStorageGB
-      }
-    }
-  }
-`;
-
-export const CANCEL_SUBSCRIPTION = gql`
-  mutation CancelSubscription($reason: String) {
-    cancelSubscription(reason: $reason) {
-      id
-      status
-      cancelledAt
     }
   }
 `;
@@ -271,41 +218,7 @@ export const DELETE_BROADCAST_RIGHT = gql`
   }
 `;
 
-// ==================== HELP & SUPPORT ====================
-
-export const CREATE_SUPPORT_TICKET = gql`
-  mutation CreateSaasTicket($input: CreateSupportTicketInput!) {
-    createSaasTicket(input: $input) {
-      id
-      ticketNumber
-      subject
-      status
-    }
-  }
-`;
-
-export const ADD_TICKET_MESSAGE = gql`
-  mutation AddTicketMessage($input: AddTicketMessageInput!) {
-    addTicketMessage(input: $input) {
-      id
-      messages {
-        senderName
-        message
-        createdAt
-      }
-    }
-  }
-`;
-
-export const CLOSE_SUPPORT_TICKET = gql`
-  mutation CloseSupportTicket($id: ID!, $satisfactionRating: Int, $satisfactionComment: String) {
-    closeSupportTicket(id: $id, satisfactionRating: $satisfactionRating, satisfactionComment: $satisfactionComment) {
-      id
-      status
-      closedAt
-    }
-  }
-`;
+// ==================== HELP ARTICLES ====================
 
 export const RATE_HELP_ARTICLE = gql`
   mutation RateHelpArticle($articleId: ID!, $helpful: Boolean!) {
@@ -388,3 +301,13 @@ export const TEST_WEBHOOK = gql`
     testWebhook(id: $id)
   }
 `;
+
+// ==================== BACKWARDS-COMPAT EXPORTS ====================
+// `apps/web/src/app/help/page.tsx` still imports the old SaaS-named ticket
+// mutations; alias them to the IT-support equivalents so callers can be
+// migrated incrementally.
+export {
+  CREATE_IT_TICKET as CREATE_SUPPORT_TICKET,
+  ADD_IT_TICKET_MESSAGE as ADD_TICKET_MESSAGE,
+  CLOSE_IT_TICKET as CLOSE_SUPPORT_TICKET,
+} from './itSupportMutations';

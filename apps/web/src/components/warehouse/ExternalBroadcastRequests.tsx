@@ -63,9 +63,10 @@ interface Preset {
 
 interface Props {
   message: any;
+  canManage?: boolean;
 }
 
-const ExternalBroadcastRequests: React.FC<Props> = ({ message }) => {
+const ExternalBroadcastRequests: React.FC<Props> = ({ message, canManage = false }) => {
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
   const [assignments, setAssignments] = useState<Record<string, Record<number, { id: string; name: string }>>>({});
 
@@ -241,7 +242,7 @@ const ExternalBroadcastRequests: React.FC<Props> = ({ message }) => {
                     icon={<SaveOutlined />}
                     onClick={handleSaveAssignments}
                     loading={saving}
-                    disabled={Object.keys(assignments).length === 0}
+                    disabled={!canManage || Object.keys(assignments).length === 0}
                   >
                     שמור הקצאות
                   </Button>
@@ -319,6 +320,7 @@ const ExternalBroadcastRequests: React.FC<Props> = ({ message }) => {
                               style={{ width: '100%' }}
                               size="small"
                               allowClear
+                              disabled={!canManage}
                               showSearch
                               filterOption={(input, option) =>
                                 (option?.label as string)?.toLowerCase().includes(input.toLowerCase()) ?? false

@@ -1,12 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Card, Form, DatePicker, Select, Input, Button, App } from 'antd';
-import { useMutation, useQuery, gql } from '@apollo/client';
+import { Card, Form, DatePicker, Select, Input, Button, App, Modal } from 'antd';
+import { useMutation, useApolloClient, gql } from '@apollo/client';
 import dayjs from 'dayjs';
-import 'dayjs/locale/he';
-
-dayjs.locale('he');
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -44,8 +41,9 @@ const VACATION_TYPES = [
 export default function VacationRequest() {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
-  const { message } = App.useApp();
-  
+  const { message, modal } = App.useApp();
+  const client = useApolloClient();
+
   const [createVacationRequest] = useMutation(CREATE_VACATION_REQUEST, {
     onCompleted: () => {
       message.success('בקשת החופשה נשלחה בהצלחה');
@@ -59,30 +57,55 @@ export default function VacationRequest() {
     }
   });
 
+  async function submitRequest(start: string, end: string, vacationType: string, reason: string) {
+    await createVacationRequest({
+      variables: {
+        input: { startDate: start, endDate: end, vacationType, reason: reason || '' },
+      },
+    });
+  }
+
   const handleSubmit = async (values: any) => {
     setLoading(true);
     try {
-      // Basic overlap check with upcoming shifts in selected range
       const start = values.dateRange[0].format('YYYY-MM-DD');
       const end = values.dateRange[1].format('YYYY-MM-DD');
-      const { data: overlapData } = await (async () => {
-        try {
-          return await (useQuery ? Promise.resolve({ data: {} as any }) : Promise.resolve({ data: {} as any }));
-        } catch {
-          return { data: {} as any };
+
+      // Live overlap check: warn if user already has shifts inside the selected range.
+      let overlappingShifts: Array<{ id: string; date: string }> = [];
+      try {
+        const { data: overlapData } = await client.query({
+          query: MY_UPCOMING_SHIFTS,
+          variables: { start, end },
+          fetchPolicy: 'network-only',
+        });
+        overlappingShifts = overlapData?.myUpcomingShifts ?? [];
+      } catch (err) {
+        console.warn('Overlap check failed, proceeding without it.', err);
+      }
+
+      if (overlappingShifts.length > 0) {
+        const dates = overlappingShifts
+          .map((s) => dayjs(s.date).format('DD/MM/YYYY'))
+          .filter((v, i, arr) => arr.indexOf(v) === i)
+          .join(', ');
+        const proceed = await new Promise<boolean>((resolve) => {
+          modal.confirm({
+            title: 'התנגשות עם משמרות קיימות',
+            content: `יש לך ${overlappingShifts.length} משמרות בטווח הבקשה (${dates}). האם להמשיך בכל זאת?`,
+            okText: 'המשך בכל זאת',
+            cancelText: 'בטל',
+            onOk: () => resolve(true),
+            onCancel: () => resolve(false),
+          });
+        });
+        if (!proceed) {
+          setLoading(false);
+          return;
         }
-      })();
-      // Proceed without blocking if query infra not available in this component
-      await createVacationRequest({
-        variables: {
-          input: {
-            startDate: start,
-            endDate: end,
-            vacationType: values.vacationType,
-            reason: values.reason || ''
-          }
-        }
-      });
+      }
+
+      await submitRequest(start, end, values.vacationType, values.reason);
     } catch (error) {
       // Error handled in mutation
     }

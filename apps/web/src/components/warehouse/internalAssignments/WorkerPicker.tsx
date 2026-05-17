@@ -1,9 +1,14 @@
 import React, { useMemo } from 'react';
 import { Form, Input, Radio, Select, Spin } from 'antd';
 import { useQuery } from '@apollo/client';
-import { GET_USERS } from '../../../graphql/queries';
+import { GET_USERS, GET_ASSIGNMENT_FORM_CONFIG } from '../../../graphql/queries';
+import { useAuth } from '@/contexts/AuthContext';
+import { Permission } from '@/rbac';
 
 export type WorkerPickerType = 'internal' | 'external';
+
+/** Stable form key admins can configure under Settings → טפסים. */
+const FORM_KEY = 'warehouseInternalAssignment';
 
 interface WorkerPickerProps {
   /** Form names so the picker integrates with parent <Form />. */
@@ -21,6 +26,8 @@ interface UserOption {
   lastName?: string;
   displayName?: string;
   email?: string;
+  departments?: Array<{ departmentId: string; departmentName?: string }>;
+  department?: string;
 }
 
 const WorkerPicker: React.FC<WorkerPickerProps> = ({
@@ -30,16 +37,49 @@ const WorkerPicker: React.FC<WorkerPickerProps> = ({
   phoneFieldName = 'assignedToPhone',
   type,
 }) => {
+  const { hasPermission } = useAuth();
+  // Only fetch the user list when the caller can actually read it. Roles like
+  // MCR Operator don't have USERS_VIEW and the server would reject the query
+  // with "Missing permission" — turn that into a quiet no-op instead.
+  const canListUsers = hasPermission(Permission.USERS_VIEW);
+
   // Active users only — keeps the picker focused on people who can actually
   // pick up equipment today.
   const { data, loading } = useQuery(GET_USERS, {
     variables: { isActive: true },
     fetchPolicy: 'cache-first',
+    skip: !canListUsers,
+    errorPolicy: 'all',
   });
+
+  // Optional admin-configured department whitelist. When no form config exists,
+  // the picker falls back to its previous org-wide behavior.
+  const { data: formCfgData } = useQuery(GET_ASSIGNMENT_FORM_CONFIG, {
+    variables: { formKey: FORM_KEY },
+    fetchPolicy: 'cache-first',
+  });
+
+  const allowedDepartmentCodes = useMemo<Set<string> | null>(() => {
+    const cfg = formCfgData?.assignmentFormConfig;
+    if (!cfg || !cfg.isActive) return null;
+    const list: any[] = Array.isArray(cfg.departments) ? cfg.departments : [];
+    if (list.length === 0) return null;
+    return new Set(list.map((d: any) => d.departmentCode).filter(Boolean));
+  }, [formCfgData]);
 
   const userOptions = useMemo(() => {
     const users: UserOption[] = data?.users || [];
-    return users
+    const filteredUsers = !allowedDepartmentCodes
+      ? users
+      : users.filter((u) => {
+          if (Array.isArray(u.departments) && u.departments.length > 0) {
+            return u.departments.some((d) =>
+              d.departmentId && allowedDepartmentCodes.has(d.departmentId),
+            );
+          }
+          return !!(u.department && allowedDepartmentCodes.has(u.department));
+        });
+    return filteredUsers
       .map((u) => {
         const name =
           u.displayName ||
@@ -53,7 +93,7 @@ const WorkerPicker: React.FC<WorkerPickerProps> = ({
         };
       })
       .sort((a, b) => a.label.localeCompare(b.label, 'he'));
-  }, [data]);
+  }, [data, allowedDepartmentCodes]);
 
   return (
     <>

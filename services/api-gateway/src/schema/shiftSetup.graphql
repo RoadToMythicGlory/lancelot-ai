@@ -1,0 +1,336 @@
+# =============================================================================
+# Shift Setup — first-class concepts ported from the Crystal Shift reference
+#
+# Adds entities the original schema lacked, while leaving every existing
+# `Shift`, `VacationRequest`, `ShiftSwapRequest`, `AvailabilityConstraint`,
+# `DepartmentShiftConfig` operation untouched. Older code keeps working;
+# new shifts UI uses these richer types.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Types
+# -----------------------------------------------------------------------------
+
+# APL = a sub-role / activity slot inside a shift, with eligible employees.
+# E.g. inside a "Morning" shift type a department might have APLs:
+#   "Director", "Camera 1", "Camera 2", "VTR", "Audio".
+type APL {
+  id: ID!
+  departmentId: String!
+  name: String!
+  color: String!
+  order: Int!
+  active: Boolean!
+  # Employee ids eligible to be assigned to this APL.
+  eligibleUserIds: [String!]!
+}
+
+# A typed shift slot for a department. Lifted out of DepartmentShiftConfig.shifts[]
+# into its own first-class collection so we can reorder / soft-delete / link.
+type ShiftTypeDef {
+  id: ID!
+  departmentId: String!
+  name: String!
+  startTime: String!
+  endTime: String!
+  role: String
+  color: String
+  order: Int!
+  active: Boolean!
+}
+
+# Logical grouping of shift type slots ("Weekend block", "Holiday on-call", etc.).
+type ShiftCategory {
+  id: ID!
+  departmentId: String!
+  name: String!
+  color: String
+  maxPerWeek: Int
+  slots: [CategorySlot!]!
+  active: Boolean!
+}
+
+type CategorySlot {
+  dayOfWeek: Int!     # 0 = Sunday … 6 = Saturday
+  shiftTypeId: String!
+}
+
+# Soft constraint on what an EMPLOYEE may submit as a preference (e.g. max
+# "prefer_not" days). Distinct from SchedulingRule, which constrains the
+# assignment side.
+type ConstraintRule {
+  id: ID!
+  departmentId: String!
+  name: String!
+  type: String!       # "max_prefer_not_per_week", "min_available_per_week", …
+  value: Int
+  active: Boolean!
+}
+
+# Hard constraint applied when ASSIGNING shifts (used by AI suggestions and
+# manual assign validation). Each rule is one bounded check.
+type SchedulingRule {
+  id: ID!
+  departmentId: String!
+  name: String!
+  active: Boolean!
+  maxDaysPerWeek: Int
+  maxConsecutiveDays: Int
+  maxShiftsOfTypePerWeek: Int
+  shiftTypeId: String
+  maxConsecutiveShiftsOfType: Int
+  categoryId: String
+  maxCategorySlotsPerWeek: Int
+}
+
+# Per-employee, per-week granular preferences (richer than AvailabilityConstraint:
+# can be per-APL inside a shift type, with rank ordering for AI scoring).
+type Preference {
+  id: ID!
+  userId: String!
+  departmentId: String!
+  weekStartDate: String!
+  entries: [PreferenceEntry!]!
+  submittedAt: String
+  user: User
+}
+
+type PreferenceEntry {
+  dayOfWeek: Int!     # 0 = Sunday
+  shiftTypeId: String!
+  aplId: String       # null = "any APL" inside this shift type
+  rank: Int!          # lower = stronger preference
+  status: String!     # "available" | "unavailable" | "prefer" | "prefer_not"
+}
+
+# Bundled department reference data — saves the manager UI from making 3 round trips.
+type DepartmentShiftSetup {
+  departmentId: String!
+  employees: [User!]!
+  apls: [APL!]!
+  shiftTypes: [ShiftTypeDef!]!
+}
+
+# AI suggestion produced by aiScheduleSuggest. Pure projection, never persisted
+# until the manager Applies them (which fans out to assignUserToShift).
+type AiShiftSuggestion {
+  shiftTypeId: String!
+  shiftTypeName: String!
+  aplId: String!
+  aplName: String!
+  date: String!
+  userId: String!
+  userDisplayName: String!
+  startTime: String!
+  endTime: String!
+  reason: String!
+}
+
+# -----------------------------------------------------------------------------
+# Inputs
+# -----------------------------------------------------------------------------
+
+input APLInput {
+  departmentId: String!
+  name: String!
+  color: String
+  order: Int
+  active: Boolean
+  eligibleUserIds: [String!]
+}
+
+input APLUpdateInput {
+  name: String
+  color: String
+  order: Int
+  active: Boolean
+  eligibleUserIds: [String!]
+}
+
+input ShiftTypeDefInput {
+  departmentId: String!
+  name: String!
+  startTime: String!
+  endTime: String!
+  role: String
+  color: String
+  order: Int
+  active: Boolean
+}
+
+input ShiftTypeDefUpdateInput {
+  name: String
+  startTime: String
+  endTime: String
+  role: String
+  color: String
+  order: Int
+  active: Boolean
+}
+
+input ShiftCategoryInput {
+  departmentId: String!
+  name: String!
+  color: String
+  maxPerWeek: Int
+  slots: [CategorySlotInput!]
+  active: Boolean
+}
+
+input ShiftCategoryUpdateInput {
+  name: String
+  color: String
+  maxPerWeek: Int
+  slots: [CategorySlotInput!]
+  active: Boolean
+}
+
+input CategorySlotInput {
+  dayOfWeek: Int!
+  shiftTypeId: String!
+}
+
+input ConstraintRuleInput {
+  departmentId: String!
+  name: String!
+  type: String!
+  value: Int
+  active: Boolean
+}
+
+input ConstraintRuleUpdateInput {
+  name: String
+  type: String
+  value: Int
+  active: Boolean
+}
+
+input SchedulingRuleInput {
+  departmentId: String!
+  name: String!
+  active: Boolean
+  maxDaysPerWeek: Int
+  maxConsecutiveDays: Int
+  maxShiftsOfTypePerWeek: Int
+  shiftTypeId: String
+  maxConsecutiveShiftsOfType: Int
+  categoryId: String
+  maxCategorySlotsPerWeek: Int
+}
+
+input SchedulingRuleUpdateInput {
+  name: String
+  active: Boolean
+  maxDaysPerWeek: Int
+  maxConsecutiveDays: Int
+  maxShiftsOfTypePerWeek: Int
+  shiftTypeId: String
+  maxConsecutiveShiftsOfType: Int
+  categoryId: String
+  maxCategorySlotsPerWeek: Int
+}
+
+input PreferenceSubmitInput {
+  departmentId: String!
+  weekStartDate: String!
+  entries: [PreferenceEntryInput!]!
+}
+
+input PreferenceEntryInput {
+  dayOfWeek: Int!
+  shiftTypeId: String!
+  aplId: String
+  rank: Int!
+  status: String!
+}
+
+input AiScheduleSuggestInput {
+  departmentId: String!
+  weekStart: String!
+  weekEnd: String!
+  userPrompt: String
+}
+
+input ApplyAiSuggestionsInput {
+  departmentId: String!
+  suggestions: [AiShiftSuggestionInput!]!
+}
+
+input AiShiftSuggestionInput {
+  shiftTypeId: String!
+  aplId: String!
+  date: String!
+  userId: String!
+  startTime: String!
+  endTime: String!
+}
+
+# -----------------------------------------------------------------------------
+# Queries / Mutations (extend the root types)
+# -----------------------------------------------------------------------------
+
+extend type Query {
+  # APLs
+  apls(departmentId: String!): [APL!]!
+  apl(id: ID!): APL
+
+  # Shift type definitions
+  shiftTypeDefs(departmentId: String!): [ShiftTypeDef!]!
+  shiftTypeDef(id: ID!): ShiftTypeDef
+
+  # Categories
+  shiftCategories(departmentId: String!): [ShiftCategory!]!
+  shiftCategory(id: ID!): ShiftCategory
+
+  # Constraint rules (preference side)
+  constraintRules(departmentId: String!): [ConstraintRule!]!
+
+  # Scheduling rules (assignment side)
+  schedulingRules(departmentId: String!): [SchedulingRule!]!
+
+  # Preferences
+  myPreferences(weekStartDate: String!): Preference
+  preferences(departmentId: String!, weekStartDate: String!): [Preference!]!
+
+  # Bundled setup payload
+  departmentShiftSetup(departmentId: String!): DepartmentShiftSetup!
+
+  # AI suggestions (read-only; does not persist)
+  aiScheduleSuggest(input: AiScheduleSuggestInput!): [AiShiftSuggestion!]!
+}
+
+extend type Mutation {
+  # APLs
+  createAPL(input: APLInput!): APL!
+  updateAPL(id: ID!, input: APLUpdateInput!): APL!
+  deleteAPL(id: ID!): Boolean!
+  setUserAplMembership(userId: String!, departmentId: String!, aplIds: [String!]!): [APL!]!
+
+  # Shift type definitions
+  createShiftTypeDef(input: ShiftTypeDefInput!): ShiftTypeDef!
+  updateShiftTypeDef(id: ID!, input: ShiftTypeDefUpdateInput!): ShiftTypeDef!
+  deleteShiftTypeDef(id: ID!): Boolean!
+  reorderShiftTypeDefs(departmentId: String!, orderedIds: [String!]!): [ShiftTypeDef!]!
+
+  # Categories
+  createShiftCategory(input: ShiftCategoryInput!): ShiftCategory!
+  updateShiftCategory(id: ID!, input: ShiftCategoryUpdateInput!): ShiftCategory!
+  deleteShiftCategory(id: ID!): Boolean!
+
+  # Constraint rules
+  createConstraintRule(input: ConstraintRuleInput!): ConstraintRule!
+  updateConstraintRule(id: ID!, input: ConstraintRuleUpdateInput!): ConstraintRule!
+  deleteConstraintRule(id: ID!): Boolean!
+
+  # Scheduling rules
+  createSchedulingRule(input: SchedulingRuleInput!): SchedulingRule!
+  updateSchedulingRule(id: ID!, input: SchedulingRuleUpdateInput!): SchedulingRule!
+  deleteSchedulingRule(id: ID!): Boolean!
+
+  # Preferences
+  submitPreferences(input: PreferenceSubmitInput!): Preference!
+
+  # Apply AI suggestions in bulk (fans out to assignUserToShift internally,
+  # so RBAC checks reuse the existing pathway).
+  applyAiSuggestions(input: ApplyAiSuggestionsInput!): Int!
+}

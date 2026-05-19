@@ -279,7 +279,16 @@ export const broadcastResolvers = {
         requirePermission(context, Permission.WAREHOUSE_VIEW);
         await ensureMongoConnection();
 
-        const query: any = { isDisabled: { $ne: true } };
+        // Exclude rows that would violate the non-null `name` contract on
+        // `WarehouseEquipmentPickerItem`. The Equipment model marks `name`
+        // as required, but legacy/imported documents (e.g. from the PDF
+        // parser pipeline) have slipped through without one. Even a single
+        // such row would null the entire 5000-item picker payload via
+        // GraphQL non-null propagation.
+        const query: any = {
+          isDisabled: { $ne: true },
+          name: { $type: 'string', $ne: '' },
+        };
         if (args?.search) {
           const re = new RegExp(args.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
           query.$or = [{ name: re }, { barcode: re }, { equipmentModel: re }];
@@ -305,16 +314,21 @@ export const broadcastResolvers = {
           .lean()
           .exec();
 
-        return items.map((it: any) => ({
-          id: it._id.toString(),
-          name: it.name,
-          category: it.category,
-          barcode: it.barcode || null,
-          quantityTotal: it.quantityTotal ?? null,
-          isQuantityBased: !!it.isQuantityBased,
-          isDisabled: !!it.isDisabled,
-          brand: it.company || null,
-        }));
+        // Defensive second pass — the DB filter is the primary guard, but
+        // an extra runtime check ensures one malformed row can never null
+        // the entire list via non-null propagation.
+        return items
+          .filter((it: any) => typeof it?.name === 'string' && it.name.length > 0)
+          .map((it: any) => ({
+            id: it._id.toString(),
+            name: it.name,
+            category: it.category ?? null,
+            barcode: it.barcode || null,
+            quantityTotal: it.quantityTotal ?? null,
+            isQuantityBased: !!it.isQuantityBased,
+            isDisabled: !!it.isDisabled,
+            brand: it.company || null,
+          }));
       } catch (err) {
         console.error('Error fetching warehouse equipment picker list:', err);
         return [];

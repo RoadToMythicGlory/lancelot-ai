@@ -59,6 +59,7 @@ function normalizePanels(panels: any[] | undefined | null): any[] {
     sortField: p.sortField ?? null,
     sortDirection: p.sortDirection || 'ASC',
     rowLimit: typeof p.rowLimit === 'number' ? p.rowLimit : null,
+    hideSatellites: typeof p.hideSatellites === 'boolean' ? p.hideSatellites : false,
     order: typeof p.order === 'number' ? p.order : index,
   }));
 }
@@ -79,6 +80,7 @@ function serializeBoard(board: any): any {
     panels: (obj.panels || []).map((p: any) => ({
       ...p,
       id: p._id?.toString() || p.panelKey,
+      hideSatellites: typeof p.hideSatellites === 'boolean' ? p.hideSatellites : false,
     })),
     overlay: {
       hiddenItemKeys: obj.overlay?.hiddenItemKeys || [],

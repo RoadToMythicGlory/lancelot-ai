@@ -5,6 +5,7 @@ import {
   Card,
   Table,
   Button,
+  Dropdown,
   Modal,
   Form,
   Input,
@@ -21,6 +22,7 @@ import {
   Tooltip,
   Alert,
 } from 'antd';
+import type { MenuProps } from 'antd';
 import {
   PlusOutlined,
   EditOutlined,
@@ -93,6 +95,70 @@ interface FormConfigRecord {
  * Broadcast Array uses this layout; other forms keep the department-keyed
  * editor unchanged. */
 const COLUMN_BASED_FORM_KEYS = new Set<string>(['broadcastArray']);
+
+/** Built-in Broadcast Array column presets — same seven columns the
+ * broadcast-array page uses as its FALLBACK_ROLE_COLUMNS and that the
+ * seed script writes by default. Admins can pick from this list when
+ * adding a column to avoid retyping the well-known role names; the
+ * preset's `allowedDepartmentCodes` mirror the historical hard-coded
+ * department mapping, and `allowedUserIds` start empty for the admin
+ * to populate. */
+interface BroadcastArrayColumnPreset {
+  key: string;
+  hebrewLabel: string;
+  englishLabel: string;
+  allowedDepartmentCodes: string[];
+}
+
+const BROADCAST_ARRAY_COLUMN_PRESETS: BroadcastArrayColumnPreset[] = [
+  {
+    key: 'editor',
+    hebrewLabel: 'עורך',
+    englishLabel: 'Editor',
+    allowedDepartmentCodes: [
+      'CONTENT_EDIT',
+      'Visuals-VideoEditors',
+      'NewMedia-Editors',
+      'News-Editors',
+    ],
+  },
+  {
+    key: 'producer',
+    hebrewLabel: 'מפיק',
+    englishLabel: 'Producer',
+    allowedDepartmentCodes: ['PROD', 'NewMedia-Producers', 'News-Producers'],
+  },
+  {
+    key: 'vtr',
+    hebrewLabel: 'איש VTR',
+    englishLabel: 'VTR',
+    allowedDepartmentCodes: ['VTR', 'Production-VTR'],
+  },
+  {
+    key: 'broadcastTech',
+    hebrewLabel: 'טכנאי שידור',
+    englishLabel: 'Broadcast Technician / Director',
+    allowedDepartmentCodes: ['DIR', 'Production-Directors'],
+  },
+  {
+    key: 'anchor',
+    hebrewLabel: 'שדר',
+    englishLabel: 'Anchor',
+    allowedDepartmentCodes: ['COMMENT', 'Production-Commentators'],
+  },
+  {
+    key: 'analyst',
+    hebrewLabel: 'אנליסט',
+    englishLabel: 'Analyst',
+    allowedDepartmentCodes: ['COMMENT', 'Production-Commentators'],
+  },
+  {
+    key: 'sidelineAnchor',
+    hebrewLabel: 'שדר קוים',
+    englishLabel: 'Sideline Anchor',
+    allowedDepartmentCodes: ['SOUND', 'Production-Soundmen'],
+  },
+];
 
 const slugifyKey = (s: string): string =>
   s
@@ -316,15 +382,24 @@ const AssignmentFormConfigPanel: React.FC = () => {
     setColumns((prev) => prev.filter((_, i) => i !== idx).map((c, i) => ({ ...c, order: i })));
   };
 
-  const addColumn = () => {
+  const addColumn = (preset?: BroadcastArrayColumnPreset) => {
     const idx = columns_.length;
+    // If a preset is supplied but its key is already used, suffix it
+    // so two distinct rows can coexist (admin can rename later).
+    const takenKeys = new Set(columns_.map((c) => c.key));
+    const baseKey = preset?.key || `col_${Date.now().toString(36)}`;
+    let resolvedKey = baseKey;
+    let n = 2;
+    while (takenKeys.has(resolvedKey)) {
+      resolvedKey = `${baseKey}_${n++}`;
+    }
     setColumns([
       ...columns_,
       {
-        key: `col_${Date.now().toString(36)}`,
-        hebrewLabel: '',
-        englishLabel: '',
-        allowedDepartmentCodes: [],
+        key: resolvedKey,
+        hebrewLabel: preset?.hebrewLabel || '',
+        englishLabel: preset?.englishLabel || '',
+        allowedDepartmentCodes: preset ? [...preset.allowedDepartmentCodes] : [],
         allowedUserIds: [],
         requireUser: false,
         defaultCount: 1,
@@ -584,7 +659,7 @@ const AssignmentFormConfigPanel: React.FC = () => {
         <Alert
           type="info"
           showIcon
-          message='לא הוגדרו עמודות לטופס זה. לחץ על "הוסף עמודה" כדי להתחיל.'
+          message='לא הוגדרו עמודות לטופס זה. לחץ על "הוסף עמודה ידועה מראש" כדי להוסיף תבנית, או על "הוסף עמודה מותאמת אישית" ליצור חדשה.'
           style={{ marginBottom: 12 }}
         />
       ) : null}
@@ -776,9 +851,47 @@ const AssignmentFormConfigPanel: React.FC = () => {
           </Card>
         );
       })}
-      <Button type="dashed" icon={<PlusOutlined />} block onClick={addColumn}>
-        הוסף עמודה
-      </Button>
+      {(() => {
+        // Mark presets whose key is already used so the admin sees at a
+        // glance which built-in columns are already on the form.
+        const usedKeys = new Set(columns_.map((c) => c.key));
+        const presetMenu: MenuProps = {
+          items: BROADCAST_ARRAY_COLUMN_PRESETS.map((p) => ({
+            key: p.key,
+            label: (
+              <Space size={6}>
+                <Text>{p.hebrewLabel}</Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {p.englishLabel}
+                </Text>
+                {usedKeys.has(p.key) ? (
+                  <Tag color="default" style={{ marginInlineStart: 4 }}>
+                    כבר נוסף
+                  </Tag>
+                ) : null}
+              </Space>
+            ),
+            disabled: usedKeys.has(p.key),
+          })),
+          onClick: ({ key }) => {
+            const preset = BROADCAST_ARRAY_COLUMN_PRESETS.find((p) => p.key === key);
+            if (preset) addColumn(preset);
+          },
+        };
+
+        return (
+          <Space style={{ width: '100%' }} direction="vertical" size={8}>
+            <Dropdown menu={presetMenu} trigger={['click']}>
+              <Button block icon={<PlusOutlined />}>
+                הוסף עמודה ידועה מראש (תבנית) ▾
+              </Button>
+            </Dropdown>
+            <Button type="dashed" icon={<PlusOutlined />} block onClick={() => addColumn()}>
+              הוסף עמודה מותאמת אישית
+            </Button>
+          </Space>
+        );
+      })()}
     </div>
   );
 

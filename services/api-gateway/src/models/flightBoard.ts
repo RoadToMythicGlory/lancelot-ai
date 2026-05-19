@@ -63,6 +63,14 @@ export interface IFlightBoardPanel {
   sortField?: string | null;
   sortDirection: FlightBoardSortDirection;
   rowLimit?: number | null;
+  /**
+   * When true, hide rows whose broadcast location is "satellite only"
+   * (`raw.broadcastArray.broadcastLocation === "יעלה לווין בלבד"`).
+   * Manual rows that carry the same value in their broadcast-array field
+   * are also hidden. Defaults to false so existing boards keep showing
+   * every row.
+   */
+  hideSatellites?: boolean;
   order: number;
 }
 
@@ -162,6 +170,7 @@ const flightBoardPanelSchema = new Schema<IFlightBoardPanel>(
       default: 'ASC',
     },
     rowLimit: { type: Number, default: null },
+    hideSatellites: { type: Boolean, default: false },
     order: { type: Number, default: 0 },
   },
   { _id: true },

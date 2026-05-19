@@ -23,6 +23,7 @@ export const FLIGHT_BOARD_FIELDS = gql`
       sortField
       sortDirection
       rowLimit
+      hideSatellites
       order
     }
     createdBy {

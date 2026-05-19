@@ -29,8 +29,28 @@ function widthToColumnSpan(panel: FlightBoardPanel): number {
   return Math.max(3, Math.round(12 * fraction));
 }
 
+// Value of `מקום שידור` (BroadcastArrayModal location dropdown) that marks
+// the row as "satellite uplink only". Kept in sync with the option list in
+// `apps/web/src/components/broadcast/BroadcastArrayModal.tsx` and
+// `apps/web/src/app/broadcast-array/page.tsx`.
+const SATELLITE_ONLY_LOCATION = 'יעלה לווין בלבד';
+
+// True when an item's resolved broadcast location is the satellite-only
+// option. Reads the same nested path that the table reader uses
+// (`raw.broadcastArray.broadcastLocation`) so manual rows that were saved
+// with that column get matched the same way as parsed broadcast events.
+function isSatelliteOnlyItem(item: FlightBoardItem): boolean {
+  const location = item.raw?.broadcastArray?.broadcastLocation;
+  return typeof location === 'string' && location.trim() === SATELLITE_ONLY_LOCATION;
+}
+
 function filterPanelItems(panel: FlightBoardPanel, items: FlightBoardItem[]): FlightBoardItem[] {
   return items.filter((item) => {
+    // Panel-level "הסתר לוויינים" toggle — applied uniformly to manual and
+    // parsed rows so the user can't accidentally see a satellite-only row
+    // by virtue of it being a manual override.
+    if (panel.hideSatellites && isSatelliteOnlyItem(item)) return false;
+
     // Manual rows scoped to a specific panel only show in that panel.
     if (item.isManual) {
       if (item.panelKey && item.panelKey !== panel.panelKey) return false;

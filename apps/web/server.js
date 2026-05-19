@@ -152,7 +152,10 @@ app.prepare().then(() => {
         return
       }
 
-      if (pathname === '/parse-broadcast-schedule') {
+      if (
+        pathname === '/parse-broadcast-schedule' ||
+        pathname === '/parse-broadcast-array'
+      ) {
         proxyToExcelParser(req, res)
         return
       }

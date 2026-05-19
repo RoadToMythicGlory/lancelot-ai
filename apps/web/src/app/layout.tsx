@@ -1,5 +1,5 @@
 import './globals.css'
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Heebo, Inter } from 'next/font/google'
 import ClientProviders from './client-providers'
 import { Toaster } from 'react-hot-toast'
@@ -17,13 +17,20 @@ export const metadata: Metadata = {
     apple: '/lancelot-small-logo.png',
   },
   manifest: '/manifest.json',
-  themeColor: '#3B82F6',
-  viewport: 'width=device-width, initial-scale=1, maximum-scale=1',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
     title: 'Lancelot',
   },
+}
+
+// Next.js 14+ requires `themeColor` and `viewport` to live in a separate
+// `viewport` export rather than on the `metadata` object.
+export const viewport: Viewport = {
+  themeColor: '#3B82F6',
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
 }
 
 export default function RootLayout({

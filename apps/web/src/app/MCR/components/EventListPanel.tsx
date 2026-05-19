@@ -111,7 +111,27 @@ const EventListPanel: React.FC<Props> = ({
           </Empty>
         ) : (
           <div className="flex flex-col gap-2">
-            {(mode === 'day' ? [groups[0] || { dateKey: '', label: '', events }] : groups).map((g) => (
+            {/*
+              In day mode the server already scopes the query to the selected
+              day (events whose start/end/span overlaps it). We must render
+              ALL returned events here — picking `groups[0]` alone would hide
+              every event whose start date isn't the earliest in the result
+              set (e.g. shadow events whose `start` was set from an old
+              broadcast event, or items that span midnight). That caused the
+              "31 events badge but only 1 visible row" bug.
+            */}
+            {(mode === 'day'
+              ? [
+                  {
+                    dateKey: 'day',
+                    label: '',
+                    events: [...events].sort(
+                      (a, b) => dayjs(a.start).valueOf() - dayjs(b.start).valueOf(),
+                    ),
+                  },
+                ]
+              : groups
+            ).map((g) => (
               <div key={g.dateKey} className="flex flex-col gap-2">
                 {mode !== 'day' && g.label && (
                   <div className="mcr-day-group-header">

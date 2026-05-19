@@ -62,6 +62,7 @@ const GET_USERS = gql`
       createdAt
       roleTemplateId
       roleTemplateName
+      permissions
     }
   }
 `;
@@ -78,12 +79,33 @@ const GET_ME = gql`
   }
 `;
 
+// Mutations return the same shape as GET_USERS for the fields the table
+// shows so Apollo can patch the cached entry without us having to issue a
+// follow-up refetch (which the page still does as a belt-and-suspenders).
+const USER_MUTATION_RETURN_FIELDS = `
+  id
+  email
+  firstName
+  lastName
+  displayName
+  systemRole
+  departments {
+    departmentId
+    departmentName
+    roles
+  }
+  phone
+  mobile
+  isActive
+  roleTemplateId
+  roleTemplateName
+  permissions
+`;
+
 const CREATE_USER = gql`
   mutation CreateUser($input: CreateUserInput!) {
     createUser(input: $input) {
-      id
-      email
-      displayName
+      ${USER_MUTATION_RETURN_FIELDS}
     }
   }
 `;
@@ -91,9 +113,7 @@ const CREATE_USER = gql`
 const UPDATE_USER = gql`
   mutation UpdateUser($id: ID!, $input: UpdateUserInput!) {
     updateUser(id: $id, input: $input) {
-      id
-      email
-      displayName
+      ${USER_MUTATION_RETURN_FIELDS}
     }
   }
 `;
@@ -132,6 +152,7 @@ interface User {
   createdAt: string;
   roleTemplateId?: string;
   roleTemplateName?: string;
+  permissions?: string[];
 }
 
 // ---- Helpers ----
@@ -300,14 +321,18 @@ export default function UsersPage() {
           mobile: values.mobile ?? null,
           isActive: typeof values.isActive === 'boolean' ? values.isActive : true,
           departments,
+          // Always send the template id so clearing it (-> null) actually
+          // unsets it on the server instead of silently keeping the old one.
+          roleTemplateId: roleTemplateId ?? null,
         };
         if (values.password) {
           updateInput.password = values.password;
         }
-        if (roleTemplateId) {
-          updateInput.roleTemplateId = roleTemplateId;
-        }
-        if (customPermissions.length > 0) {
+        // Only System Admins are allowed to send customPermissions (backend
+        // rejects others). When the actor has that capability we ALWAYS send
+        // the field, even when empty, so unchecking permissions actually
+        // removes them rather than being a no-op.
+        if (mySystemRole === 'SYSTEM_ADMIN') {
           updateInput.customPermissions = customPermissions;
         }
 
@@ -385,7 +410,15 @@ export default function UsersPage() {
       });
       setDepartmentRoles(roles);
       setRoleTemplateId(user.roleTemplateId ?? null);
-      setCustomPermissions([]);
+      // Seed the picker with the user's effective permissions so the admin
+      // can actually see what's currently granted and (un)check items.
+      // The backend stores the merged set in `permissions`; preset items
+      // (department/role/template-provided) are shown locked in the picker
+      // via `presetPermissions`, but they still need to live in `value` for
+      // the checkboxes to render correctly. The backend re-merges with the
+      // template on save, so duplicates between template and custom are
+      // harmless.
+      setCustomPermissions(user.permissions ?? []);
     } else {
       setEditingUser(null);
       form.resetFields();
@@ -625,6 +658,31 @@ export default function UsersPage() {
             </Form.Item>
 
             <Divider>מחלקות ותפקידים</Divider>
+
+            {/* Quick-add shortcut for Broadcast Array — a very common
+                assignment for production staff. Pre-fills the department
+                + opens the role multi-select below for that department. */}
+            {(() => {
+              const BROADCAST_ARRAY_CODE = 'BROADCAST_ARRAY';
+              const isAssigned = selectedDepartments.includes(BROADCAST_ARRAY_CODE);
+              const hasDept = !!departmentByCode.get(BROADCAST_ARRAY_CODE);
+              if (!hasDept) return null;
+              return (
+                <div style={{ marginBottom: 12 }}>
+                  <Button
+                    type="dashed"
+                    disabled={isAssigned}
+                    onClick={() => {
+                      setSelectedDepartments((prev) =>
+                        prev.includes(BROADCAST_ARRAY_CODE) ? prev : [...prev, BROADCAST_ARRAY_CODE],
+                      );
+                    }}
+                  >
+                    {isAssigned ? '✓ משויך למערך השידור' : '+ שייך למערך השידור'}
+                  </Button>
+                </div>
+              );
+            })()}
 
             <Form.Item label="בחר מחלקות">
               <Select

@@ -24,10 +24,17 @@
  */
 
 import mongoose from 'mongoose';
+import dayjs from 'dayjs';
+import utcPlugin from 'dayjs/plugin/utc';
+import tzPlugin from 'dayjs/plugin/timezone';
 import MCREvent, { IMCREvent } from '../models/mcrEvent';
 import ActivityRow from '../models/activityRow';
 import { IBroadcastEvent } from '../models/broadcast.models';
 import { pubsub } from '../utils/pubsub';
+import { config } from '../config';
+
+dayjs.extend(utcPlugin);
+dayjs.extend(tzPlugin);
 
 const MCR_EVENT_CREATED = 'MCR_EVENT_CREATED';
 const MCR_EVENT_UPDATED = 'MCR_EVENT_UPDATED';
@@ -128,14 +135,17 @@ async function ensureActivityRowForBroadcast(
   const end = toDate(broadcast.endTime) || start;
   if (!start || !end) return;
 
-  const dayStart = new Date(start);
-  dayStart.setHours(0, 0, 0, 0);
+  // Anchor the row to the start of the day in the org's timezone (default
+  // Asia/Jerusalem) so the MCR Schedule's day-window query matches it
+  // regardless of where the API process is hosted (prod is currently EDT).
+  const tz = config.TIMEZONE || 'Asia/Jerusalem';
+  const dayStart = dayjs(start).tz(tz).startOf('day').toDate();
 
   const existing = await ActivityRow.findOne({ broadcastEventId: id });
   if (existing) return;
 
   const fmt = (d: Date) =>
-    d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', hour12: false });
+    dayjs(d).tz(tz).format('HH:mm');
 
   const row = await ActivityRow.create({
     date: dayStart,
@@ -211,8 +221,8 @@ export async function syncShadowMcrEventFromBroadcast(
     try {
       const row = await ActivityRow.findOne({ broadcastEventId: broadcastId });
       if (row) {
-        const fmt = (d: Date) =>
-          d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', hour12: false });
+        const tz = config.TIMEZONE || 'Asia/Jerusalem';
+        const fmt = (d: Date) => dayjs(d).tz(tz).format('HH:mm');
         let rowDirty = false;
         if (broadcast.title && row.activityName !== broadcast.title) {
           row.activityName = broadcast.title;

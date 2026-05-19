@@ -1190,30 +1190,33 @@ export const shiftsResolvers = {
 
     myDepartmentShiftConfig: async (_: any, __: any, context: any) => {
       checkAuthentication(context);
-      console.log('🔍 Shifts resolver - checking auth context:', {
-        hasUser: !!context.user,
-        userId: context.user?.userId,
-        email: context.user?.email,
-        role: context.user?.role,
-        systemRole: context.user?.systemRole
-      });
 
+      // The schema declares this query as nullable
+      // (`myDepartmentShiftConfig: DepartmentShiftConfig`), so users without
+      // a department (system admins, support staff, fresh accounts) should
+      // get `null` instead of throwing — the previous behavior turned every
+      // page that surfaces this query into a 500 in the user's console
+      // (we saw repeated "User has no department assigned" failures from
+      // the sysadmin user opening `/shifts/*`).
       if (!ObjectId.isValid(context.user.userId)) {
-        throw new Error('Invalid user ID');
+        return null;
       }
 
-      // Since we're using MongoDB for users, let's get the user from there
       const db = await connectMongoDB();
-      const user = await db.collection('users').findOne({ _id: new ObjectId(context.user.userId) });
-      
+      const user = await db
+        .collection('users')
+        .findOne({ _id: new ObjectId(context.user.userId) });
+
       if (!user || !user.departments || user.departments.length === 0) {
-        throw new Error('User has no department assigned');
+        return null;
       }
-      
-      // Get the first department from the departments array
+
       const userDepartment = user.departments[0].departmentId;
-      
-      return shiftsResolvers.Query.departmentShiftConfig(_, { departmentId: userDepartment }, context);
+      return shiftsResolvers.Query.departmentShiftConfig(
+        _,
+        { departmentId: userDepartment },
+        context,
+      );
     },
 
     allDepartmentShiftConfigs: async (_: any, __: any, context: any) => {

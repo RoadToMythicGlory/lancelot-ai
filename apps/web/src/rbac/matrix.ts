@@ -10,6 +10,71 @@ import {
 } from './permissions';
 
 // ---------------------------------------------------------------------------
+// Permission implications
+// ---------------------------------------------------------------------------
+// Mirror of services/api-gateway/src/rbac/matrix.ts — keep in sync.
+// See that file for the rationale.
+
+const PERMISSION_IMPLIES: Partial<Record<Permission, Permission[]>> = {
+  [Permission.BROADCAST_VIEW]: [
+    Permission.BROADCAST_ARRAY_VIEW,
+    Permission.VENUES_VIEW,
+  ],
+  [Permission.BROADCAST_MANAGE]: [
+    Permission.BROADCAST_VIEW,
+    Permission.BROADCAST_ARRAY_MANAGE,
+    Permission.VENUES_MANAGE,
+  ],
+  [Permission.BROADCAST_ARRAY_MANAGE]: [Permission.BROADCAST_ARRAY_VIEW],
+  [Permission.VENUES_MANAGE]: [Permission.VENUES_VIEW],
+
+  [Permission.DASHBOARD_VIEW]: [Permission.BULLETIN_VIEW],
+  [Permission.DASHBOARD_MANAGE]: [
+    Permission.DASHBOARD_VIEW,
+    Permission.BULLETIN_MANAGE,
+  ],
+  [Permission.BULLETIN_MANAGE]: [Permission.BULLETIN_VIEW],
+
+  [Permission.FLIGHT_BOARD_VIEW]: [Permission.MCR_FLIGHT_BOARD_VIEW],
+  [Permission.FLIGHT_BOARD_MANAGE]: [
+    Permission.FLIGHT_BOARD_VIEW,
+    Permission.MCR_FLIGHT_BOARD_MANAGE,
+  ],
+  [Permission.MCR_FLIGHT_BOARD_MANAGE]: [Permission.MCR_FLIGHT_BOARD_VIEW],
+
+  [Permission.WAREHOUSE_MANAGE]: [Permission.WAREHOUSE_VIEW],
+  [Permission.SHIFTS_MANAGE]: [Permission.SHIFTS_VIEW_ALL, Permission.SHIFTS_VIEW_OWN],
+  [Permission.SHIFTS_VIEW_ALL]: [Permission.SHIFTS_VIEW_OWN],
+  [Permission.MCR_MANAGE]: [Permission.MCR_VIEW],
+  [Permission.MCR_ADMIN]: [Permission.MCR_MANAGE, Permission.MCR_VIEW],
+  [Permission.VIZRT_OPERATE]: [Permission.VIZRT_VIEW],
+  [Permission.VIZRT_ADMIN]: [Permission.VIZRT_OPERATE, Permission.VIZRT_VIEW],
+  [Permission.SETTINGS_MANAGE]: [Permission.SETTINGS_VIEW],
+  [Permission.INTEGRATIONS_MANAGE]: [Permission.INTEGRATIONS_VIEW],
+  [Permission.MEDIA_MANAGE]: [Permission.MEDIA_VIEW],
+  [Permission.RIGHTS_MANAGE]: [Permission.RIGHTS_VIEW],
+  [Permission.WORKFLOWS_MANAGE]: [Permission.WORKFLOWS_VIEW],
+  [Permission.IT_SUPPORT_MANAGE]: [Permission.IT_SUPPORT_VIEW],
+  [Permission.USERS_MANAGE_ALL]: [Permission.USERS_MANAGE_DEPT, Permission.USERS_VIEW],
+  [Permission.USERS_MANAGE_DEPT]: [Permission.USERS_VIEW],
+};
+
+function expandImplications(perms: Set<Permission>): void {
+  const stack: Permission[] = Array.from(perms);
+  while (stack.length > 0) {
+    const p = stack.pop()!;
+    const implied = PERMISSION_IMPLIES[p];
+    if (!implied) continue;
+    for (const child of implied) {
+      if (!perms.has(child)) {
+        perms.add(child);
+        stack.push(child);
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // SystemRole -> global permissions
 // ---------------------------------------------------------------------------
 
@@ -168,6 +233,15 @@ export function computePermissions(user: UserForPermissions): ComputedPermission
     for (const dept of user.departments) {
       if (!dept.departmentId) continue;
       const deptPerms = new Set<Permission>();
+
+      // Department-wide grants (registry key `__departmentDefault__`)
+      // apply to every member of the department regardless of role.
+      const departmentDefaults = resolveDeptRolePermissions(
+        dept.departmentId,
+        '__departmentDefault__',
+      );
+      for (const p of departmentDefaults) deptPerms.add(p);
+
       if (Array.isArray(dept.roles)) {
         for (const roleName of dept.roles) {
           if (!roleName) continue;
@@ -190,6 +264,10 @@ export function computePermissions(user: UserForPermissions): ComputedPermission
       }
     }
   }
+
+  // Apply transitive implications (manage→view, umbrella→sub-feature).
+  expandImplications(global);
+  byDept.forEach((set) => expandImplications(set));
 
   return { global, byDept };
 }

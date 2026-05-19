@@ -294,6 +294,18 @@ async function loadEquipmentLinks(broadcastIds: mongoose.Types.ObjectId[]) {
   return map;
 }
 
+// Activity rows (one row per MCR Schedule entry). Used by the dedicated
+// MCR Flight Board which renders one item per ActivityRow document.
+async function loadActivityRowsInRange(range: AggregateRange) {
+  const query: any = {};
+  if (range.start || range.end) {
+    query.date = {};
+    if (range.start) query.date.$gte = range.start;
+    if (range.end) query.date.$lte = range.end;
+  }
+  return ActivityRow.find(query).sort({ date: 1, time: 1 }).limit(2000).lean();
+}
+
 async function loadOrphanMcrEvents(range: AggregateRange) {
   // MCR-only events — either flagged isMCROnly, or simply have no
   // broadcastEventId. They become their own MCR-typed rows.
@@ -472,6 +484,7 @@ function buildBroadcastItem(
             vtr: (broadcastArrayCrew.byRole['איש VTR'] || []).join(', '),
             broadcastTech: (broadcastArrayCrew.byRole['טכנאי שידור'] || []).join(', '),
             anchor: (broadcastArrayCrew.byRole['שדר'] || []).join(', '),
+            analyst: (broadcastArrayCrew.byRole['אנליסט'] || []).join(', '),
             sidelineAnchor: (broadcastArrayCrew.byRole['שדר קוים'] || []).join(', '),
           }
         : null,
@@ -483,6 +496,54 @@ function buildBroadcastItem(
         names: equipmentSummary.names,
         list: equipmentSummary.list,
         items: (equipment || []).map((eq) => plainCopy(eq)),
+      },
+    },
+  };
+}
+
+function buildActivityItem(row: any): FlightBoardItemShape {
+  // Compose a Date from the row's day + time string for accurate sorting.
+  const base = row.date ? new Date(row.date) : null;
+  const composeAt = (t: string | null | undefined): Date | null => {
+    if (!base || !t) return base;
+    const [hh, mm] = String(t).split(':').map((x) => parseInt(x, 10));
+    if (Number.isFinite(hh) && Number.isFinite(mm)) {
+      const d = new Date(base);
+      d.setHours(hh, mm, 0, 0);
+      return d;
+    }
+    return base;
+  };
+  return {
+    id: `activity:${row._id.toString()}`,
+    type: 'ACTIVITY' as any,
+    title: row.activityName || 'פעילות',
+    date: base,
+    startTime: composeAt(row.time),
+    endTime: composeAt(row.endTime),
+    channel: row.channel || null,
+    status: row.status || null,
+    description: row.source || null,
+    notes: row.notes || null,
+    raw: {
+      _id: row._id.toString(),
+      activity: {
+        id: row._id.toString(),
+        activityName: row.activityName || null,
+        time: row.time || null,
+        endTime: row.endTime || null,
+        source: row.source || null,
+        equipment: row.equipment || null,
+        backup: row.backup || null,
+        routing: row.routing || null,
+        channel: row.channel || null,
+        broadcastType: row.broadcastType || null,
+        notes: row.notes || null,
+        status: row.status || null,
+        isHidden: !!row.isHidden,
+        isManual: !!row.isManual,
+        broadcastEventId: row.broadcastEventId ? String(row.broadcastEventId) : null,
+        count: 1,
       },
     },
   };
@@ -568,6 +629,36 @@ function buildManualItem(row: {
     const d = new Date(val);
     return Number.isNaN(d.getTime()) ? null : d;
   };
+
+  // Manual rows accept arbitrary panel column keys including nested
+  // raw paths like `raw.broadcastArray.broadcastLocation`. Walk those
+  // into the nested raw subtree so the table reader (which traverses
+  // by path) finds them; non-raw, non-standard keys remain at top level
+  // of raw as flat keys for backward compatibility.
+  const raw: any = { manual: true, rowId: row.rowId, panelKey: row.panelKey || null };
+  const setDeep = (root: any, segments: string[], value: any) => {
+    let cur = root;
+    for (let i = 0; i < segments.length - 1; i++) {
+      const seg = segments[i];
+      if (cur[seg] == null || typeof cur[seg] !== 'object' || Array.isArray(cur[seg])) {
+        cur[seg] = {};
+      }
+      cur = cur[seg];
+    }
+    cur[segments[segments.length - 1]] = value;
+  };
+  for (const [key, val] of Object.entries(v)) {
+    if (['title', 'date', 'startTime', 'endTime', 'channel', 'status', 'description', 'notes']
+      .includes(key)) {
+      continue; // handled below by the top-level fields
+    }
+    if (key.startsWith('raw.')) {
+      setDeep(raw, key.slice(4).split('.'), val);
+    } else {
+      raw[key] = val;
+    }
+  }
+
   return {
     id: `manual:${row.rowId}`,
     type: 'MANUAL' as any,
@@ -579,12 +670,7 @@ function buildManualItem(row: {
     status: typeof v.status === 'string' ? v.status : null,
     description: typeof v.description === 'string' ? v.description : null,
     notes: typeof v.notes === 'string' ? v.notes : null,
-    raw: {
-      manual: true,
-      rowId: row.rowId,
-      panelKey: row.panelKey || null,
-      ...v,
-    },
+    raw,
   };
 }
 
@@ -629,6 +715,27 @@ function applyOverlay(
       hasOverride: !!override && Object.keys(override).length > 0,
     };
     if (override) {
+      // Helper: walk a dotted path on an object, creating intermediate
+      // plain objects as needed, and set the final segment to `val`.
+      // Needed because panel columns like `raw.broadcastArray.broadcastLocation`
+      // must be written into a nested raw subtree, not as a literal dotted
+      // key on `raw` (which is what the previous flat assignment did, and
+      // why overrides looked like they didn't save — the reader walks the
+      // path).
+      const setDeep = (root: any, segments: string[], value: any) => {
+        let cur = root;
+        for (let i = 0; i < segments.length - 1; i++) {
+          const seg = segments[i];
+          if (cur[seg] == null || typeof cur[seg] !== 'object' || Array.isArray(cur[seg])) {
+            cur[seg] = {};
+          }
+          cur = cur[seg];
+        }
+        cur[segments[segments.length - 1]] = value;
+      };
+
+      merged.raw = { ...(merged.raw || {}) };
+
       for (const [col, val] of Object.entries(override)) {
         if (col === 'date' || col === 'startTime' || col === 'endTime') {
           if (val == null) {
@@ -637,13 +744,17 @@ function applyOverlay(
             const d = new Date(val as any);
             if (!Number.isNaN(d.getTime())) merged[col] = d;
           }
+        } else if (col.startsWith('raw.')) {
+          setDeep(merged.raw, col.slice(4).split('.'), val);
         } else if (col in merged && col !== 'raw' && col !== 'id' && col !== 'type') {
           merged[col] = val;
         } else {
-          merged.raw = { ...(merged.raw || {}), [col]: val };
+          // Unknown top-level column; stash under raw as a plain key for
+          // any reader that explicitly looks for it.
+          merged.raw[col] = val;
         }
       }
-      merged.raw = { ...(merged.raw || {}), __override: override };
+      merged.raw.__override = override;
     }
     out.push(merged);
   }
@@ -682,6 +793,10 @@ async function aggregateBoardItems(
     requested.add('MCR');
     requested.add('POST');
     requested.add('EXTERNAL');
+    // ACTIVITY items map 1:1 to MCR Schedule rows. They're only included
+    // when a panel explicitly asks for them (or `allTypes` is set) so
+    // existing broadcast-centric boards don't suddenly double-count rows.
+    requested.add('ACTIVITY');
   }
 
   const items: FlightBoardItemShape[] = [];
@@ -727,6 +842,13 @@ async function aggregateBoardItems(
     const posts = await loadBulletinPosts(range);
     for (const post of posts) {
       items.push(buildPostItem(post));
+    }
+  }
+
+  if (requested.has('ACTIVITY')) {
+    const rows = await loadActivityRowsInRange(range);
+    for (const row of rows) {
+      items.push(buildActivityItem(row));
     }
   }
 

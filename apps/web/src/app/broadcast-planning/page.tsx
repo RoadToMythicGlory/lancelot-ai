@@ -573,10 +573,23 @@ const BroadcastPlanningPage: React.FC = () => {
         awaitRefetchQueries: true
       });
 
-      const { data } = result;
-      const response = data.createBroadcastEventWithOverlapCheck;
+      // Defensive access: in some failure modes (server returned only
+      // `errors`, network blip, schema mismatch with a stale bundle, etc.)
+      // `result.data` can be undefined even though Apollo did not throw.
+      // Reading `data.createBroadcastEventWithOverlapCheck` directly then
+      // crashes with "Cannot read properties of undefined" and hides the
+      // real cause from the user.
+      const response = result?.data?.createBroadcastEventWithOverlapCheck;
+      if (!response) {
+        const gqlErrors = (result as any)?.errors;
+        const msg = Array.isArray(gqlErrors) && gqlErrors[0]?.message
+          ? gqlErrors[0].message
+          : 'לא התקבלה תגובה תקינה מהשרת';
+        messageApi.error(`שגיאה ביצירת האירוע: ${msg}`);
+        return;
+      }
 
-      if (response.overlapCheck.hasOverlaps && !forceCreate) {
+      if (response.overlapCheck?.hasOverlaps && !forceCreate) {
         // Show overlap confirmation
         modal.confirm({
           title: 'זוהתה חפיפת ערוצים',
@@ -1648,7 +1661,7 @@ const BroadcastPlanningPage: React.FC = () => {
                 label="תאריך ושעה"
                 rules={[{ required: true, message: 'חובה לבחור תאריך ושעה' }]}
               >
-                <DatePicker showTime format="DD/MM/YYYY HH:mm" style={{ width: '100%' }} />
+                <DatePicker showTime needConfirm={false} format="DD/MM/YYYY HH:mm" style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col span={8}>
@@ -1656,7 +1669,7 @@ const BroadcastPlanningPage: React.FC = () => {
                 name="koTime"
                 label="KO / TO (Kick Off / Take Off)"
               >
-                <TimePicker format="HH:mm" style={{ width: '100%' }} />
+                <TimePicker format="HH:mm" needConfirm={false} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col span={8}>
@@ -1664,7 +1677,7 @@ const BroadcastPlanningPage: React.FC = () => {
                 name="endTime"
                 label="שעת סיום"
               >
-                <DatePicker showTime format="DD/MM/YYYY HH:mm" style={{ width: '100%' }} />
+                <DatePicker showTime needConfirm={false} format="DD/MM/YYYY HH:mm" style={{ width: '100%' }} />
               </Form.Item>
             </Col>
           </Row>
@@ -1839,7 +1852,7 @@ const BroadcastPlanningPage: React.FC = () => {
                 label="תאריך ושעה"
                 rules={[{ required: true, message: 'חובה לבחור תאריך ושעה' }]}
               >
-                <DatePicker showTime format="DD/MM/YYYY HH:mm" style={{ width: '100%' }} />
+                <DatePicker showTime needConfirm={false} format="DD/MM/YYYY HH:mm" style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col span={8}>
@@ -1847,7 +1860,7 @@ const BroadcastPlanningPage: React.FC = () => {
                 name="koTime"
                 label="KO / TO (Kick Off / Take Off)"
               >
-                <TimePicker format="HH:mm" style={{ width: '100%' }} />
+                <TimePicker format="HH:mm" needConfirm={false} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col span={8}>
@@ -1855,7 +1868,7 @@ const BroadcastPlanningPage: React.FC = () => {
                 name="endTime"
                 label="שעת סיום"
               >
-                <DatePicker showTime format="DD/MM/YYYY HH:mm" style={{ width: '100%' }} />
+                <DatePicker showTime needConfirm={false} format="DD/MM/YYYY HH:mm" style={{ width: '100%' }} />
               </Form.Item>
             </Col>
           </Row>

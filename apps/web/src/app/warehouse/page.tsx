@@ -100,6 +100,12 @@ const WarehousePage: React.FC = () => {
   const canManageWarehouse = hasPermission(Permission.WAREHOUSE_MANAGE);
   const canDisableEquipment = hasPermission(Permission.WAREHOUSE_DISABLE_EQUIPMENT);
   const canForceReleaseEquipment = hasPermission(Permission.WAREHOUSE_FORCE_RELEASE);
+  // Broadcast cross-cutting features (history tab, upcoming events widget,
+  // PDF import wizard, etc.) are gated by BROADCAST_VIEW. A warehouse user
+  // without broadcast access (e.g. a plain MCR operator) should never see
+  // them — and we definitely shouldn't fire the GET_BROADCAST_EVENTS
+  // resolver from this page for them.
+  const canViewBroadcasts = hasPermission(Permission.BROADCAST_VIEW);
   const [searchText, setSearchText] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
@@ -156,7 +162,7 @@ const WarehousePage: React.FC = () => {
       startDate: dateRangeValid ? dateRange[0]!.toISOString() : undefined,
       endDate: dateRangeValid ? dateRange[1]!.toISOString() : undefined
     },
-    skip: activeTab !== 'history' || !dateRangeValid
+    skip: activeTab !== 'history' || !dateRangeValid || !canViewBroadcasts
   });
 
   // Get unique categories for filter
@@ -985,24 +991,28 @@ const WarehousePage: React.FC = () => {
                 >
                   החזרת ציוד
                 </Button>
-                <Button
-                  icon={<FilePdfOutlined />}
-                  size="large"
-                  onClick={() => setIsPdfImportVisible(true)}
-                  style={{ marginLeft: 8 }}
-                >
-                  ייבוא PDF ציוד
-                </Button>
+                {canViewBroadcasts && (
+                  <Button
+                    icon={<FilePdfOutlined />}
+                    size="large"
+                    onClick={() => setIsPdfImportVisible(true)}
+                    style={{ marginLeft: 8 }}
+                  >
+                    ייבוא PDF ציוד
+                  </Button>
+                )}
               </Space>
             )}
           </div>
         </div>
 
-        {/* Tabs */}
+        {/* Tabs. Broadcast-dependent tabs are filtered out for users who
+            don't have BROADCAST_VIEW so they don't accidentally trip a
+            "Missing permission: BROADCAST_VIEW" 500 from the resolver. */}
         <Tabs 
           activeKey={activeTab} 
           onChange={setActiveTab}
-          items={[
+          items={([
             {
               key: 'equipment',
               label: (
@@ -1013,7 +1023,7 @@ const WarehousePage: React.FC = () => {
               ),
               children: renderEquipmentTab(),
             },
-            {
+            canViewBroadcasts && {
               key: 'history',
               label: (
                 <span>
@@ -1043,7 +1053,7 @@ const WarehousePage: React.FC = () => {
               ),
               children: <VendorManagement canManage={canManageWarehouse} />,
             },
-            {
+            canViewBroadcasts && {
               key: 'upcoming-events',
               label: (
                 <span>
@@ -1063,7 +1073,7 @@ const WarehousePage: React.FC = () => {
               ),
               children: <EquipmentSetsManager canManage={canManageWarehouse} />,
             },
-            {
+            canViewBroadcasts && {
               key: 'external-requests',
               label: (
                 <span>
@@ -1083,7 +1093,7 @@ const WarehousePage: React.FC = () => {
               ),
               children: <EquipmentLiveTracking />,
             },
-          ]}
+          ].filter(Boolean) as { key: string; label: React.ReactNode; children: React.ReactNode }[])}
         />
 
         {/* Equipment Registration Modal */}

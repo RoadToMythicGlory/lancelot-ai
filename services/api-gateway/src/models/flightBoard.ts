@@ -20,7 +20,8 @@ export type FlightBoardItemType =
   | 'POST'
   | 'PROJECT'
   | 'EXTERNAL'
-  | 'MANUAL';
+  | 'MANUAL'
+  | 'ACTIVITY';
 
 export type FlightBoardPanelType =
   | 'TABLE'
@@ -134,7 +135,17 @@ const flightBoardPanelSchema = new Schema<IFlightBoardPanel>(
     itemTypes: [
       {
         type: String,
-        enum: ['BROADCAST', 'STREAM', 'MCR', 'PODCAST', 'POST', 'PROJECT', 'EXTERNAL'],
+        enum: [
+          'BROADCAST',
+          'STREAM',
+          'MCR',
+          'PODCAST',
+          'POST',
+          'PROJECT',
+          'EXTERNAL',
+          'MANUAL',
+          'ACTIVITY',
+        ],
       },
     ],
     visibleColumns: { type: [String], default: [] },

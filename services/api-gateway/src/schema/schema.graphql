@@ -142,6 +142,21 @@ type AssignmentFormDepartmentDef {
   order: Int!
 }
 
+# Column-based layout used by the broadcastArray form. Each column
+# corresponds to a role column rendered in the Broadcast Array grid;
+# `hebrewLabel` doubles as the `role` value stored in
+# crewAssignments[] on each BroadcastEvent.
+type AssignmentFormColumnDef {
+  key: String!
+  hebrewLabel: String!
+  englishLabel: String
+  allowedDepartmentCodes: [String!]!
+  allowedUserIds: [String!]!
+  requireUser: Boolean!
+  defaultCount: Int!
+  order: Int!
+}
+
 type AssignmentFormConfig {
   id: ID!
   formKey: String!
@@ -149,6 +164,7 @@ type AssignmentFormConfig {
   hebrewName: String
   description: String
   departments: [AssignmentFormDepartmentDef!]!
+  columns: [AssignmentFormColumnDef!]!
   allowUserPresets: Boolean!
   isActive: Boolean!
   createdAt: DateTime!
@@ -163,12 +179,24 @@ input AssignmentFormDepartmentDefInput {
   order: Int
 }
 
+input AssignmentFormColumnDefInput {
+  key: String!
+  hebrewLabel: String!
+  englishLabel: String
+  allowedDepartmentCodes: [String!]
+  allowedUserIds: [String!]
+  requireUser: Boolean
+  defaultCount: Int
+  order: Int
+}
+
 input UpsertAssignmentFormConfigInput {
   formKey: String!
   name: String!
   hebrewName: String
   description: String
   departments: [AssignmentFormDepartmentDefInput!]!
+  columns: [AssignmentFormColumnDefInput!]
   allowUserPresets: Boolean
   isActive: Boolean
 }
@@ -323,6 +351,20 @@ type WarehouseEquipmentStats {
   totalAssigned: Int!
   totalMaintenance: Int!
   totalDisabled: Int!
+}
+
+# Slim equipment shape returned by `warehouseEquipmentForPicker`. Keep this
+# narrow on purpose — adding fields here means raising the payload for the
+# 5000-item picker query.
+type WarehouseEquipmentPickerItem {
+  id: ID!
+  name: String!
+  category: String
+  brand: String
+  barcode: String
+  quantityTotal: Int
+  isQuantityBased: Boolean!
+  isDisabled: Boolean!
 }
 
 type StorageLocation {
@@ -897,6 +939,76 @@ input CreateExternalBroadcastPresetInput {
   equipment: [PresetEquipmentInput!]
 }
 
+# --- Venues -----------------------------------------------------------
+type Venue {
+  id: ID!
+  name: String!
+  hebrewName: String
+  city: String
+  address: String
+  notes: String
+  capacity: Int
+  equipmentPresetIds: [ID!]!
+  crewStructures: [VenueCrewStructure!]!
+  isActive: Boolean!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type VenueCrewStructure {
+  name: String!
+  notes: String
+  jobs: [VenueCrewJob!]!
+}
+
+type VenueCrewJob {
+  departmentCode: String!
+  roleKey: String
+  roleLabel: String
+  count: Int!
+  userId: String
+  userName: String
+}
+
+input VenueCrewJobInput {
+  departmentCode: String!
+  roleKey: String
+  roleLabel: String
+  count: Int = 1
+  userId: String
+  userName: String
+}
+
+input VenueCrewStructureInput {
+  name: String!
+  notes: String
+  jobs: [VenueCrewJobInput!]!
+}
+
+input CreateVenueInput {
+  name: String!
+  hebrewName: String
+  city: String
+  address: String
+  notes: String
+  capacity: Int
+  equipmentPresetIds: [ID!]
+  crewStructures: [VenueCrewStructureInput!]
+  isActive: Boolean
+}
+
+input UpdateVenueInput {
+  name: String
+  hebrewName: String
+  city: String
+  address: String
+  notes: String
+  capacity: Int
+  equipmentPresetIds: [ID!]
+  crewStructures: [VenueCrewStructureInput!]
+  isActive: Boolean
+}
+
 input UpdateExternalBroadcastPresetInput {
   name: String
   description: String
@@ -1097,6 +1209,10 @@ type Query {
   # Warehouse Equipment
   warehouseEquipment(filter: WarehouseEquipmentFilter, limit: Int, offset: Int): [WarehouseEquipment!]!
   warehouseEquipmentStats(filter: WarehouseEquipmentFilter): WarehouseEquipmentStats!
+  # Slim projection of every active equipment row for picker UIs (e.g. the
+  # equipment-sets Preset Items selector). Up to 5000 items, name-sorted,
+  # optionally filtered by a free-text `search` over name/barcode/model.
+  warehouseEquipmentForPicker(search: String): [WarehouseEquipmentPickerItem!]!
   
   # Equipment Assignments
   equipmentAssignmentsByEvent(broadcastEventId: ID!): [EquipmentAssignment!]!
@@ -1186,6 +1302,11 @@ type Query {
   # External Broadcast Presets
   externalBroadcastPresets: [ExternalBroadcastPreset!]!
   externalBroadcastPreset(id: ID!): ExternalBroadcastPreset
+
+  # Venues / stadiums (used by External Broadcasts to hydrate crew +
+  # equipment defaults when a venue is selected).
+  venues(includeInactive: Boolean): [Venue!]!
+  venue(id: ID!): Venue
 }
 
 type Mutation {
@@ -1326,6 +1447,11 @@ type Mutation {
   createExternalBroadcastPreset(input: CreateExternalBroadcastPresetInput!): ExternalBroadcastPreset!
   updateExternalBroadcastPreset(id: ID!, input: UpdateExternalBroadcastPresetInput!): ExternalBroadcastPreset!
   deleteExternalBroadcastPreset(id: ID!): Boolean!
+
+  # Venues
+  createVenue(input: CreateVenueInput!): Venue!
+  updateVenue(id: ID!, input: UpdateVenueInput!): Venue!
+  deleteVenue(id: ID!): Boolean!
 
   # Department management
   createDepartment(input: CreateDepartmentInput!): Department!
@@ -4037,6 +4163,9 @@ enum FlightBoardItemType {
   PROJECT
   EXTERNAL
   MANUAL
+  # One row per MCR Schedule activity row. Used by the MCR Flight Board
+  # variant — each item maps 1:1 to an ActivityRow document.
+  ACTIVITY
 }
 
 enum FlightBoardPanelType {

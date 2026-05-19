@@ -15,6 +15,7 @@ export const ENABLED_ITEM_TYPES: FlightBoardItemType[] = [
   'BROADCAST',
   'MCR',
   'POST',
+  'ACTIVITY',
 ];
 
 export const DEFERRED_ITEM_TYPES: FlightBoardItemType[] = [
@@ -33,6 +34,7 @@ export const ITEM_TYPE_HEBREW_LABELS: Record<FlightBoardItemType, string> = {
   PROJECT: 'פרויקטי אירוע',
   EXTERNAL: 'שידורי חוץ',
   MANUAL: 'שורה ידנית',
+  ACTIVITY: 'שורות לוח MCR',
 };
 
 // Compact 4-letter labels for the optional "type" column. Most boards no
@@ -47,6 +49,7 @@ export const ITEM_TYPE_SHORT_LABELS: Record<FlightBoardItemType, string> = {
   PROJECT: 'PROJ',
   EXTERNAL: 'EXT',
   MANUAL: 'ידני',
+  ACTIVITY: 'פעילות',
 };
 
 export const ITEM_TYPE_COLORS: Record<FlightBoardItemType, string> = {
@@ -58,6 +61,7 @@ export const ITEM_TYPE_COLORS: Record<FlightBoardItemType, string> = {
   PROJECT: '#ec4899',
   EXTERNAL: '#ef4444',
   MANUAL: '#fbbf24',
+  ACTIVITY: '#14b8a6',
 };
 
 export const PANEL_TYPE_LABELS: Record<FlightBoardPanelType, string> = {
@@ -219,12 +223,19 @@ export const COLUMN_GROUPS: ColumnGroup[] = [
     description: 'מידע משורות הלוח (פעילות) המקושרות לאירוע',
     columns: [
       { key: 'raw.activity.count', label: 'מספר שורות פעילות' },
+      { key: 'raw.activity.activityName', label: 'פעילות', longText: true },
       { key: 'raw.activity.time', label: 'שעת התחלה (לוח)', timeOnly: true },
       { key: 'raw.activity.endTime', label: 'שעת סיום (לוח)', timeOnly: true },
+      { key: 'raw.activity.source', label: 'אולפן/מקור' },
+      { key: 'raw.activity.channel', label: 'ערוץ (לוח)' },
       { key: 'raw.activity.equipment', label: 'מכשירים (לוח)', longText: true },
       { key: 'raw.activity.backup', label: 'גיבוי (לוח)' },
-      { key: 'raw.activity.routing', label: 'ניתובים (לוח)', longText: true },
+      { key: 'raw.activity.routing', label: 'ניתובים / יעד (לוח)', longText: true },
       { key: 'raw.activity.broadcastType', label: 'סוג שידור (לוח)' },
+      { key: 'raw.activity.status', label: 'סטטוס (לוח)' },
+      { key: 'raw.activity.notes', label: 'הערות (לוח)', longText: true },
+      { key: 'raw.activity.isManual', label: 'שורה ידנית', boolean: true },
+      { key: 'raw.activity.isHidden', label: 'מוסתרת מהתצוגה', boolean: true },
     ],
   },
   {
@@ -256,6 +267,7 @@ export const COLUMN_GROUPS: ColumnGroup[] = [
       { key: 'raw.broadcastArray.vtr', label: 'איש VTR', longText: true },
       { key: 'raw.broadcastArray.broadcastTech', label: 'טכנאי שידור', longText: true },
       { key: 'raw.broadcastArray.anchor', label: 'שדר', longText: true },
+      { key: 'raw.broadcastArray.analyst', label: 'אנליסט', longText: true },
       { key: 'raw.broadcastArray.sidelineAnchor', label: 'שדר קווים', longText: true },
       { key: 'raw.broadcastArray.summary', label: 'סיכום מערך שידור', longText: true },
     ],

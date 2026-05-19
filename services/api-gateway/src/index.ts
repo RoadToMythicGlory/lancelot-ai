@@ -37,6 +37,7 @@ import { warehouseRoutes } from './routes/warehouseRoutes';
 import { trackingRoutes } from './routes/trackingRoutes';
 import { equipmentSetsResolvers } from './resolvers/equipmentSets';
 import { internalAssignmentsResolvers } from './resolvers/internalAssignments';
+import { venueResolvers } from './resolvers/venues';
 import { trackingResolvers } from './resolvers/tracking';
 import { roleTemplateResolvers } from './resolvers/roleTemplate';
 import { flightBoardResolvers } from './resolvers/flightBoard';
@@ -68,6 +69,8 @@ const resolvers = {
     eventsWithAssignedEquipment: broadcastResolvers.Query.eventsWithAssignedEquipment,
     externalBroadcastPresets: broadcastResolvers.Query.externalBroadcastPresets,
     externalBroadcastPreset: broadcastResolvers.Query.externalBroadcastPreset,
+    venues: venueResolvers.Query.venues,
+    venue: venueResolvers.Query.venue,
     // Equipment Sets
     equipmentSets: equipmentSetsResolvers.Query.equipmentSets,
     equipmentSet: equipmentSetsResolvers.Query.equipmentSet,
@@ -130,6 +133,9 @@ const resolvers = {
     createExternalBroadcastPreset: broadcastResolvers.Mutation.createExternalBroadcastPreset,
     updateExternalBroadcastPreset: broadcastResolvers.Mutation.updateExternalBroadcastPreset,
     deleteExternalBroadcastPreset: broadcastResolvers.Mutation.deleteExternalBroadcastPreset,
+    createVenue: venueResolvers.Mutation.createVenue,
+    updateVenue: venueResolvers.Mutation.updateVenue,
+    deleteVenue: venueResolvers.Mutation.deleteVenue,
     // Equipment Sets
     createEquipmentSet: equipmentSetsResolvers.Mutation.createEquipmentSet,
     updateEquipmentSet: equipmentSetsResolvers.Mutation.updateEquipmentSet,

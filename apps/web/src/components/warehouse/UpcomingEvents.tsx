@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Card, List, DatePicker, Button, Space, Tag, Row, Col, Spin, Empty, Typography, Divider, Timeline, Segmented } from 'antd';
-import { 
+import React, { useState, useEffect, useMemo } from 'react';
+import { Card, List, DatePicker, Button, Space, Tag, Row, Col, Spin, Empty, Typography, Divider, Timeline, Segmented, Modal, Input, App } from 'antd';
+import {
   CalendarOutlined,
   ClockCircleOutlined,
   EnvironmentOutlined,
@@ -11,11 +11,15 @@ import {
   LeftOutlined,
   RightOutlined,
   UnorderedListOutlined,
-  AppstoreOutlined
+  AppstoreOutlined,
+  ImportOutlined,
 } from '@ant-design/icons';
-import { useQuery } from '@apollo/client';
+import { useMutation, useQuery } from '@apollo/client';
 import { GET_BROADCAST_EVENTS } from '../../graphql/queries';
+import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA } from '../../graphql/mutations';
 import WarehouseModal from '../broadcast/WarehouseModal';
+import { useAuth } from '@/contexts/AuthContext';
+import { Permission } from '@/rbac';
 import dayjs from 'dayjs';
 import isBetween from 'dayjs/plugin/isBetween';
 import weekOfYear from 'dayjs/plugin/weekOfYear';
@@ -57,14 +61,46 @@ interface UpcomingEventsProps {
   onEventClick?: (event: BroadcastEvent) => void;
 }
 
+// Decide whether an event "belongs" in the warehouse upcoming view. By
+// default we only show events the warehouse is actually responsible for —
+// i.e. either some equipment was requested or an admin has manually
+// imported the event into the warehouse (sets a small flag in
+// `metadata.departments.warehouse.manuallyTracked`).
+function hasWarehouseInterest(event: any): boolean {
+  const wh = event?.metadata?.departments?.warehouse;
+  if (!wh) return false;
+  if (wh.manuallyTracked === true) return true;
+  if ((wh.totalRequested || 0) > 0) return true;
+  if (Array.isArray(wh.requestedItems) && wh.requestedItems.length > 0) return true;
+  if (Array.isArray(wh.assignedItems) && wh.assignedItems.length > 0) return true;
+  // Legacy fallback (older events stored data directly under metadata.warehouseData)
+  const legacy = event?.metadata?.warehouseData;
+  if (legacy) {
+    if (legacy.manuallyTracked === true) return true;
+    if ((legacy.totalRequested || 0) > 0) return true;
+    if (Array.isArray(legacy.requestedItems) && legacy.requestedItems.length > 0) return true;
+    if (Array.isArray(legacy.assignedItems) && legacy.assignedItems.length > 0) return true;
+  }
+  return false;
+}
+
 const UpcomingEvents: React.FC<UpcomingEventsProps> = ({ onEventClick }) => {
+  const { message } = App.useApp();
   const [viewMode, setViewMode] = useState<'day' | 'week'>('day');
   const [selectedDate, setSelectedDate] = useState(dayjs());
   const [selectedWeek, setSelectedWeek] = useState(dayjs());
   const [selectedEvent, setSelectedEvent] = useState<BroadcastEvent | null>(null);
   const [isWarehouseModalVisible, setIsWarehouseModalVisible] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importSearch, setImportSearch] = useState('');
+  const { hasPermission } = useAuth();
+  const canViewBroadcasts = hasPermission(Permission.BROADCAST_VIEW);
+  const canManageWarehouse = hasPermission(Permission.WAREHOUSE_MANAGE);
 
-  // Query for broadcast events
+  // Query for broadcast events. Skipped if the user lacks BROADCAST_VIEW
+  // so the resolver doesn't throw an "Missing permission" 500 when this
+  // widget is rendered defensively (e.g. embedded on a page they can
+  // otherwise see).
   const { data, loading, error, refetch } = useQuery(GET_BROADCAST_EVENTS, {
     variables: {
       startDate: viewMode === 'day' 
@@ -73,10 +109,56 @@ const UpcomingEvents: React.FC<UpcomingEventsProps> = ({ onEventClick }) => {
       endDate: viewMode === 'day'
         ? selectedDate.endOf('day').toISOString()
         : selectedWeek.endOf('week').toISOString()
-    }
+    },
+    skip: !canViewBroadcasts,
   });
 
-  const events: BroadcastEvent[] = data?.broadcastEvents || [];
+  const allEvents: BroadcastEvent[] = data?.broadcastEvents || [];
+  // Warehouse view: only events that have requested equipment or were
+  // explicitly imported by an admin (see "ייבוא אירוע מהתכנונית" button).
+  const events: BroadcastEvent[] = useMemo(
+    () => allEvents.filter((e) => hasWarehouseInterest(e)),
+    [allEvents],
+  );
+
+  const importCandidates = useMemo(() => {
+    const term = importSearch.trim().toLowerCase();
+    return allEvents
+      .filter((e) => !hasWarehouseInterest(e))
+      .filter((e) => {
+        if (!term) return true;
+        const title = `${(e as any).hebrewTitle || ''} ${e.title || ''}`.toLowerCase();
+        return title.includes(term);
+      })
+      .slice(0, 50);
+  }, [allEvents, importSearch]);
+
+  const [importEvent, { loading: importing }] = useMutation(UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA, {
+    onCompleted: () => {
+      message.success('האירוע נוסף לרשימת המחסן');
+      refetch();
+    },
+    onError: (err) => {
+      message.error(err.message || 'הוספת האירוע נכשלה');
+    },
+  });
+
+  const handleImportEvent = async (event: BroadcastEvent) => {
+    const existingWh = (event as any).metadata?.departments?.warehouse || {};
+    await importEvent({
+      variables: {
+        eventId: event.id,
+        department: 'warehouse',
+        data: {
+          customData: {
+            ...existingWh,
+            manuallyTracked: true,
+            manuallyTrackedAt: new Date().toISOString(),
+          },
+        },
+      },
+    });
+  };
 
   const handleEventClick = (event: BroadcastEvent) => {
     setSelectedEvent(event);
@@ -404,6 +486,17 @@ const UpcomingEvents: React.FC<UpcomingEventsProps> = ({ onEventClick }) => {
           אירועים קרובים
         </Title>
         <Space>
+          {canManageWarehouse && (
+            <Button
+              icon={<ImportOutlined />}
+              onClick={() => {
+                setImportSearch('');
+                setImportModalOpen(true);
+              }}
+            >
+              ייבוא אירוע מהתכנונית
+            </Button>
+          )}
           <Button type="primary" onClick={handleToday}>
             היום
           </Button>
@@ -445,6 +538,62 @@ const UpcomingEvents: React.FC<UpcomingEventsProps> = ({ onEventClick }) => {
           onDataSaved={handleDataSaved}
         />
       )}
+
+      {/* Import-from-planner modal: lets a warehouse admin pull any
+          planner event into the warehouse view even if no equipment was
+          requested for it yet. */}
+      <Modal
+        open={importModalOpen}
+        title="ייבוא אירוע מהתכנונית"
+        onCancel={() => setImportModalOpen(false)}
+        footer={null}
+        width={640}
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <Input.Search
+            placeholder="חיפוש לפי שם אירוע"
+            allowClear
+            value={importSearch}
+            onChange={(e) => setImportSearch(e.target.value)}
+          />
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            הרשימה מציגה אירועים מהתכנונית בטווח התאריכים הנוכחי שאינם מופיעים עדיין במחסן (לא בוקש להם ציוד).
+          </Text>
+          {importCandidates.length === 0 ? (
+            <Empty description="אין אירועים נוספים זמינים לייבוא בטווח התאריכים שנבחר" />
+          ) : (
+            <List
+              size="small"
+              bordered
+              dataSource={importCandidates}
+              renderItem={(ev) => (
+                <List.Item
+                  actions={[
+                    <Button
+                      key="import"
+                      type="link"
+                      icon={<ImportOutlined />}
+                      loading={importing}
+                      onClick={() => handleImportEvent(ev)}
+                    >
+                      ייבא
+                    </Button>,
+                  ]}
+                >
+                  <div>
+                    <div style={{ fontWeight: 500 }}>
+                      {(ev as any).hebrewTitle || ev.title}
+                    </div>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {dayjs(ev.startTime).format('DD/MM/YYYY HH:mm')} • {ev.channel || '—'}
+                    </Text>
+                  </div>
+                </List.Item>
+              )}
+            />
+          )}
+        </Space>
+      </Modal>
     </div>
   );
 };

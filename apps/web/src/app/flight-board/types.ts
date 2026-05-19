@@ -6,7 +6,8 @@ export type FlightBoardItemType =
   | 'POST'
   | 'PROJECT'
   | 'EXTERNAL'
-  | 'MANUAL';
+  | 'MANUAL'
+  | 'ACTIVITY';
 
 export type FlightBoardPanelType =
   | 'TABLE'

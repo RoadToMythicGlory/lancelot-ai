@@ -4,13 +4,54 @@ import { connectMongoDB } from '../config/mongodb';
 import { config } from '../config';
 import { expandMCRDepartments } from '../utils/departments';
 import { requireAuth, requirePermission } from '../middleware/auth';
-import { Permission, canManageUser } from '../rbac';
+import { Permission, canManageUser, computePermissions } from '../rbac';
 import { RoleTemplate } from '../models/roleTemplate';
 import type { Context } from '../types';
 
 // Hard cap on user-list queries to keep an unbounded admin search from
 // pulling tens of thousands of rows in a single request.
 const MAX_USER_LIST = 1000;
+
+/**
+ * Compute the user's full effective permission set: the union of
+ *   1. permissions implied by the user's `departments[]` (department-wide
+ *      grants + per-role grants resolved through the runtime registry that
+ *      `departmentRegistry.ts` keeps in sync), AND
+ *   2. permissions provided by the role template, AND
+ *   3. extra custom permissions granted on top.
+ *
+ * The result is what we persist on `users.permissions`. Storing the
+ * fully-merged set means:
+ *   - the `users` / `me` GraphQL queries return the correct effective
+ *     permissions (admins see the right tags in the table; the user
+ *     sees the right capabilities in `me`),
+ *   - the JWT signed at login carries the real effective set so the
+ *     frontend's sidebar gating works without a separate registry
+ *     download, and
+ *   - the per-request server-side `computePermissions(...)` in
+ *     `middleware/context.ts` still re-derives perms from the same
+ *     stored shape, so the runtime check is self-consistent.
+ */
+function deriveEffectivePermissions(args: {
+  systemRole: string | undefined;
+  departments: any[] | undefined;
+  templatePerms: string[];
+  customPerms: string[];
+}): string[] {
+  const computed = computePermissions({
+    systemRole: args.systemRole,
+    departments: args.departments,
+    // Feed the union of template + custom in as direct grants so they
+    // also pass through the Permission-enum validator inside
+    // computePermissions (it silently drops anything unknown).
+    permissions: Array.from(new Set([...(args.templatePerms || []), ...(args.customPerms || [])])),
+  });
+  const out = new Set<string>(computed.global);
+  computed.byDept.forEach((deptPerms) => {
+    deptPerms.forEach((p) => out.add(p));
+  });
+  return Array.from(out);
+}
 
 async function computePublicKeyFingerprint(publicKey: string): Promise<string> {
   const crypto = await import('crypto');
@@ -220,10 +261,17 @@ export const userResolvers = {
 
       const hashedPassword = await bcrypt.hash(input.password, config.BCRYPT_ROUNDS);
 
-      // Merge template permissions with custom overrides
-      const finalPermissions = [
-        ...new Set([...templatePerms, ...(input.customPermissions || [])]),
-      ];
+      // Fold template + custom + department-derived perms into a single
+      // effective set so the stored value matches what the user actually
+      // has at runtime. Without the department merge, the table would
+      // show a freshly-created MCR Operator as having zero perms even
+      // though every per-request resolver correctly grants MCR_VIEW etc.
+      const finalPermissions = deriveEffectivePermissions({
+        systemRole: input.systemRole,
+        departments: input.departments,
+        templatePerms,
+        customPerms: input.customPermissions || [],
+      });
 
       const { roleTemplateId: _rtId, customPermissions: _cp, ...rest } = input;
 
@@ -332,11 +380,50 @@ export const userResolvers = {
         updatedBy: actor.userId,
       };
 
-      // Merge template + custom permissions
-      if (templatePerms !== null || input.customPermissions) {
-        const base = templatePerms ?? (targetUser.permissions || []);
-        const custom = input.customPermissions || [];
-        updateData.permissions = [...new Set([...base, ...custom])];
+      // Recompute the stored permissions set whenever the caller touched
+      // anything that contributes to it — the role template, the custom
+      // permission list, the user's system role, OR their department/role
+      // assignments. Department changes matter because each department
+      // (and the roles within it) grants permissions through the runtime
+      // registry; without folding them in here the `users` table, the
+      // `me` endpoint, and the JWT issued at next login would all show a
+      // freshly-assigned MCR Operator as having zero perms.
+      const customPermsProvided = input.customPermissions !== undefined;
+      const templateTouched = resolvedTemplateId !== undefined;
+      const departmentsTouched = input.departments !== undefined;
+      const systemRoleTouched = input.systemRole !== undefined
+        && input.systemRole !== targetUser.systemRole;
+      if (templateTouched || customPermsProvided || departmentsTouched || systemRoleTouched) {
+        // Resolve the template perms in play. If the caller didn't touch
+        // the template, keep the existing one's perms so we don't
+        // silently strip them.
+        let basePerms: string[] = [];
+        if (templateTouched) {
+          basePerms = templatePerms || [];
+        } else if (targetUser.roleTemplateId) {
+          const existingTemplate = await RoleTemplate
+            .findById(targetUser.roleTemplateId)
+            .lean();
+          basePerms = (existingTemplate?.permissions as string[]) || [];
+        }
+
+        // For customPermissions: explicit empty list means "clear";
+        // missing field means "keep whatever the user had stored on top
+        // of departments/template". We approximate "kept custom" as
+        // (existing stored perms − perms that would be derived from the
+        // current/previous template + the previous department roles),
+        // but in practice the frontend always sends customPermissions
+        // for System Admin actors, so this branch is mostly defensive.
+        const custom = customPermsProvided
+          ? (input.customPermissions as string[])
+          : (targetUser.permissions || []);
+
+        updateData.permissions = deriveEffectivePermissions({
+          systemRole: input.systemRole ?? targetUser.systemRole,
+          departments: departmentsTouched ? input.departments : targetUser.departments,
+          templatePerms: basePerms,
+          customPerms: custom,
+        });
       }
 
       if (resolvedTemplateId !== undefined) {

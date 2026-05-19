@@ -1,7 +1,9 @@
 import { Context } from '../types';
 import { ObjectId } from 'mongodb';
+import mongoose from 'mongoose';
 import { connectMongoDB, connectMongoose } from '../config/mongodb';
 import { BroadcastEvent } from '../models/broadcast.models';
+import BulletinPost from '../models/bulletinPost';
 import { requirePermission } from '../middleware/auth';
 import { Permission } from '../rbac';
 
@@ -9,6 +11,76 @@ import { Permission } from '../rbac';
 const MAX_DASHBOARD_BROADCASTS = 1000;
 const MAX_DASHBOARD_SHIFTS = 1000;
 const MAX_BULLETIN_LIMIT = 200;
+
+// Shapes a Mongoose BulletinPost doc into the GraphQL `BulletinPost` type
+// the dashboard expects. Author info is resolved via a single
+// `users.findOne` to keep round-trips small.
+async function shapeBulletinPost(doc: any): Promise<any> {
+  if (!doc) return null;
+  const mongoDb = await connectMongoDB();
+  let author: any = {
+    id: doc.createdBy?.toString?.() || String(doc.createdBy || ''),
+    displayName: 'Unknown User',
+    email: '',
+  };
+  if (doc.createdBy) {
+    try {
+      const user = await mongoDb
+        .collection('users')
+        .findOne({ _id: new ObjectId(String(doc.createdBy)) });
+      if (user) {
+        author = {
+          id: user._id.toString(),
+          displayName:
+            user.displayName ||
+            `${user.firstName || ''} ${user.lastName || ''}`.trim() ||
+            user.email ||
+            'Unknown User',
+          email: user.email || '',
+        };
+      }
+    } catch {
+      // Bad ObjectId or user missing — fall through with the placeholder.
+    }
+  }
+  let departmentName: string | null = null;
+  if (doc.departmentId) {
+    try {
+      const dept = await mongoDb
+        .collection('departments')
+        .findOne({ _id: new ObjectId(String(doc.departmentId)) });
+      departmentName = dept?.hebrewName || dept?.name || null;
+    } catch {
+      departmentName = null;
+    }
+  }
+  return {
+    id: doc._id ? doc._id.toString() : doc.id,
+    title: doc.title || '',
+    content: doc.content || '',
+    isEmergency: !!doc.isEmergency,
+    isPinned: !!doc.isPinned,
+    departmentId: doc.departmentId ? String(doc.departmentId) : null,
+    departmentName,
+    author,
+    createdAt: (doc.createdAt instanceof Date
+      ? doc.createdAt
+      : new Date(doc.createdAt || Date.now())
+    ).toISOString(),
+    updatedAt: (doc.updatedAt instanceof Date
+      ? doc.updatedAt
+      : new Date(doc.updatedAt || Date.now())
+    ).toISOString(),
+    expiresAt: doc.expiryDate
+      ? (doc.expiryDate instanceof Date
+          ? doc.expiryDate
+          : new Date(doc.expiryDate)
+        ).toISOString()
+      : null,
+    viewCount: doc.viewCount || 0,
+    tags: Array.isArray(doc.tags) ? doc.tags : [],
+  };
+}
 
 // Define resolver types
 type ResolverFn = (parent: any, args: any, context: Context, info?: any) => any;
@@ -18,48 +90,6 @@ type ResolverMap = {
   Subscription?: Record<string, ResolverFn>;
   [key: string]: any;
 };
-
-// Mock data for now - in production, these would come from the database
-const mockBulletinPosts = [
-  {
-    id: '1',
-    title: 'עדכון מערכת חדש',
-    content: 'המערכת תעודכן הלילה בשעה 02:00. צפויה השבתה של כ-30 דקות.',
-    isEmergency: false,
-    isPinned: true,
-    departmentId: 'IT',
-    departmentName: 'מחלקת IT',
-    author: {
-      id: '1',
-      displayName: 'מנהל המערכת',
-      email: 'admin@example.com'
-    },
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    expiresAt: null,
-    viewCount: 45,
-    tags: ['מערכת', 'עדכון']
-  },
-  {
-    id: '2',
-    title: 'הודעת חירום - בעיה בשידור',
-    content: 'יש בעיה טכנית בערוץ 5 לייב. צוות טכני מטפל.',
-    isEmergency: true,
-    isPinned: false,
-    departmentId: 'MCR',
-    departmentName: 'מחלקת בקרה',
-    author: {
-      id: '2',
-      displayName: 'בקר ראשי',
-      email: 'mcr@example.com'
-    },
-    createdAt: new Date(Date.now() - 3600000).toISOString(),
-    updatedAt: new Date(Date.now() - 3600000).toISOString(),
-    expiresAt: null,
-    viewCount: 120,
-    tags: ['חירום', 'שידור']
-  }
-];
 
 export const dashboardResolvers = {
   Query: {
@@ -198,42 +228,34 @@ export const dashboardResolvers = {
       }
     },
     // Bulletin board queries
-    bulletinPosts: async (_parent: any, { departmentId, limit = 10, onlyEmergency = false, onlyPinned = false }: any, context: Context) => {
-      requirePermission(context, Permission.DASHBOARD_VIEW);
-
-      // Bound caller-provided limits.
+    bulletinPosts: async (
+      _parent: any,
+      { departmentId, limit = 10, onlyEmergency = false, onlyPinned = false }: any,
+      context: Context,
+    ) => {
+      requirePermission(context, Permission.BULLETIN_VIEW);
       const boundedLimit = Math.max(1, Math.min(Number(limit) || 10, MAX_BULLETIN_LIMIT));
 
       try {
-        // In production, this would query MongoDB
-        let posts = [...mockBulletinPosts];
+        await connectMongoose();
 
-        // Filter by department if specified
-        if (departmentId) {
-          posts = posts.filter(post => post.departmentId === departmentId);
+        const query: any = { isActive: true };
+        // Suppress expired posts from the board so stale announcements
+        // don't linger forever.
+        query.$or = [{ expiryDate: null }, { expiryDate: { $exists: false } }, { expiryDate: { $gt: new Date() } }];
+        if (departmentId && ObjectId.isValid(String(departmentId))) {
+          query.departmentId = new mongoose.Types.ObjectId(String(departmentId));
         }
+        if (onlyEmergency) query.isEmergency = true;
+        if (onlyPinned) query.isPinned = true;
 
-        // Filter by emergency status
-        if (onlyEmergency) {
-          posts = posts.filter(post => post.isEmergency);
-        }
+        const docs = await BulletinPost.find(query)
+          .sort({ isEmergency: -1, isPinned: -1, createdAt: -1 })
+          .limit(boundedLimit)
+          .lean()
+          .exec();
 
-        // Filter by pinned status
-        if (onlyPinned) {
-          posts = posts.filter(post => post.isPinned);
-        }
-
-        // Sort by emergency first, then pinned, then by date
-        posts.sort((a, b) => {
-          if (a.isEmergency && !b.isEmergency) return -1;
-          if (!a.isEmergency && b.isEmergency) return 1;
-          if (a.isPinned && !b.isPinned) return -1;
-          if (!a.isPinned && b.isPinned) return 1;
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-        });
-
-        // Limit results
-        return posts.slice(0, boundedLimit);
+        return Promise.all(docs.map(shapeBulletinPost));
       } catch (error) {
         console.error('Error fetching bulletin posts:', error);
         return [];
@@ -241,9 +263,16 @@ export const dashboardResolvers = {
     },
 
     bulletinPost: async (_parent: any, { id }: any, context: Context) => {
-      requirePermission(context, Permission.DASHBOARD_VIEW);
-
-      return mockBulletinPosts.find(post => post.id === id) || null;
+      requirePermission(context, Permission.BULLETIN_VIEW);
+      if (!ObjectId.isValid(String(id))) return null;
+      try {
+        await connectMongoose();
+        const doc = await BulletinPost.findById(id).lean().exec();
+        return shapeBulletinPost(doc);
+      } catch (error) {
+        console.error('Error fetching bulletin post:', error);
+        return null;
+      }
     },
 
     // Dashboard statistics queries
@@ -255,7 +284,10 @@ export const dashboardResolvers = {
         await connectMongoose();
         
         const mongoDb = await connectMongoDB();
-        const bulletinCollection = mongoDb.collection('bulletin_posts');
+        // Mongoose's default collection name (pluralised, lowercased) for
+        // the `BulletinPost` model is `bulletinposts`. The old code queried
+        // a `bulletin_posts` collection that never existed in this app.
+        const bulletinCollection = mongoDb.collection('bulletinposts');
         
         // Get today's date range
         const today = new Date();
@@ -309,12 +341,16 @@ export const dashboardResolvers = {
           status: { $ne: 'cancelled' }
         });
         
-        // Count critical alerts (emergency bulletins)
+        // Count critical alerts (emergency bulletins). The schema uses
+        // `expiryDate` (matches the Mongoose model) — the prior `expiresAt`
+        // field was a leftover from the mock dataset.
         const criticalAlerts = await bulletinCollection.countDocuments({
           isEmergency: true,
+          isActive: { $ne: false },
           $or: [
-            { expiresAt: null },
-            { expiresAt: { $gt: new Date() } }
+            { expiryDate: null },
+            { expiryDate: { $exists: false } },
+            { expiryDate: { $gt: new Date() } }
           ]
         });
         
@@ -473,33 +509,31 @@ export const dashboardResolvers = {
   Mutation: {
     // Bulletin board mutations
     createBulletinPost: async (_parent: any, args: any, context: Context) => {
-      requirePermission(context, Permission.DASHBOARD_MANAGE);
+      requirePermission(context, Permission.BULLETIN_MANAGE);
 
       try {
-        const newPost = {
-          id: new ObjectId().toString(),
+        await connectMongoose();
+        const userId = context.user?.userId;
+        if (!userId || !ObjectId.isValid(userId)) {
+          throw new Error('Invalid user');
+        }
+        const departmentId =
+          args.departmentId && ObjectId.isValid(String(args.departmentId))
+            ? new mongoose.Types.ObjectId(String(args.departmentId))
+            : null;
+        const doc = await BulletinPost.create({
           title: args.title,
           content: args.content,
-          isEmergency: args.isEmergency || false,
-          isPinned: args.isPinned || false,
-          departmentId: args.departmentId || context.user?.departments?.[0]?.departmentId,
-          departmentName: args.departmentId || context.user?.departments?.[0]?.departmentName || 'כללי',
-          author: {
-            id: context.user!.userId,
-            displayName: context.user?.displayName || 'Unknown User',
-            email: context.user?.email || ''
-          },
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          expiresAt: args.expiresAt || null,
+          isEmergency: !!args.isEmergency,
+          isPinned: !!args.isPinned,
+          tags: Array.isArray(args.tags) ? args.tags : [],
           viewCount: 0,
-          tags: args.tags || []
-        };
-
-        // In production, save to MongoDB
-        mockBulletinPosts.unshift(newPost);
-        
-        return newPost;
+          createdBy: new mongoose.Types.ObjectId(userId),
+          departmentId,
+          expiryDate: args.expiresAt ? new Date(args.expiresAt) : undefined,
+          isActive: true,
+        });
+        return shapeBulletinPost(doc.toObject());
       } catch (error) {
         console.error('Error creating bulletin post:', error);
         throw new Error('Failed to create bulletin post');
@@ -507,55 +541,76 @@ export const dashboardResolvers = {
     },
 
     updateBulletinPost: async (_parent: any, { id, ...updates }: any, context: Context) => {
-      requirePermission(context, Permission.DASHBOARD_MANAGE);
-
-      const postIndex = mockBulletinPosts.findIndex(p => p.id === id);
-      if (postIndex === -1) {
+      requirePermission(context, Permission.BULLETIN_MANAGE);
+      if (!ObjectId.isValid(String(id))) {
         throw new Error('Bulletin post not found');
       }
+      await connectMongoose();
+      const doc = await BulletinPost.findById(id).exec();
+      if (!doc || !doc.isActive) throw new Error('Bulletin post not found');
 
-      const post = mockBulletinPosts[postIndex];
-      
-      // Check if user is author or admin
-      if (post.author.id !== context.user!.userId && !context.user!.has(Permission.MCR_ADMIN)) {
+      // Authors can always edit their own post; otherwise the user needs
+      // the manage perm we already checked above, OR MCR_ADMIN for legacy
+      // admin-only override flows.
+      const userId = context.user?.userId;
+      const isOwner = userId && doc.createdBy?.toString() === userId;
+      if (
+        !isOwner &&
+        !context.user!.has(Permission.BULLETIN_MANAGE) &&
+        !context.user!.has(Permission.MCR_ADMIN)
+      ) {
         throw new Error('Not authorized to update this post');
       }
 
-      // Update fields
-      Object.assign(post, updates, { updatedAt: new Date().toISOString() });
-      
-      return post;
+      if (updates.title !== undefined) doc.title = updates.title;
+      if (updates.content !== undefined) doc.content = updates.content;
+      if (updates.isEmergency !== undefined) doc.isEmergency = !!updates.isEmergency;
+      if (updates.isPinned !== undefined) doc.isPinned = !!updates.isPinned;
+      if (updates.tags !== undefined)
+        doc.tags = Array.isArray(updates.tags) ? updates.tags : [];
+      if (updates.expiresAt !== undefined)
+        doc.expiryDate = updates.expiresAt ? new Date(updates.expiresAt) : undefined;
+      await doc.save();
+      return shapeBulletinPost(doc.toObject());
     },
 
     deleteBulletinPost: async (_parent: any, { id }: any, context: Context) => {
-      requirePermission(context, Permission.DASHBOARD_MANAGE);
-
-      const postIndex = mockBulletinPosts.findIndex(p => p.id === id);
-      if (postIndex === -1) {
+      requirePermission(context, Permission.BULLETIN_MANAGE);
+      if (!ObjectId.isValid(String(id))) {
         throw new Error('Bulletin post not found');
       }
+      await connectMongoose();
+      const doc = await BulletinPost.findById(id).exec();
+      if (!doc || !doc.isActive) throw new Error('Bulletin post not found');
 
-      const post = mockBulletinPosts[postIndex];
-      
-      // Check if user is author or admin
-      if (post.author.id !== context.user!.userId && !context.user!.has(Permission.MCR_ADMIN)) {
+      const userId = context.user?.userId;
+      const isOwner = userId && doc.createdBy?.toString() === userId;
+      if (
+        !isOwner &&
+        !context.user!.has(Permission.BULLETIN_MANAGE) &&
+        !context.user!.has(Permission.MCR_ADMIN)
+      ) {
         throw new Error('Not authorized to delete this post');
       }
-
-      mockBulletinPosts.splice(postIndex, 1);
+      // Soft delete so we never lose the announcement history.
+      doc.isActive = false;
+      await doc.save();
       return true;
     },
 
     incrementBulletinViewCount: async (_parent: any, { id }: any, context: Context) => {
-      requirePermission(context, Permission.DASHBOARD_VIEW);
-
-      const post = mockBulletinPosts.find(p => p.id === id);
-      if (!post) {
+      requirePermission(context, Permission.BULLETIN_VIEW);
+      if (!ObjectId.isValid(String(id))) {
         throw new Error('Bulletin post not found');
       }
-
-      post.viewCount += 1;
-      return post;
+      await connectMongoose();
+      const doc = await BulletinPost.findByIdAndUpdate(
+        id,
+        { $inc: { viewCount: 1 } },
+        { new: true },
+      ).exec();
+      if (!doc) throw new Error('Bulletin post not found');
+      return shapeBulletinPost(doc.toObject());
     },
 
     // Support ticket mutations

@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { Permission } from '@/rbac';
 import { useQuery } from '@apollo/client';
 import { gql } from '@apollo/client';
 import { 
@@ -121,9 +122,15 @@ const GET_WEEKLY_SHIFTS = gql`
 
 const LancelotDashboard: React.FC = () => {
   const router = useRouter();
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, hasPermission } = useAuth();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [broadcastsModalVisible, setBroadcastsModalVisible] = useState(false);
+
+  // Skip per-widget queries when the user lacks the permission so the
+  // backend resolver doesn't throw and we don't pollute the console.
+  const canViewDashboard = hasPermission(Permission.DASHBOARD_VIEW);
+  const canViewBroadcasts = hasPermission(Permission.BROADCAST_VIEW);
+  const canViewOwnShifts = hasPermission(Permission.SHIFTS_VIEW_OWN);
 
   const assignmentsDateRange = useMemo(() => {
     const start = new Date();
@@ -145,7 +152,7 @@ const LancelotDashboard: React.FC = () => {
 
   // Query for dashboard stats
   const { data: statsData, loading: statsLoading, refetch: refetchStats } = useQuery(GET_DASHBOARD_STATS, {
-    skip: !user,
+    skip: !user || !canViewDashboard,
     errorPolicy: 'all',
     pollInterval: 300000 // Refresh every 5 minutes
   });
@@ -153,14 +160,14 @@ const LancelotDashboard: React.FC = () => {
   // Query for bulletin posts
   const { data: bulletinData, loading: bulletinLoading } = useQuery(GET_BULLETIN_POSTS, {
     variables: { limit: 5, onlyEmergency: false },
-    skip: !user,
+    skip: !user || !canViewDashboard,
     errorPolicy: 'all',
     pollInterval: 60000 // Refresh every minute
   });
 
   // Query for today's broadcasts
   const { data: broadcastsData, loading: broadcastsLoading } = useQuery(GET_TODAYS_BROADCASTS, {
-    skip: !user,
+    skip: !user || !canViewBroadcasts,
     errorPolicy: 'all',
     pollInterval: 300000 // Refresh every 5 minutes
   });
@@ -168,7 +175,7 @@ const LancelotDashboard: React.FC = () => {
   // Query for broadcasts in the next week (to extract "my assignments" from broadcast array)
   const { data: assignmentsSourceData, loading: assignmentsLoading } = useQuery(GET_BROADCAST_EVENTS_FOR_ASSIGNMENTS, {
     variables: assignmentsDateRange,
-    skip: !user,
+    skip: !user || !canViewBroadcasts,
     errorPolicy: 'all',
     pollInterval: 300000
   });
@@ -176,7 +183,7 @@ const LancelotDashboard: React.FC = () => {
   // Query for weekly shifts
   const { data: shiftsData, loading: shiftsLoading } = useQuery(GET_WEEKLY_SHIFTS, {
     variables: { userId: user?.id },
-    skip: !user,
+    skip: !user || !canViewOwnShifts,
     errorPolicy: 'all',
     pollInterval: 300000 // Refresh every 5 minutes
   });
@@ -823,7 +830,7 @@ const LancelotDashboard: React.FC = () => {
             </Button>
           ]}
           width={1000}
-          bodyStyle={{ maxHeight: '70vh', overflow: 'auto', padding: '24px' }}
+          styles={{ body: { maxHeight: '70vh', overflow: 'auto', padding: '24px' } }}
         >
           <div className="space-y-1">
             {sortedBroadcasts.map(renderBroadcastItem)}

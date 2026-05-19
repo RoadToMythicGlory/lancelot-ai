@@ -2,8 +2,16 @@ import { Schema, model, Document, Types, Model } from 'mongoose';
 
 export interface IBulletinPost extends Document {
   content: string;
+  // Dashboard board fields. Optional so MCR's bulletin (which only uses
+  // `content`) keeps working. The home page's "Bulletin Board" uses all
+  // of them.
+  title?: string;
+  isEmergency?: boolean;
+  isPinned?: boolean;
+  tags?: string[];
+  viewCount?: number;
   createdBy: Types.ObjectId;
-  departmentId: Types.ObjectId;
+  departmentId?: Types.ObjectId | null;
   expiryDate?: Date;
   untilNewPost?: boolean;
   isActive: boolean;
@@ -16,6 +24,11 @@ const bulletinPostSchema = new Schema<IBulletinPost>({
     type: String,
     required: true
   },
+  title: { type: String },
+  isEmergency: { type: Boolean, default: false },
+  isPinned: { type: Boolean, default: false },
+  tags: { type: [String], default: [] },
+  viewCount: { type: Number, default: 0 },
   createdBy: {
     type: Schema.Types.ObjectId,
     ref: 'User',
@@ -24,7 +37,10 @@ const bulletinPostSchema = new Schema<IBulletinPost>({
   departmentId: {
     type: Schema.Types.ObjectId,
     ref: 'Department',
-    required: true
+    // Org-wide announcements (the dashboard board's default) have no
+    // department, so this is intentionally optional.
+    required: false,
+    default: null,
   },
   expiryDate: {
     type: Date

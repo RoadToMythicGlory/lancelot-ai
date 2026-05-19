@@ -11,6 +11,14 @@ export enum Permission {
   BROADCAST_MANAGE = 'BROADCAST_MANAGE',
   BROADCAST_DELETE = 'BROADCAST_DELETE',
 
+  // Broadcast Array (Excel-grid crew assignments per event)
+  BROADCAST_ARRAY_VIEW = 'BROADCAST_ARRAY_VIEW',
+  BROADCAST_ARRAY_MANAGE = 'BROADCAST_ARRAY_MANAGE',
+
+  // Venues / Stadiums (used by External Broadcasts)
+  VENUES_VIEW = 'VENUES_VIEW',
+  VENUES_MANAGE = 'VENUES_MANAGE',
+
   // Warehouse / Equipment
   WAREHOUSE_VIEW = 'WAREHOUSE_VIEW',
   WAREHOUSE_MANAGE = 'WAREHOUSE_MANAGE',
@@ -30,6 +38,10 @@ export enum Permission {
   // Flight Board (live operations dashboards)
   FLIGHT_BOARD_VIEW = 'FLIGHT_BOARD_VIEW',
   FLIGHT_BOARD_MANAGE = 'FLIGHT_BOARD_MANAGE',
+
+  // MCR Flight Board (specialised flight board variant for MCR Schedule rows)
+  MCR_FLIGHT_BOARD_VIEW = 'MCR_FLIGHT_BOARD_VIEW',
+  MCR_FLIGHT_BOARD_MANAGE = 'MCR_FLIGHT_BOARD_MANAGE',
 
   // Vizrt
   VIZRT_VIEW = 'VIZRT_VIEW',
@@ -53,6 +65,9 @@ export enum Permission {
   // Misc
   DASHBOARD_VIEW = 'DASHBOARD_VIEW',
   DASHBOARD_MANAGE = 'DASHBOARD_MANAGE',
+  // Bulletin board (real publishing flow on the dashboard)
+  BULLETIN_VIEW = 'BULLETIN_VIEW',
+  BULLETIN_MANAGE = 'BULLETIN_MANAGE',
   CHAT_USE = 'CHAT_USE',
   INTEGRATIONS_VIEW = 'INTEGRATIONS_VIEW',
   INTEGRATIONS_MANAGE = 'INTEGRATIONS_MANAGE',

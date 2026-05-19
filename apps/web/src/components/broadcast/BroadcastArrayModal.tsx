@@ -187,13 +187,16 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
         specialInstructions: broadcastArrayData?.specialInstructions
       });
       
-      // Extract crew assignments
+      // Extract crew assignments. Each role can now have multiple users
+      // assigned to it, so we collect *every* matching userId per role
+      // instead of taking only the first one — this matches the way the
+      // form's role selects render in `mode="multiple"`.
       const crewAssignments = broadcastArrayData?.crewAssignments || [];
-      const getCrewMemberByRole = (role: string) => {
-        const assignment = crewAssignments.find((a: any) => a.role === role);
-        return assignment?.userId || '';
-      };
-      
+      const getCrewMembersByRole = (role: string): string[] =>
+        crewAssignments
+          .filter((a: any) => a?.role === role && a?.userId)
+          .map((a: any) => a.userId);
+
       form.setFieldsValue({
         // Read-only fields from Broadcast Planning
         תאריך: eventData.תאריך || eventData.metadata?.rawHebrewData?.תאריך || eventData.metadata?.eventDetails?.date || (eventData.startTime ? dayjs(eventData.startTime).format('DD/MM/YYYY') : ''),
@@ -202,16 +205,17 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
         משחק: eventData.title || eventData.hebrewTitle,
         ערוץ: eventData.ערוץ || eventData.metadata?.rawHebrewData?.ערוץ || eventData.channel || eventData.metadata?.eventDetails?.channel,
         הערות: eventData.הערות || eventData.metadata?.rawHebrewData?.הערות || eventData.notes || eventData.metadata?.eventDetails?.notes,
-        
+
         // Editable fields from saved department data
         שידור: broadcastArrayData?.specialInstructions || broadcastArrayData?.שידור || '',
         מקוםשידור: broadcastArrayData?.מקוםשידור || '',
-        עורך: getCrewMemberByRole('עורך'),
-        מפיק: getCrewMemberByRole('מפיק'),
-        אישVTR: getCrewMemberByRole('איש VTR'),
-        טכנאישידור: getCrewMemberByRole('טכנאי שידור'),
-        שדר: getCrewMemberByRole('שדר'),
-        שדרקוים: getCrewMemberByRole('שדר קוים')
+        עורך: getCrewMembersByRole('עורך'),
+        מפיק: getCrewMembersByRole('מפיק'),
+        אישVTR: getCrewMembersByRole('איש VTR'),
+        טכנאישידור: getCrewMembersByRole('טכנאי שידור'),
+        שדר: getCrewMembersByRole('שדר'),
+        אנליסט: getCrewMembersByRole('אנליסט'),
+        שדרקוים: getCrewMembersByRole('שדר קוים')
       });
 
       // Pre-fill dynamic jobs (the new admin-configurable list) from saved data.
@@ -248,48 +252,49 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
         if (!employeesList || !employeeId) return '';
         const employee = employeesList.find(e => e.id === employeeId);
         if (!employee) return '';
-        
+
         // Prefer Hebrew name if available
         return employee.displayName || `${employee.firstName} ${employee.lastName}`;
       };
-      
+
+      // Each role is now multi-select (`mode="multiple"`), so values come
+      // through as arrays of userIds. We expand each array into one
+      // `crewAssignments` entry per selected user — the server-side
+      // `summarizeBroadcastArrayCrew` already groups by role and joins
+      // names, so this stays compatible with the flight board read path.
+      const buildAssignmentsForRole = (
+        role: string,
+        userIds: any,
+        usersList: Employee[] | undefined,
+      ): Array<{ role: string; userId: string; userName: string }> => {
+        const ids: string[] = Array.isArray(userIds)
+          ? userIds.filter((id) => typeof id === 'string' && id.length > 0)
+          : userIds
+            ? [userIds]
+            : [];
+        return ids.map((id) => ({
+          role,
+          userId: id,
+          userName: getEmployeeName(id, usersList),
+        }));
+      };
+
       // Prepare the data in the format expected by the mutation
       // Only include schema-defined fields in broadcastArray
       const departmentData = {
         broadcastArray: {
           // Schema-defined fields ONLY
           crewAssignments: [
-            values.עורך && { 
-              role: 'עורך', 
-              userId: values.עורך,
-              userName: getEmployeeName(values.עורך, editorsData?.users)
-            },
-            values.מפיק && { 
-              role: 'מפיק', 
-              userId: values.מפיק,
-              userName: getEmployeeName(values.מפיק, producersData?.users)
-            },
-            values.אישVTR && { 
-              role: 'איש VTR', 
-              userId: values.אישVTR,
-              userName: getEmployeeName(values.אישVTR, vtrData?.users)
-            },
-            values.טכנאישידור && { 
-              role: 'טכנאי שידור', 
-              userId: values.טכנאישידור,
-              userName: getEmployeeName(values.טכנאישידור, directorsData?.users)
-            },
-            values.שדר && { 
-              role: 'שדר', 
-              userId: values.שדר,
-              userName: getEmployeeName(values.שדר, commentatorsData?.users)
-            },
-            values.שדרקוים && { 
-              role: 'שדר קוים', 
-              userId: values.שדרקוים,
-              userName: getEmployeeName(values.שדרקוים, soundmenData?.users)
-            }
-          ].filter(Boolean), // Remove null values
+            ...buildAssignmentsForRole('עורך', values.עורך, editorsData?.users),
+            ...buildAssignmentsForRole('מפיק', values.מפיק, producersData?.users),
+            ...buildAssignmentsForRole('איש VTR', values.אישVTR, vtrData?.users),
+            ...buildAssignmentsForRole('טכנאי שידור', values.טכנאישידור, directorsData?.users),
+            ...buildAssignmentsForRole('שדר', values.שדר, commentatorsData?.users),
+            // Analyst (אנליסט) draws from the same Commentators pool today;
+            // when there's a dedicated department for it, swap the list.
+            ...buildAssignmentsForRole('אנליסט', values.אנליסט, commentatorsData?.users),
+            ...buildAssignmentsForRole('שדר קוים', values.שדרקוים, soundmenData?.users),
+          ],
           specialInstructions: values.שידור || '',
           setupTime: null,
           breakdownTime: null,
@@ -517,12 +522,14 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
                 <Option value="קונטרול 5">קונטרול 5</Option>
                 <Option value="קונטרול 6">קונטרול 6</Option>
                 <Option value="קונטרול 7">קונטרול 7</Option>
+                <Option value="קונטרול 8">קונטרול 8</Option>
                 <Option value="יוניפייד 1">יוניפייד 1</Option>
                 <Option value="יוניפייד 2">יוניפייד 2</Option>
                 <Option value="יוניפייד 3">יוניפייד 3</Option>
                 <Option value="יוניפייד 4">יוניפייד 4</Option>
                 <Option value="יוניפייד 5">יוניפייד 5</Option>
                 <Option value="יוניפייד 6">יוניפייד 6</Option>
+                <Option value="רדיו">רדיו</Option>
                 <Option value="יעלה לווין בלבד">יעלה לווין בלבד</Option>
               </Select>
             </Form.Item>
@@ -532,12 +539,14 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
         <Row gutter={16}>
           <Col span={12}>
             <Form.Item name="עורך" label="עורך">
-              <Select 
-                placeholder="בחר עורך"
+              <Select
+                mode="multiple"
+                placeholder="בחר עורכים"
                 showSearch
                 optionFilterProp="children"
                 loading={editorsLoading}
                 notFoundContent={editorsLoading ? <Spin size="small" /> : 'אין עורכים זמינים'}
+                allowClear
               >
                 {editorsData?.users?.map((employee: Employee) => renderEmployeeOption(employee))}
               </Select>
@@ -545,12 +554,14 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
           </Col>
           <Col span={12}>
             <Form.Item name="מפיק" label="מפיק">
-              <Select 
-                placeholder="בחר מפיק"
+              <Select
+                mode="multiple"
+                placeholder="בחר מפיקים"
                 showSearch
                 optionFilterProp="children"
                 loading={producersLoading}
                 notFoundContent={producersLoading ? <Spin size="small" /> : 'אין מפיקים זמינים'}
+                allowClear
               >
                 {producersData?.users?.map((employee: Employee) => renderEmployeeOption(employee))}
               </Select>
@@ -560,9 +571,10 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
 
         <Row gutter={16}>
           <Col span={12}>
-            <Form.Item name="אישVTR" label="איש VTR (ריפליי)">
-              <Select 
-                placeholder="בחר איש VTR"
+            <Form.Item name="אישVTR" label="אנשי VTR (ריפליי)">
+              <Select
+                mode="multiple"
+                placeholder="בחר אנשי VTR"
                 showSearch
                 optionFilterProp="children"
                 filterOption={(input, option) =>
@@ -570,6 +582,7 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
                 }
                 loading={vtrLoading}
                 notFoundContent={vtrLoading ? <Spin size="small" /> : 'אין אנשי VTR זמינים'}
+                allowClear
               >
                 {vtrData?.users?.map((employee: Employee) => renderEmployeeOption(employee))}
               </Select>
@@ -577,7 +590,8 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
           </Col>
           <Col span={12}>
             <Form.Item name="טכנאישידור" label="טכנאי שידור / במאי">
-              <Select 
+              <Select
+                mode="multiple"
                 placeholder="בחר טכנאי/במאי"
                 showSearch
                 optionFilterProp="children"
@@ -586,6 +600,7 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
                 }
                 loading={directorsLoading}
                 notFoundContent={directorsLoading ? <Spin size="small" /> : 'אין במאים זמינים'}
+                allowClear
               >
                 {directorsData?.users?.map((employee: Employee) => renderEmployeeOption(employee))}
               </Select>
@@ -595,9 +610,10 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
 
         <Row gutter={16}>
           <Col span={12}>
-            <Form.Item name="שדר" label="שדר + פרשן">
-              <Select 
-                placeholder="בחר שדר/פרשן"
+            <Form.Item name="שדר" label="שדרים (פרשנים)">
+              <Select
+                mode="multiple"
+                placeholder="בחר שדרים/פרשנים"
                 showSearch
                 optionFilterProp="children"
                 filterOption={(input, option) =>
@@ -605,15 +621,38 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
                 }
                 loading={commentatorsLoading}
                 notFoundContent={commentatorsLoading ? <Spin size="small" /> : 'אין פרשנים זמינים'}
+                allowClear
               >
                 {commentatorsData?.users?.map((employee: Employee) => renderEmployeeOption(employee))}
               </Select>
             </Form.Item>
           </Col>
           <Col span={12}>
-            <Form.Item name="שדרקוים" label="שדר קוים">
-              <Select 
-                placeholder="בחר שדר קוים"
+            <Form.Item name="אנליסט" label="אנליסטים">
+              <Select
+                mode="multiple"
+                placeholder="בחר אנליסטים"
+                showSearch
+                optionFilterProp="children"
+                filterOption={(input, option) =>
+                  option?.children?.toString().toLowerCase().includes(input.toLowerCase()) ?? false
+                }
+                loading={commentatorsLoading}
+                notFoundContent={commentatorsLoading ? <Spin size="small" /> : 'אין אנליסטים זמינים'}
+                allowClear
+              >
+                {commentatorsData?.users?.map((employee: Employee) => renderEmployeeOption(employee))}
+              </Select>
+            </Form.Item>
+          </Col>
+        </Row>
+
+        <Row gutter={16}>
+          <Col span={12}>
+            <Form.Item name="שדרקוים" label="שדרי קווים">
+              <Select
+                mode="multiple"
+                placeholder="בחר שדרי קווים"
                 showSearch
                 optionFilterProp="children"
                 filterOption={(input, option) =>
@@ -621,6 +660,7 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
                 }
                 loading={soundmenLoading}
                 notFoundContent={soundmenLoading ? <Spin size="small" /> : 'אין סאונדמנים זמינים'}
+                allowClear
               >
                 {soundmenData?.users?.map((employee: Employee) => renderEmployeeOption(employee))}
               </Select>

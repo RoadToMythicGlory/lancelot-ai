@@ -33,6 +33,17 @@ interface DefaultFormDeptDef {
   order?: number;
 }
 
+interface DefaultFormColumnDef {
+  key: string;
+  hebrewLabel: string;
+  englishLabel?: string;
+  allowedDepartmentCodes: string[];
+  allowedUserIds?: string[];
+  defaultCount?: number;
+  requireUser?: boolean;
+  order?: number;
+}
+
 interface DefaultFormConfig {
   formKey: string;
   name: string;
@@ -40,6 +51,8 @@ interface DefaultFormConfig {
   description?: string;
   allowUserPresets: boolean;
   departments: DefaultFormDeptDef[];
+  /** Optional column-based layout (broadcastArray only). */
+  columns?: DefaultFormColumnDef[];
 }
 
 // Department codes mirror what `seed-departments-users.ts` already creates.
@@ -60,6 +73,75 @@ const FORM_DEFAULTS: DefaultFormConfig[] = [
       { departmentCode: 'Production-Technicians', defaultCount: 1, order: 5 },
       { departmentCode: 'Production-Commentators', defaultCount: 0, order: 6 },
       { departmentCode: 'MCR-General', defaultCount: 1, order: 7 },
+    ],
+    // Column-based layout used by the Broadcast Array grid. Mirrors the
+    // hard-coded ROLE_COLUMNS list in
+    // apps/web/src/app/broadcast-array/page.tsx so admins start with the
+    // exact same picker behavior as before. `hebrewLabel` is the `role`
+    // value written into crewAssignments[] — keep it stable so the
+    // BroadcastArrayModal continues to read assignments correctly.
+    columns: [
+      {
+        key: 'editor',
+        hebrewLabel: 'עורך',
+        englishLabel: 'Editor',
+        allowedDepartmentCodes: [
+          'CONTENT_EDIT',
+          'Visuals-VideoEditors',
+          'NewMedia-Editors',
+          'News-Editors',
+        ],
+        defaultCount: 1,
+        order: 0,
+      },
+      {
+        key: 'producer',
+        hebrewLabel: 'מפיק',
+        englishLabel: 'Producer',
+        allowedDepartmentCodes: ['PROD', 'NewMedia-Producers', 'News-Producers'],
+        defaultCount: 1,
+        order: 1,
+      },
+      {
+        key: 'vtr',
+        hebrewLabel: 'איש VTR',
+        englishLabel: 'VTR',
+        allowedDepartmentCodes: ['VTR', 'Production-VTR'],
+        defaultCount: 1,
+        order: 2,
+      },
+      {
+        key: 'broadcastTech',
+        hebrewLabel: 'טכנאי שידור',
+        englishLabel: 'Broadcast Technician / Director',
+        allowedDepartmentCodes: ['DIR', 'Production-Directors'],
+        defaultCount: 1,
+        order: 3,
+      },
+      {
+        key: 'anchor',
+        hebrewLabel: 'שדר',
+        englishLabel: 'Anchor',
+        allowedDepartmentCodes: ['COMMENT', 'Production-Commentators'],
+        defaultCount: 1,
+        order: 4,
+      },
+      {
+        key: 'analyst',
+        hebrewLabel: 'אנליסט',
+        englishLabel: 'Analyst',
+        allowedDepartmentCodes: ['COMMENT', 'Production-Commentators'],
+        defaultCount: 0,
+        order: 5,
+      },
+      {
+        key: 'sidelineAnchor',
+        hebrewLabel: 'שדר קוים',
+        englishLabel: 'Sideline Anchor',
+        allowedDepartmentCodes: ['SOUND', 'Production-Soundmen'],
+        defaultCount: 0,
+        order: 6,
+      },
     ],
   },
   {
@@ -202,6 +284,23 @@ async function seedFormConfigs(): Promise<void> {
         order: d.order ?? idx,
       }));
 
+    // Columns are optional and currently used only by broadcastArray.
+    // We keep every column even if some of its allowedDepartmentCodes
+    // are unknown — the page resolves them lazily and missing codes
+    // are just skipped at runtime.
+    const columns = Array.isArray(cfg.columns)
+      ? cfg.columns.map((c, idx) => ({
+          key: c.key,
+          hebrewLabel: c.hebrewLabel,
+          englishLabel: c.englishLabel,
+          allowedDepartmentCodes: c.allowedDepartmentCodes || [],
+          allowedUserIds: c.allowedUserIds || [],
+          requireUser: c.requireUser ?? false,
+          defaultCount: c.defaultCount ?? 1,
+          order: c.order ?? idx,
+        }))
+      : [];
+
     if (existing) {
       // Don't override an admin's customization. Only fill in fields that are
       // missing on the existing doc.
@@ -219,6 +318,10 @@ async function seedFormConfigs(): Promise<void> {
         existing.departments = departments;
         dirty = true;
       }
+      if (columns.length > 0 && (!Array.isArray(existing.columns) || existing.columns.length === 0)) {
+        existing.columns = columns;
+        dirty = true;
+      }
       if (dirty) {
         await existing.save();
         updated++;
@@ -233,11 +336,14 @@ async function seedFormConfigs(): Promise<void> {
         hebrewName: cfg.hebrewName,
         description: cfg.description,
         departments,
+        columns,
         allowUserPresets: cfg.allowUserPresets,
         isActive: true,
       });
       inserted++;
-      console.log(`➕ Inserted form config: ${cfg.formKey} (${departments.length} departments)`);
+      console.log(
+        `➕ Inserted form config: ${cfg.formKey} (${departments.length} departments, ${columns.length} columns)`,
+      );
     }
   }
 

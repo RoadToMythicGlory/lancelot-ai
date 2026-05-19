@@ -16,6 +16,30 @@ async function ensureMongoConnection() {
   }
 }
 
+// Normalize the items[] payload coming from clients. Frontend forms commonly
+// send an empty `equipmentId` when a user adds a row but never picks a
+// piece of equipment from the dropdown; without this guard the resolver
+// crashes inside `new ObjectId('')` with the opaque BSON error
+// "input must be a 24 character hex string, 12 byte Uint8Array, or an integer".
+function normalizeSetItems(rawItems: any): { equipmentId: any; quantity: number; required: boolean }[] {
+  const items = Array.isArray(rawItems) ? rawItems : [];
+  return items.map((raw, idx) => {
+    const equipmentId = typeof raw?.equipmentId === 'string' ? raw.equipmentId.trim() : raw?.equipmentId;
+    if (!equipmentId || (typeof equipmentId === 'string' && !mongoose.Types.ObjectId.isValid(equipmentId))) {
+      throw new Error(`פריט מספר ${idx + 1} בסט חייב לכלול ציוד תקין`);
+    }
+    const quantity = Number(raw?.quantity);
+    if (!Number.isFinite(quantity) || quantity < 1) {
+      throw new Error(`כמות לא תקינה בפריט מספר ${idx + 1} בסט`);
+    }
+    return {
+      equipmentId: new mongoose.Types.ObjectId(equipmentId),
+      quantity: Math.floor(quantity),
+      required: raw?.required ?? true,
+    };
+  });
+}
+
 function mapEquipmentToGql(item: any) {
   return {
     id: item._id.toString(),
@@ -140,15 +164,16 @@ export const equipmentSetsResolvers = {
         throw new Error(`ברקוד "${input.barcode}" כבר קיים במערכת`);
       }
 
+      const normalizedItems = normalizeSetItems(input.items);
+      if (normalizedItems.length === 0) {
+        throw new Error('יש להוסיף לפחות פריט אחד לסט');
+      }
+
       const doc = new EquipmentSet({
         name: input.name,
         barcode: input.barcode,
         description: input.description,
-        items: (input.items || []).map((i: any) => ({
-          equipmentId: new mongoose.Types.ObjectId(i.equipmentId),
-          quantity: i.quantity,
-          required: i.required ?? true,
-        })),
+        items: normalizedItems,
         notes: input.notes,
         createdBy: user.userId,
       });
@@ -173,11 +198,11 @@ export const equipmentSetsResolvers = {
       if (input.notes !== undefined) updateData.notes = input.notes;
       if (input.isActive !== undefined) updateData.isActive = input.isActive;
       if (input.items !== undefined) {
-        updateData.items = input.items.map((i: any) => ({
-          equipmentId: new mongoose.Types.ObjectId(i.equipmentId),
-          quantity: i.quantity,
-          required: i.required ?? true,
-        }));
+        const normalized = normalizeSetItems(input.items);
+        if (normalized.length === 0) {
+          throw new Error('יש להוסיף לפחות פריט אחד לסט');
+        }
+        updateData.items = normalized;
       }
 
       const updated = await EquipmentSet.findByIdAndUpdate(id, { $set: updateData }, { new: true }).exec();

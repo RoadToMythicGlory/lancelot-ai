@@ -831,6 +831,16 @@ export const UPSERT_ASSIGNMENT_FORM_CONFIG = gql`
         defaultCount
         order
       }
+      columns {
+        key
+        hebrewLabel
+        englishLabel
+        allowedDepartmentCodes
+        allowedUserIds
+        requireUser
+        defaultCount
+        order
+      }
     }
   }
 `;
@@ -1076,5 +1086,29 @@ export const UPDATE_TRACKER_GATEWAY_POSITION = gql`
         y
       }
     }
+  }
+`;
+
+export const CREATE_VENUE = gql`
+  mutation CreateVenue($input: CreateVenueInput!) {
+    createVenue(input: $input) {
+      id
+      name
+    }
+  }
+`;
+
+export const UPDATE_VENUE = gql`
+  mutation UpdateVenue($id: ID!, $input: UpdateVenueInput!) {
+    updateVenue(id: $id, input: $input) {
+      id
+      name
+    }
+  }
+`;
+
+export const DELETE_VENUE = gql`
+  mutation DeleteVenue($id: ID!) {
+    deleteVenue(id: $id)
   }
 `;

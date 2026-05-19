@@ -35,12 +35,30 @@ import type {
 } from './types';
 import './styles/flight-board.css';
 
-function FlightBoardPageInner() {
+interface FlightBoardPageInnerProps {
+  /**
+   * When set, the page locks itself to a single board identified by
+   * `pinnedBoard.matchTitle`. If no board with that title exists yet and
+   * the user has manage permission, it will be auto-created from
+   * `pinnedBoard.initialBoardInput`. The board selector is hidden and
+   * users can't switch to other boards from this view — used by purpose-
+   * built pages like the MCR Flight Board.
+   */
+  pinnedBoard?: {
+    matchTitle: string;
+    pageTitle?: string;
+    pageSubtitle?: string;
+    initialBoardInput: any;
+  };
+}
+
+export function FlightBoardPageInner({ pinnedBoard }: FlightBoardPageInnerProps = {}) {
   const { hasPermission } = useAuth();
   const canManage = hasPermission(Permission.FLIGHT_BOARD_MANAGE);
   const { message, modal } = App.useApp();
 
   const [selectedBoardId, setSelectedBoardId] = useState<string | null>(null);
+  const [bootstrappingPinned, setBootstrappingPinned] = useState(false);
   const [range, setRange] = useState<FlightBoardRange>({ preset: 'TODAY' });
   const [expandedPanelId, setExpandedPanelId] = useState<string | null>(null);
   const [builderOpen, setBuilderOpen] = useState(false);
@@ -134,13 +152,70 @@ function FlightBoardPageInner() {
     [boards, selectedBoardId],
   );
 
+  const [createBoard, { loading: creating }] = useMutation(CREATE_FLIGHT_BOARD, {
+    refetchQueries: [{ query: GET_FLIGHT_BOARDS }],
+  });
+  const [updateBoard, { loading: updating }] = useMutation(UPDATE_FLIGHT_BOARD, {
+    refetchQueries: [{ query: GET_FLIGHT_BOARDS }],
+  });
+  const [deleteBoard] = useMutation(DELETE_FLIGHT_BOARD, {
+    refetchQueries: [{ query: GET_FLIGHT_BOARDS }],
+  });
+
   // Auto-select default board (or first board) when boards load.
   useEffect(() => {
     if (selectedBoardId) return;
+    if (boardsLoading) return;
+
+    if (pinnedBoard) {
+      // Locked to a single board. Look it up by title; if missing, fall
+      // through to the bootstrap effect below (which can auto-create it).
+      const match = boards.find((b) => b.title === pinnedBoard.matchTitle);
+      if (match) {
+        setSelectedBoardId(match.id);
+      }
+      return;
+    }
+
     if (boards.length === 0) return;
     const def = boards.find((b) => b.isDefault);
     setSelectedBoardId(def ? def.id : boards[0].id);
-  }, [boards, selectedBoardId]);
+  }, [boards, selectedBoardId, boardsLoading, pinnedBoard]);
+
+  // Auto-create the pinned board on first visit when it doesn't exist
+  // yet. Only attempted for users with manage permission — viewers see
+  // the empty-state notice below instead.
+  useEffect(() => {
+    if (!pinnedBoard) return;
+    if (selectedBoardId) return;
+    if (boardsLoading) return;
+    if (bootstrappingPinned) return;
+    if (!canManage) return;
+    const match = boards.find((b) => b.title === pinnedBoard.matchTitle);
+    if (match) return;
+
+    let cancelled = false;
+    setBootstrappingPinned(true);
+    (async () => {
+      try {
+        const res = await createBoard({ variables: { input: pinnedBoard.initialBoardInput } });
+        const newId = res.data?.createFlightBoard?.id;
+        if (!cancelled && newId) {
+          setSelectedBoardId(newId);
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          message.error(err?.message || 'שגיאה ביצירת לוח MCR');
+        }
+      } finally {
+        if (!cancelled) setBootstrappingPinned(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinnedBoard, boards, boardsLoading, selectedBoardId, canManage]);
 
   const refreshIntervalSec = selectedBoard?.refreshIntervalSec || 60;
 
@@ -161,16 +236,6 @@ function FlightBoardPageInner() {
 
   const items = dataQuery.data?.flightBoardData?.items || [];
   const overlay = dataQuery.data?.flightBoardData?.overlay || null;
-
-  const [createBoard, { loading: creating }] = useMutation(CREATE_FLIGHT_BOARD, {
-    refetchQueries: [{ query: GET_FLIGHT_BOARDS }],
-  });
-  const [updateBoard, { loading: updating }] = useMutation(UPDATE_FLIGHT_BOARD, {
-    refetchQueries: [{ query: GET_FLIGHT_BOARDS }],
-  });
-  const [deleteBoard] = useMutation(DELETE_FLIGHT_BOARD, {
-    refetchQueries: [{ query: GET_FLIGHT_BOARDS }],
-  });
 
   const handleSelectBoard = (id: string | null) => {
     setSelectedBoardId(id);
@@ -298,20 +363,27 @@ function FlightBoardPageInner() {
       <div className="flight-board-shell">
         <header className="flight-board-header">
           <div className="flight-board-title">
-            <h1>לוח טיסות</h1>
-            <span className="subtitle">תפעול בזמן אמת</span>
+            <h1>{pinnedBoard?.pageTitle || 'לוח טיסות'}</h1>
+            <span className="subtitle">
+              {pinnedBoard?.pageSubtitle || 'תפעול בזמן אמת'}
+            </span>
             <span className="flight-board-live-dot">LIVE</span>
           </div>
           <div className="flight-board-actions">
-            <BoardSelector
-              boards={boards}
-              selectedId={selectedBoardId}
-              canManage={canManage}
-              onSelect={handleSelectBoard}
-              onEdit={handleEdit}
-              onDelete={handleDelete}
-              onCreate={handleCreate}
-            />
+            {!pinnedBoard && (
+              <BoardSelector
+                boards={boards}
+                selectedId={selectedBoardId}
+                canManage={canManage}
+                onSelect={handleSelectBoard}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+                onCreate={handleCreate}
+              />
+            )}
+            {pinnedBoard && canManage && selectedBoard && (
+              <Button onClick={handleEdit}>ערוך לוח</Button>
+            )}
             <Tooltip title="רענון ידני">
               <Button
                 icon={<ReloadOutlined />}
@@ -340,7 +412,7 @@ function FlightBoardPageInner() {
                 {kiosk ? 'יציאה ממסך מלא' : 'מסך מלא'}
               </Button>
             </Tooltip>
-            {selectedBoard && (
+            {selectedBoard && !pinnedBoard && (
               <Button
                 type="text"
                 icon={<ArrowLeftOutlined />}
@@ -361,6 +433,17 @@ function FlightBoardPageInner() {
         {boardsLoading && !boards.length ? (
           <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}>
             <Spin size="large" />
+          </div>
+        ) : bootstrappingPinned ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}>
+            <Spin size="large" tip="יוצר לוח MCR…" />
+          </div>
+        ) : !selectedBoard && pinnedBoard ? (
+          <div className="flight-board-empty" style={{ minHeight: 240 }}>
+            לוח ה-MCR טרם נוצר.
+            {canManage
+              ? ' מנהל יכול ליצור אותו לחיצה אחת – נסה לרענן.'
+              : ' פנה למנהל המערכת.'}
           </div>
         ) : !selectedBoard ? (
           <BoardGallery

@@ -451,6 +451,16 @@ export const EditPanelDrawer: React.FC<Props> = ({
   const visibleItems = useMemo(() => {
     if (!panel) return [] as FlightBoardItem[];
     return items.filter((it) => {
+      // Mirror PanelContainer's "הסתר לוויינים" panel toggle — the editor
+      // must reflect exactly the row set the live panel renders, otherwise
+      // admins see satellite-only rows here that aren't visible on the
+      // board itself.
+      if (panel.hideSatellites) {
+        const location = it.raw?.broadcastArray?.broadcastLocation;
+        if (typeof location === 'string' && location.trim() === 'יעלה לווין בלבד') {
+          return false;
+        }
+      }
       // Manual rows are scoped per-panel (when panelKey is set).
       if (it.isManual) {
         return !it.panelKey || it.panelKey === panel.panelKey;

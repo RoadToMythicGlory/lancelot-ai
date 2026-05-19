@@ -12,9 +12,15 @@ import {
   Select,
   Space,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd';
-import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import {
+  DeleteOutlined,
+  EyeInvisibleOutlined,
+  EyeOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
 import {
   CHART_METRIC_LABELS,
   COLUMN_GROUPS,
@@ -113,6 +119,7 @@ function emptyPanel(order: number): DraftPanel {
     sortField: 'date',
     sortDirection: 'ASC',
     rowLimit: null,
+    hideSatellites: false,
     order,
   };
 }
@@ -132,6 +139,7 @@ function panelsFromBoard(board: FlightBoard | null): DraftPanel[] {
     sortField: p.sortField ?? 'date',
     sortDirection: p.sortDirection,
     rowLimit: p.rowLimit ?? null,
+    hideSatellites: !!p.hideSatellites,
     order: p.order,
   }));
 }
@@ -271,14 +279,33 @@ const PanelEditor: React.FC<{
           justifyContent: 'space-between',
           alignItems: 'center',
           marginBottom: 8,
+          gap: 8,
         }}
       >
         <Text strong>
           פאנל #{index + 1} · {PANEL_TYPE_LABELS[panel.type]}
         </Text>
-        <Button danger size="small" type="text" icon={<DeleteOutlined />} onClick={onRemove}>
-          הסר
-        </Button>
+        <Space size={4}>
+          <Tooltip
+            title={
+              panel.hideSatellites
+                ? 'הצג שוב שורות עם מקום שידור "יעלה לווין בלבד"'
+                : 'הסתר מהפאנל שורות עם מקום שידור "יעלה לווין בלבד"'
+            }
+          >
+            <Button
+              size="small"
+              type={panel.hideSatellites ? 'primary' : 'default'}
+              icon={panel.hideSatellites ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+              onClick={() => update({ hideSatellites: !panel.hideSatellites })}
+            >
+              {panel.hideSatellites ? 'לוויינים מוסתרים' : 'הסתר לוויינים'}
+            </Button>
+          </Tooltip>
+          <Button danger size="small" type="text" icon={<DeleteOutlined />} onClick={onRemove}>
+            הסר
+          </Button>
+        </Space>
       </div>
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         <div className="flight-board-field">
@@ -460,6 +487,7 @@ export const BoardBuilder: React.FC<Props> = ({ open, initial, saving, onClose, 
         sortField: p.sortField ?? null,
         sortDirection: p.sortDirection,
         rowLimit: p.rowLimit ?? null,
+        hideSatellites: !!p.hideSatellites,
         order: idx,
       })),
     });

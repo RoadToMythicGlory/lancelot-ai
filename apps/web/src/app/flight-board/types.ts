@@ -57,6 +57,12 @@ export interface FlightBoardPanel {
   sortField?: string | null;
   sortDirection: FlightBoardSortDirection;
   rowLimit?: number | null;
+  /**
+   * When true, rows whose broadcast location equals "יעלה לווין בלבד"
+   * (satellite-only) are removed from this panel. Filtering happens
+   * client-side in `PanelContainer.filterPanelItems`.
+   */
+  hideSatellites: boolean;
   order: number;
 }
 

@@ -4226,6 +4226,9 @@ type FlightBoardPanel {
   sortField: String
   sortDirection: FlightBoardSortDirection!
   rowLimit: Int
+  """When true, rows whose broadcast location is "יעלה לווין בלבד"
+  (satellite-only) are hidden from this panel."""
+  hideSatellites: Boolean!
   order: Int!
 }
 
@@ -4310,6 +4313,7 @@ input FlightBoardPanelInput {
   sortField: String
   sortDirection: FlightBoardSortDirection
   rowLimit: Int
+  hideSatellites: Boolean
   order: Int
 }
 

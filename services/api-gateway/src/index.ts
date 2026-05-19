@@ -63,6 +63,7 @@ const resolvers = {
     departments: broadcastResolvers.Query.departments,
     warehouseEquipment: broadcastResolvers.Query.warehouseEquipment,
     warehouseEquipmentStats: broadcastResolvers.Query.warehouseEquipmentStats,
+    warehouseEquipmentForPicker: broadcastResolvers.Query.warehouseEquipmentForPicker,
     equipmentAssignmentsByEvent: broadcastResolvers.Query.equipmentAssignmentsByEvent,
     equipmentAssignments: broadcastResolvers.Query.equipmentAssignments,
     equipmentHistory: broadcastResolvers.Query.equipmentHistory,

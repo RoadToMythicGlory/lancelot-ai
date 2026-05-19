@@ -19,6 +19,9 @@ import DepartmentPicker from '@/components/shifts/DepartmentPicker';
 
 dayjs.locale('he');
 
+// NOTE: VacationRequest exposes the requester as `user` (the swap-request
+// type uses `requestingUser`, which is what confused this query before and
+// caused a hard GraphQL validation failure for the entire HoD dashboard).
 const PENDING_VACATIONS = gql`
   query HodPendingVacations {
     vacationRequests(status: pending) {
@@ -27,7 +30,7 @@ const PENDING_VACATIONS = gql`
       endDate
       vacationType
       status
-      requestingUser {
+      user {
         id
         firstName
         lastName
@@ -80,7 +83,7 @@ export default function HodDashboardPage() {
     const all = (vData?.vacationRequests || []) as any[];
     if (!activeDeptId) return all;
     return all.filter(
-      (r) => !r.requestingUser?.department || r.requestingUser.department === activeDeptId,
+      (r) => !r.user?.department || r.user.department === activeDeptId,
     );
   }, [vData, activeDeptId]);
 
@@ -156,8 +159,8 @@ export default function HodDashboardPage() {
                   >
                     <div className="text-sm">
                       <span className="font-medium text-gray-800">
-                        {r.requestingUser
-                          ? `${r.requestingUser.firstName} ${r.requestingUser.lastName}`
+                        {r.user
+                          ? `${r.user.firstName} ${r.user.lastName}`
                           : '—'}
                       </span>
                       <span className="text-gray-500 mr-2">

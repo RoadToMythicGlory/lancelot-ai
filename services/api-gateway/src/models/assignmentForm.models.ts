@@ -18,6 +18,29 @@ export interface IAssignmentFormDepartment {
   order: number;
 }
 
+/**
+ * Form column definition — one Broadcast-Array-style role column.
+ * Currently only the `broadcastArray` form populates this; other forms
+ * continue to use `departments[]` exclusively.
+ */
+export interface IAssignmentFormColumn {
+  /** Stable slug (e.g. "editor", "producer"). */
+  key: string;
+  /** Hebrew display label. Also written as the `role` field on each
+   * BroadcastEvent's crewAssignments[] so it must match what the
+   * BroadcastArrayModal reads back. */
+  hebrewLabel: string;
+  /** Optional English label (admin UI only). */
+  englishLabel?: string;
+  /** Pull all active users from these department codes. */
+  allowedDepartmentCodes: string[];
+  /** Additionally allow these specific user ids (across any department). */
+  allowedUserIds: string[];
+  requireUser: boolean;
+  defaultCount: number;
+  order: number;
+}
+
 export interface IAssignmentFormConfig extends Document {
   _id: mongoose.Types.ObjectId;
   /** Stable form key (e.g. "broadcastArray", "externalBroadcasts", "mcr"). */
@@ -27,6 +50,9 @@ export interface IAssignmentFormConfig extends Document {
   hebrewName?: string;
   description?: string;
   departments: IAssignmentFormDepartment[];
+  /** Column-based layout (broadcastArray form only). Empty for forms
+   * that use the department-based layout. */
+  columns: IAssignmentFormColumn[];
   /** Whether end-users can save shared presets on this form. */
   allowUserPresets: boolean;
   isActive: boolean;
@@ -46,6 +72,20 @@ const AssignmentFormDepartmentSchema = new Schema<IAssignmentFormDepartment>(
   { _id: false },
 );
 
+const AssignmentFormColumnSchema = new Schema<IAssignmentFormColumn>(
+  {
+    key: { type: String, required: true, trim: true },
+    hebrewLabel: { type: String, required: true, trim: true },
+    englishLabel: { type: String, trim: true },
+    allowedDepartmentCodes: { type: [String], default: [] },
+    allowedUserIds: { type: [String], default: [] },
+    requireUser: { type: Boolean, default: false },
+    defaultCount: { type: Number, default: 1, min: 0 },
+    order: { type: Number, default: 0 },
+  },
+  { _id: false },
+);
+
 const AssignmentFormConfigSchema = new Schema<IAssignmentFormConfig>(
   {
     formKey: { type: String, required: true, unique: true, trim: true, index: true },
@@ -53,6 +93,7 @@ const AssignmentFormConfigSchema = new Schema<IAssignmentFormConfig>(
     hebrewName: { type: String, trim: true },
     description: { type: String },
     departments: { type: [AssignmentFormDepartmentSchema], default: [] },
+    columns: { type: [AssignmentFormColumnSchema], default: [] },
     allowUserPresets: { type: Boolean, default: true },
     isActive: { type: Boolean, default: true },
     updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },

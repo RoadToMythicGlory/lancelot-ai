@@ -147,7 +147,8 @@ const RowEditor: React.FC<{
   pendingDirty: Record<string, Record<string, any>>;
   onCellChange: (itemKey: string, columnKey: string, value: any) => void;
   onCellClear: (itemKey: string, columnKey: string) => void;
-}> = ({ item, panel, boardId, refetchVars, pendingDirty, onCellChange, onCellClear }) => {
+  onItemSaved: (itemKey: string) => void;
+}> = ({ item, panel, boardId, refetchVars, pendingDirty, onCellChange, onCellClear, onItemSaved }) => {
   const { message } = App.useApp();
   const columns = useMemo(() => panelEditableColumns(panel), [panel]);
   const dirty = pendingDirty[item.itemKey] || {};
@@ -189,6 +190,12 @@ const RowEditor: React.FC<{
         await setOverride({ variables: { boardId, itemKey: item.itemKey, values: dirty } });
         message.success('הערכים נשמרו ללוח זה');
       }
+      // Clear the local dirty buffer for this row now that the server has
+      // confirmed the write — otherwise the "·" dirty markers remain and
+      // the editor reads from the stale local copy instead of the
+      // refetched server value, which is what users have been seeing as
+      // "the edit didn't save".
+      onItemSaved(item.itemKey);
     } catch (err: any) {
       message.error(err?.message || 'שמירה נכשלה');
     }
@@ -408,6 +415,15 @@ export const EditPanelDrawer: React.FC<Props> = ({
     });
   };
 
+  const handleItemSaved = (itemKey: string) => {
+    setPendingDirty((prev) => {
+      if (!prev[itemKey]) return prev;
+      const next = { ...prev };
+      delete next[itemKey];
+      return next;
+    });
+  };
+
   const handleAddRow = async () => {
     if (!panel) return;
     try {
@@ -500,6 +516,7 @@ export const EditPanelDrawer: React.FC<Props> = ({
               pendingDirty={pendingDirty}
               onCellChange={handleCellChange}
               onCellClear={handleCellClear}
+              onItemSaved={handleItemSaved}
             />
           ))}
         </div>

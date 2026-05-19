@@ -10,6 +10,87 @@ import {
 } from './permissions';
 
 // ---------------------------------------------------------------------------
+// Permission implications
+// ---------------------------------------------------------------------------
+//
+// "If a user has X, they implicitly also have Y." Used so the new
+// fine-grained sub-feature permissions (broadcast-array, venues,
+// bulletin, MCR flight board) don't require re-issuing every existing
+// role grant — anyone who already had BROADCAST_MANAGE keeps writing
+// to venues/broadcast-array, anyone with DASHBOARD_MANAGE keeps
+// publishing bulletins, and so on. Manage implies View on the same
+// feature for free. Resolved transitively at compute time.
+
+const PERMISSION_IMPLIES: Partial<Record<Permission, Permission[]>> = {
+  // Broadcast umbrella → all sub-features
+  [Permission.BROADCAST_VIEW]: [
+    Permission.BROADCAST_ARRAY_VIEW,
+    Permission.VENUES_VIEW,
+  ],
+  [Permission.BROADCAST_MANAGE]: [
+    Permission.BROADCAST_VIEW,
+    Permission.BROADCAST_ARRAY_MANAGE,
+    Permission.VENUES_MANAGE,
+  ],
+  // Sub-feature manage → sub-feature view
+  [Permission.BROADCAST_ARRAY_MANAGE]: [Permission.BROADCAST_ARRAY_VIEW],
+  [Permission.VENUES_MANAGE]: [Permission.VENUES_VIEW],
+
+  // Dashboard umbrella → bulletin
+  [Permission.DASHBOARD_VIEW]: [Permission.BULLETIN_VIEW],
+  [Permission.DASHBOARD_MANAGE]: [
+    Permission.DASHBOARD_VIEW,
+    Permission.BULLETIN_MANAGE,
+  ],
+  [Permission.BULLETIN_MANAGE]: [Permission.BULLETIN_VIEW],
+
+  // Flight board umbrella → MCR variant
+  [Permission.FLIGHT_BOARD_VIEW]: [Permission.MCR_FLIGHT_BOARD_VIEW],
+  [Permission.FLIGHT_BOARD_MANAGE]: [
+    Permission.FLIGHT_BOARD_VIEW,
+    Permission.MCR_FLIGHT_BOARD_MANAGE,
+  ],
+  [Permission.MCR_FLIGHT_BOARD_MANAGE]: [Permission.MCR_FLIGHT_BOARD_VIEW],
+
+  // Other "manage implies view" closures kept here for consistency
+  [Permission.WAREHOUSE_MANAGE]: [Permission.WAREHOUSE_VIEW],
+  [Permission.SHIFTS_MANAGE]: [Permission.SHIFTS_VIEW_ALL, Permission.SHIFTS_VIEW_OWN],
+  [Permission.SHIFTS_VIEW_ALL]: [Permission.SHIFTS_VIEW_OWN],
+  [Permission.MCR_MANAGE]: [Permission.MCR_VIEW],
+  [Permission.MCR_ADMIN]: [Permission.MCR_MANAGE, Permission.MCR_VIEW],
+  [Permission.VIZRT_OPERATE]: [Permission.VIZRT_VIEW],
+  [Permission.VIZRT_ADMIN]: [Permission.VIZRT_OPERATE, Permission.VIZRT_VIEW],
+  [Permission.SETTINGS_MANAGE]: [Permission.SETTINGS_VIEW],
+  [Permission.INTEGRATIONS_MANAGE]: [Permission.INTEGRATIONS_VIEW],
+  [Permission.MEDIA_MANAGE]: [Permission.MEDIA_VIEW],
+  [Permission.RIGHTS_MANAGE]: [Permission.RIGHTS_VIEW],
+  [Permission.WORKFLOWS_MANAGE]: [Permission.WORKFLOWS_VIEW],
+  [Permission.IT_SUPPORT_MANAGE]: [Permission.IT_SUPPORT_VIEW],
+  [Permission.USERS_MANAGE_ALL]: [Permission.USERS_MANAGE_DEPT, Permission.USERS_VIEW],
+  [Permission.USERS_MANAGE_DEPT]: [Permission.USERS_VIEW],
+};
+
+/**
+ * Expand `perms` in place to also include every transitively implied
+ * permission. O(N * depth) with a tiny fixed-point loop; safe against
+ * accidental cycles thanks to the visited check.
+ */
+function expandImplications(perms: Set<Permission>): void {
+  const stack: Permission[] = Array.from(perms);
+  while (stack.length > 0) {
+    const p = stack.pop()!;
+    const implied = PERMISSION_IMPLIES[p];
+    if (!implied) continue;
+    for (const child of implied) {
+      if (!perms.has(child)) {
+        perms.add(child);
+        stack.push(child);
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // SystemRole → global permissions
 // ---------------------------------------------------------------------------
 
@@ -200,6 +281,22 @@ export function computePermissions(user: UserForPermissions): ComputedPermission
     for (const dept of user.departments) {
       if (!dept.departmentId) continue;
       const deptPerms = new Set<Permission>();
+
+      // 2a. Department-wide permissions: every member of the department
+      // inherits the department's own `permissions[]` array, regardless of
+      // whether they were also assigned a role within it. The registry
+      // exposes that array under the special `__departmentDefault__` key
+      // (see services/departmentRegistry.ts).
+      const departmentDefaults = resolveDeptRolePermissions(
+        dept.departmentId,
+        '__departmentDefault__',
+      );
+      for (const p of departmentDefaults) {
+        deptPerms.add(p);
+      }
+
+      // 2b. Per-role extras for any role(s) the user holds within the
+      // department.
       if (Array.isArray(dept.roles)) {
         for (const roleName of dept.roles) {
           if (!roleName) continue;
@@ -226,6 +323,10 @@ export function computePermissions(user: UserForPermissions): ComputedPermission
       // Unknown values silently ignored (logged server-side in context.ts)
     }
   }
+
+  // 4. Apply transitive implications (manage→view, umbrella→sub-feature).
+  expandImplications(global);
+  byDept.forEach((set) => expandImplications(set));
 
   return { global, byDept };
 }

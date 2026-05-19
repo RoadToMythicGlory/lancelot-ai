@@ -5,26 +5,30 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { Permission } from '@/rbac';
-import { useQuery } from '@apollo/client';
+import { useMutation, useQuery } from '@apollo/client';
 import { gql } from '@apollo/client';
-import { 
-  Layout, 
-  Card, 
-  Row, 
-  Col, 
-  Statistic, 
-  Typography, 
-  Button, 
+import {
+  Layout,
+  Card,
+  Row,
+  Col,
+  Statistic,
+  Typography,
+  Button,
   Space,
   Badge,
   Spin,
   message,
   Avatar,
   Divider,
-  Modal
+  Modal,
+  Form,
+  Input,
+  Switch as AntSwitch,
+  Popconfirm,
 } from 'antd';
-import { 
-  UserOutlined, 
+import {
+  UserOutlined,
   TeamOutlined,
   VideoCameraOutlined,
   ScheduleOutlined,
@@ -34,7 +38,9 @@ import {
   ClockCircleOutlined,
   SyncOutlined,
   RadarChartOutlined,
-  MessageOutlined
+  MessageOutlined,
+  PlusOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
@@ -67,10 +73,35 @@ const GET_BULLETIN_POSTS = gql`
       isPinned
       departmentName
       author {
+        id
         displayName
       }
       createdAt
     }
+  }
+`;
+
+const CREATE_BULLETIN_POST = gql`
+  mutation CreateBulletinPost(
+    $title: String!
+    $content: String!
+    $isEmergency: Boolean
+    $isPinned: Boolean
+  ) {
+    createBulletinPost(
+      title: $title
+      content: $content
+      isEmergency: $isEmergency
+      isPinned: $isPinned
+    ) {
+      id
+    }
+  }
+`;
+
+const DELETE_BULLETIN_POST = gql`
+  mutation DeleteBulletinPost($id: ID!) {
+    deleteBulletinPost(id: $id)
   }
 `;
 
@@ -130,9 +161,28 @@ const GET_BROADCAST_EVENTS_FOR_ASSIGNMENTS = gql`
 
 export default function Home() {
   const router = useRouter();
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, hasPermission } = useAuth();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [broadcastsModalVisible, setBroadcastsModalVisible] = useState(false);
+
+  // Capabilities. Computed up-front so each useQuery below can be skipped for
+  // users who don't have the relevant permission — otherwise the resolver
+  // throws "Missing permission: X" and spams the user's console with
+  // INTERNAL_SERVER_ERRORs for data they were never going to see anyway.
+  const canViewDashboard = hasPermission(Permission.DASHBOARD_VIEW);
+  const canViewBroadcasts = hasPermission(Permission.BROADCAST_VIEW);
+  const canViewBulletin = canViewDashboard;
+  const canManageBulletin = hasPermission(Permission.BULLETIN_MANAGE);
+  const canViewOwnShifts = hasPermission(Permission.SHIFTS_VIEW_OWN);
+
+  // Compose / publish state for the bulletin board.
+  const [bulletinModalOpen, setBulletinModalOpen] = useState(false);
+  const [bulletinForm] = Form.useForm<{
+    title: string;
+    content: string;
+    isEmergency: boolean;
+    isPinned: boolean;
+  }>();
 
   // Stable date range for the next 7 days (for broadcast assignments)
   const assignmentsDateRange = useMemo(() => {
@@ -155,22 +205,44 @@ export default function Home() {
 
   // Query for dashboard stats
   const { data: statsData, loading: statsLoading, refetch: refetchStats } = useQuery(GET_DASHBOARD_STATS, {
-    skip: !user,
+    skip: !user || !canViewDashboard,
     errorPolicy: 'all',
     pollInterval: 300000 // Refresh every 5 minutes
   });
 
   // Query for bulletin posts
-  const { data: bulletinData, loading: bulletinLoading } = useQuery(GET_BULLETIN_POSTS, {
+  const { data: bulletinData, loading: bulletinLoading, refetch: refetchBulletin } = useQuery(GET_BULLETIN_POSTS, {
     variables: { limit: 5, onlyEmergency: false },
-    skip: !user,
+    skip: !user || !canViewBulletin,
     errorPolicy: 'all',
     pollInterval: 60000 // Refresh every minute
   });
 
+  const [createBulletinPost, { loading: creatingBulletin }] = useMutation(CREATE_BULLETIN_POST, {
+    onCompleted: () => {
+      message.success('ההודעה פורסמה');
+      setBulletinModalOpen(false);
+      bulletinForm.resetFields();
+      refetchBulletin();
+    },
+    onError: (err) => {
+      message.error(`פרסום נכשל: ${err.message}`);
+    },
+  });
+
+  const [deleteBulletinPost] = useMutation(DELETE_BULLETIN_POST, {
+    onCompleted: () => {
+      message.success('ההודעה נמחקה');
+      refetchBulletin();
+    },
+    onError: (err) => {
+      message.error(`מחיקה נכשלה: ${err.message}`);
+    },
+  });
+
   // Query for today's broadcasts
   const { data: broadcastsData, loading: broadcastsLoading } = useQuery(GET_TODAYS_BROADCASTS, {
-    skip: !user,
+    skip: !user || !canViewBroadcasts,
     errorPolicy: 'all',
     pollInterval: 300000 // Refresh every 5 minutes
   });
@@ -178,7 +250,7 @@ export default function Home() {
   // Query for weekly shifts
   const { data: shiftsData, loading: shiftsLoading } = useQuery(GET_WEEKLY_SHIFTS, {
     variables: { userId: user?.id },
-    skip: !user,
+    skip: !user || !canViewOwnShifts,
     errorPolicy: 'all',
     pollInterval: 300000 // Refresh every 5 minutes
   });
@@ -186,7 +258,7 @@ export default function Home() {
   // Query for broadcast events (next 7 days) to extract "my broadcast array assignments"
   const { data: assignmentsSourceData, loading: assignmentsLoading } = useQuery(GET_BROADCAST_EVENTS_FOR_ASSIGNMENTS, {
     variables: assignmentsDateRange,
-    skip: !user,
+    skip: !user || !canViewBroadcasts,
     errorPolicy: 'all',
     pollInterval: 300000
   });
@@ -791,65 +863,168 @@ export default function Home() {
           </Col>
           
           <Col xs={24} lg={12}>
-            <Card 
-              title="לוח מודעות" 
+            <Card
+              title="לוח מודעות"
               loading={bulletinLoading}
               extra={
-                <Badge count={bulletinPosts.filter((p: any) => p.isEmergency).length} offset={[-5, 5]}>
-                  <Button type="link" icon={<BellOutlined />}>
-                    הצג הכל
-                  </Button>
-                </Badge>
+                <Space>
+                  {canManageBulletin && (
+                    <Button
+                      type="primary"
+                      size="small"
+                      icon={<PlusOutlined />}
+                      onClick={() => setBulletinModalOpen(true)}
+                    >
+                      הודעה חדשה
+                    </Button>
+                  )}
+                  <Badge
+                    count={bulletinPosts.filter((p: any) => p.isEmergency).length}
+                    offset={[-5, 5]}
+                  >
+                    <Button type="link" icon={<BellOutlined />}>
+                      הצג הכל
+                    </Button>
+                  </Badge>
+                </Space>
               }
               className="h-full"
             >
               {bulletinPosts.length > 0 ? (
                 <Space direction="vertical" className="w-full">
-                  {bulletinPosts.slice(0, 3).map((post: any) => (
-                    <div 
-                      key={post.id} 
-                      className={`p-3 rounded-lg ${
-                        post.isEmergency 
-                          ? 'bg-red-50 border-l-4 border-red-500' 
-                          : post.isPinned
-                          ? 'bg-blue-50 border-l-4 border-blue-500'
-                          : 'bg-gray-50'
-                      }`}
-                    >
-                      <Space className="mb-1">
-                        <Text strong className={post.isEmergency ? 'text-red-600' : ''}>
-                          {post.title}
-                        </Text>
-                        {post.isEmergency && <Badge status="error" text="דחוף" />}
-                      </Space>
-                      <div>
-                        <Text className="text-gray-600 text-sm">{post.content}</Text>
+                  {bulletinPosts.slice(0, 3).map((post: any) => {
+                    const ownPost = post.author?.id && user?.id && post.author.id === user.id;
+                    const canDelete = canManageBulletin && ownPost;
+                    return (
+                      <div
+                        key={post.id}
+                        className={`p-3 rounded-lg ${
+                          post.isEmergency
+                            ? 'bg-red-50 border-l-4 border-red-500'
+                            : post.isPinned
+                            ? 'bg-blue-50 border-l-4 border-blue-500'
+                            : 'bg-gray-50'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <Space className="mb-1">
+                            <Text strong className={post.isEmergency ? 'text-red-600' : ''}>
+                              {post.title}
+                            </Text>
+                            {post.isEmergency && <Badge status="error" text="דחוף" />}
+                          </Space>
+                          {canDelete && (
+                            <Popconfirm
+                              title="למחוק את ההודעה?"
+                              okText="כן"
+                              cancelText="לא"
+                              okButtonProps={{ danger: true }}
+                              onConfirm={() =>
+                                deleteBulletinPost({ variables: { id: post.id } })
+                              }
+                            >
+                              <Button
+                                type="text"
+                                size="small"
+                                danger
+                                icon={<DeleteOutlined />}
+                              />
+                            </Popconfirm>
+                          )}
+                        </div>
+                        <div>
+                          <Text className="text-gray-600 text-sm">{post.content}</Text>
+                        </div>
+                        <div className="mt-2">
+                          <Text type="secondary" className="text-xs">
+                            {post.author?.displayName || 'לא ידוע'} • {
+                              new Date(post.createdAt).toLocaleDateString('he-IL', {
+                                day: 'numeric',
+                                month: 'short',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })
+                            }
+                          </Text>
+                        </div>
                       </div>
-                      <div className="mt-2">
-                        <Text type="secondary" className="text-xs">
-                          {post.author.displayName} • {
-                            new Date(post.createdAt).toLocaleDateString('he-IL', {
-                              day: 'numeric',
-                              month: 'short',
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            })
-                          }
-                        </Text>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </Space>
               ) : (
                 <div className="text-center py-8">
                   <BellOutlined className="text-4xl text-gray-400 mb-2" />
                   <br />
                   <Text type="secondary">אין הודעות חדשות</Text>
+                  {canManageBulletin && (
+                    <div className="mt-3">
+                      <Button
+                        type="primary"
+                        icon={<PlusOutlined />}
+                        onClick={() => setBulletinModalOpen(true)}
+                      >
+                        פרסם הודעה ראשונה
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
             </Card>
           </Col>
         </Row>
+
+        {/* New Bulletin Post Modal */}
+        <Modal
+          title="הודעה חדשה ללוח המודעות"
+          open={bulletinModalOpen}
+          onCancel={() => setBulletinModalOpen(false)}
+          okText="פרסם"
+          cancelText="בטל"
+          confirmLoading={creatingBulletin}
+          onOk={async () => {
+            try {
+              const values = await bulletinForm.validateFields();
+              await createBulletinPost({
+                variables: {
+                  title: values.title.trim(),
+                  content: values.content.trim(),
+                  isEmergency: !!values.isEmergency,
+                  isPinned: !!values.isPinned,
+                },
+              });
+            } catch {
+              // antd surfaces field-level validation errors directly on the form.
+            }
+          }}
+          destroyOnClose
+        >
+          <Form
+            form={bulletinForm}
+            layout="vertical"
+            initialValues={{ isEmergency: false, isPinned: false }}
+          >
+            <Form.Item
+              name="title"
+              label="כותרת"
+              rules={[{ required: true, message: 'יש להזין כותרת' }]}
+            >
+              <Input placeholder="לדוגמה: עדכון לשידור הערב" maxLength={120} />
+            </Form.Item>
+            <Form.Item
+              name="content"
+              label="תוכן"
+              rules={[{ required: true, message: 'יש להזין תוכן' }]}
+            >
+              <Input.TextArea rows={4} maxLength={2000} placeholder="גוף ההודעה" />
+            </Form.Item>
+            <Form.Item name="isEmergency" label="הודעת חירום" valuePropName="checked">
+              <AntSwitch />
+            </Form.Item>
+            <Form.Item name="isPinned" label="הצמד לראש הלוח" valuePropName="checked">
+              <AntSwitch />
+            </Form.Item>
+          </Form>
+        </Modal>
 
         {/* All Broadcasts Modal */}
         <Modal

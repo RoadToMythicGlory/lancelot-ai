@@ -7,7 +7,7 @@ import {
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, BarcodeOutlined } from '@ant-design/icons';
 import { useQuery, useMutation } from '@apollo/client';
-import { GET_EQUIPMENT_SETS, GET_WAREHOUSE_EQUIPMENT } from '../../graphql/queries';
+import { GET_EQUIPMENT_SETS, GET_WAREHOUSE_EQUIPMENT_FOR_PICKER } from '../../graphql/queries';
 import { CREATE_EQUIPMENT_SET, UPDATE_EQUIPMENT_SET, DELETE_EQUIPMENT_SET } from '../../graphql/mutations';
 
 const EQUIPMENT_CATEGORIES: Record<string, string> = {
@@ -43,10 +43,13 @@ const EquipmentSetsManager: React.FC<EquipmentSetsManagerProps> = ({ canManage =
   const [searchText, setSearchText] = useState('');
 
   const { data: setsData, loading: setsLoading, refetch } = useQuery(GET_EQUIPMENT_SETS);
-  const { data: equipmentData } = useQuery(GET_WAREHOUSE_EQUIPMENT);
+  // Use the dedicated picker query (up to 5000 rows). The default
+  // GET_WAREHOUSE_EQUIPMENT caps at 500 and was silently truncating this
+  // list so most of the catalog was unreachable when building a preset.
+  const { data: equipmentData } = useQuery(GET_WAREHOUSE_EQUIPMENT_FOR_PICKER);
 
   const sets = setsData?.equipmentSets || [];
-  const allEquipment = equipmentData?.warehouseEquipment || [];
+  const allEquipment = equipmentData?.warehouseEquipmentForPicker || [];
 
   const [createSet, { loading: creating }] = useMutation(CREATE_EQUIPMENT_SET, {
     onCompleted: () => {
@@ -110,6 +113,25 @@ const EquipmentSetsManager: React.FC<EquipmentSetsManagerProps> = ({ canManage =
     const values = await form.validateFields();
     if (setItems.length === 0) {
       message.warning('יש להוסיף לפחות פריט אחד לסט');
+      return;
+    }
+
+    // The dropdown defaults each new row to equipmentId='' until the user
+    // picks something. Submitting an unselected row would crash the resolver
+    // with a cryptic BSON error ("input must be a 24 character hex string"),
+    // so block it here with a clear message instead.
+    const missingIdx = setItems.findIndex(
+      (i) => !i.equipmentId || typeof i.equipmentId !== 'string',
+    );
+    if (missingIdx !== -1) {
+      message.warning(`יש לבחור ציוד בפריט מספר ${missingIdx + 1}`);
+      return;
+    }
+    const badQtyIdx = setItems.findIndex(
+      (i) => !Number.isFinite(i.quantity) || i.quantity < 1,
+    );
+    if (badQtyIdx !== -1) {
+      message.warning(`כמות לא תקינה בפריט מספר ${badQtyIdx + 1}`);
       return;
     }
 

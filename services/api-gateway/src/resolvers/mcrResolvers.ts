@@ -1,8 +1,36 @@
 import { AuthenticationError, UserInputError } from 'apollo-server-express';
 import mongoose from 'mongoose';
+import dayjs from 'dayjs';
+import utcPlugin from 'dayjs/plugin/utc';
+import tzPlugin from 'dayjs/plugin/timezone';
+import { config } from '../config';
 import MCREvent, { IMCREvent } from '../models/mcrEvent';
 import BulletinPost, { IBulletinPost } from '../models/bulletinPost';
 import ActivityRow, { IActivityRow } from '../models/activityRow';
+
+dayjs.extend(utcPlugin);
+dayjs.extend(tzPlugin);
+
+/**
+ * Compute the [startOfDay, endOfDay] window for the org's configured
+ * timezone (defaults to Asia/Jerusalem) given any timestamp on that day.
+ *
+ * The previous implementation used `new Date(arg).setHours(0, 0, 0, 0)`,
+ * which silently uses the *server*'s local timezone. On the prod host
+ * (EDT, UTC-4), a request for "May 18 in Jerusalem" — which arrives as
+ * `2026-05-17T21:00:00.000Z` — would get truncated to May 17 00:00 EDT
+ * and the window would end just before the activity row (stored at
+ * May 18 04:00 UTC = May 18 00:00 EDT) so MCR Schedule appeared empty
+ * for events scheduled in the Israeli evening / night.
+ */
+function dayWindowInOrgTz(input: string | Date): { startOfDay: Date; endOfDay: Date } {
+  const tz = config.TIMEZONE || 'Asia/Jerusalem';
+  const day = dayjs(input).tz(tz);
+  return {
+    startOfDay: day.startOf('day').toDate(),
+    endOfDay: day.endOf('day').toDate(),
+  };
+}
 import {
   MCRDailyCheckTemplate,
   MCRDailyCheckEntry,
@@ -178,11 +206,7 @@ const resolvers = {
     // Activity Rows — auto-syncs broadcast events into empty activity rows
     activityRows: withAuth(async (_: any, args: any, context: any) => {
       requirePermission(context, Permission.MCR_VIEW);
-      const startOfDay = new Date(args.date);
-      startOfDay.setHours(0, 0, 0, 0);
-      
-      const endOfDay = new Date(args.date);
-      endOfDay.setHours(23, 59, 59, 999);
+      const { startOfDay, endOfDay } = dayWindowInOrgTz(args.date);
 
       try {
         const broadcastEvents = await BroadcastEvent.find({
@@ -205,10 +229,11 @@ const resolvers = {
           const newRows = broadcastEvents
             .filter(event => !existingBroadcastIds.has(event._id.toString()))
             .map(event => {
+              const tz = config.TIMEZONE || 'Asia/Jerusalem';
               const startTime = new Date(event.startTime);
               const endTime = new Date(event.endTime);
-              const timeStr = startTime.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', hour12: false });
-              const endTimeStr = endTime.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', hour12: false });
+              const timeStr = dayjs(startTime).tz(tz).format('HH:mm');
+              const endTimeStr = dayjs(endTime).tz(tz).format('HH:mm');
 
               return {
                 date: startOfDay,
@@ -266,11 +291,8 @@ const resolvers = {
         throw new Error('Invalid broadcast event ID');
       }
       
-      const startOfDay = new Date(date);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(date);
-      endOfDay.setHours(23, 59, 59, 999);
-      
+      const { startOfDay, endOfDay } = dayWindowInOrgTz(date);
+
       let row = await ActivityRow.findOne({
         broadcastEventId: new mongoose.Types.ObjectId(broadcastEventId),
         date: { $gte: startOfDay, $lte: endOfDay }
@@ -282,10 +304,11 @@ const resolvers = {
           throw new UserInputError('Broadcast event not found');
         }
         
+        const tz = config.TIMEZONE || 'Asia/Jerusalem';
         const startTime = new Date(event.startTime);
         const endTime = new Date(event.endTime);
-        const timeStr = startTime.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', hour12: false });
-        const endTimeStr = endTime.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', hour12: false });
+        const timeStr = dayjs(startTime).tz(tz).format('HH:mm');
+        const endTimeStr = dayjs(endTime).tz(tz).format('HH:mm');
         
         row = new ActivityRow({
           date: startOfDay,
@@ -324,10 +347,7 @@ const resolvers = {
       requirePermission(context, Permission.MCR_VIEW);
       await ensureDefaultDailyChecks();
 
-      const startOfDay = new Date(args.date);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(args.date);
-      endOfDay.setHours(23, 59, 59, 999);
+      const { startOfDay, endOfDay } = dayWindowInOrgTz(args.date);
 
       const templates = await MCRDailyCheckTemplate.find({ isActive: true }).sort({ order: 1, name: 1 });
 
@@ -774,10 +794,7 @@ const resolvers = {
      */
     saveActivityRows: withAuth(async (_: any, args: any, context: any) => {
       requirePermission(context, Permission.MCR_MANAGE);
-      const startOfDay = new Date(args.date);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(args.date);
-      endOfDay.setHours(23, 59, 59, 999);
+      const { startOfDay, endOfDay } = dayWindowInOrgTz(args.date);
 
       const rows = Array.isArray(args.rows) ? args.rows : [];
       const savedIds: string[] = [];
@@ -923,10 +940,7 @@ const resolvers = {
       if (!mongoose.Types.ObjectId.isValid(args.templateId)) {
         throw new UserInputError('Invalid template ID');
       }
-      const startOfDay = new Date(args.date);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(args.date);
-      endOfDay.setHours(23, 59, 59, 999);
+      const { startOfDay, endOfDay } = dayWindowInOrgTz(args.date);
 
       let entry = await MCRDailyCheckEntry.findOne({
         date: { $gte: startOfDay, $lte: endOfDay },

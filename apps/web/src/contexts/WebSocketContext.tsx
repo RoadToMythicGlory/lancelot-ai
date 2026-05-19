@@ -34,7 +34,8 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       socketRef.current = null;
     }
 
-    const url = process.env.NEXT_PUBLIC_CHAT_WS_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+    const configuredUrl = process.env.NEXT_PUBLIC_CHAT_WS_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+    const url = configuredUrl === '.' ? window.location.origin : configuredUrl;
 
     try {
       // Get the auth token from localStorage

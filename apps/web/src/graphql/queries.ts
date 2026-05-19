@@ -203,6 +203,16 @@ export const GET_ASSIGNMENT_FORM_CONFIGS = gql`
         defaultCount
         order
       }
+      columns {
+        key
+        hebrewLabel
+        englishLabel
+        allowedDepartmentCodes
+        allowedUserIds
+        requireUser
+        defaultCount
+        order
+      }
       createdAt
       updatedAt
     }
@@ -222,6 +232,16 @@ export const GET_ASSIGNMENT_FORM_CONFIG = gql`
       departments {
         departmentCode
         allowedRoleKeys
+        requireUser
+        defaultCount
+        order
+      }
+      columns {
+        key
+        hebrewLabel
+        englishLabel
+        allowedDepartmentCodes
+        allowedUserIds
         requireUser
         defaultCount
         order
@@ -340,6 +360,24 @@ export const GET_WAREHOUSE_EQUIPMENT = gql`
       lastUsedAt
       createdAt
       updatedAt
+    }
+  }
+`;
+
+// Slim picker projection of every active equipment row (up to 5000).
+// Use this in Select components instead of GET_WAREHOUSE_EQUIPMENT, which
+// is capped at 500 rows by design.
+export const GET_WAREHOUSE_EQUIPMENT_FOR_PICKER = gql`
+  query GetWarehouseEquipmentForPicker($search: String) {
+    warehouseEquipmentForPicker(search: $search) {
+      id
+      name
+      category
+      brand
+      barcode
+      quantityTotal
+      isQuantityBased
+      isDisabled
     }
   }
 `;
@@ -1045,3 +1083,65 @@ export const GET_INTERNAL_EQUIPMENT_ASSIGNMENTS = gql`
     }
   }
 `;
+
+export const GET_VENUES = gql`
+  query GetVenues($includeInactive: Boolean) {
+    venues(includeInactive: $includeInactive) {
+      id
+      name
+      hebrewName
+      city
+      address
+      notes
+      capacity
+      equipmentPresetIds
+      crewStructures {
+        name
+        notes
+        jobs {
+          departmentCode
+          roleKey
+          roleLabel
+          count
+          userId
+          userName
+        }
+      }
+      isActive
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const GET_VENUE = gql`
+  query GetVenue($id: ID!) {
+    venue(id: $id) {
+      id
+      name
+      hebrewName
+      city
+      address
+      notes
+      capacity
+      equipmentPresetIds
+      crewStructures {
+        name
+        notes
+        jobs {
+          departmentCode
+          roleKey
+          roleLabel
+          count
+          userId
+          userName
+        }
+      }
+      isActive
+      createdAt
+      updatedAt
+    }
+  }
+`;
+ 
+ 

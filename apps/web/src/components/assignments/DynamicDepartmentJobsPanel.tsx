@@ -481,7 +481,7 @@ const DynamicDepartmentJobsPanel: React.FC<DynamicDepartmentJobsPanelProps> = ({
           {formConfig?.hebrewName ? <Tag>{formConfig.hebrewName}</Tag> : null}
         </Space>
       }
-      bodyStyle={{ paddingTop: 12 }}
+      styles={{ body: { paddingTop: 12 } }}
     >
       {!hidePresets ? (
         <div style={{ marginBottom: 12 }}>

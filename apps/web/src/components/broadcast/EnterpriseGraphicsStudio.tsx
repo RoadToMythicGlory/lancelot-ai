@@ -998,7 +998,7 @@ export default function EnterpriseGraphicsStudio() {
                           value: font,
                           style: { fontFamily: font }
                         }))}
-                        dropdownRender={(menu) => (
+                        popupRender={(menu) => (
                           <>
                             {menu}
                             {availableFonts.length <= DEFAULT_FONTS.length && 'queryLocalFonts' in window && (

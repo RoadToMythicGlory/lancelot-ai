@@ -41,6 +41,20 @@ const PERMISSION_GROUPS: PermissionGroup[] = [
     ],
   },
   {
+    label: 'מערך השידורים',
+    permissions: [
+      { key: Permission.BROADCAST_ARRAY_VIEW, label: 'צפייה' },
+      { key: Permission.BROADCAST_ARRAY_MANAGE, label: 'ניהול' },
+    ],
+  },
+  {
+    label: 'אולמות / שידורי חוץ',
+    permissions: [
+      { key: Permission.VENUES_VIEW, label: 'צפייה' },
+      { key: Permission.VENUES_MANAGE, label: 'ניהול' },
+    ],
+  },
+  {
     label: 'מחסן / ציוד',
     permissions: [
       { key: Permission.WAREHOUSE_VIEW, label: 'צפייה' },
@@ -107,6 +121,22 @@ const PERMISSION_GROUPS: PermissionGroup[] = [
     permissions: [
       { key: Permission.DASHBOARD_VIEW, label: 'צפייה' },
       { key: Permission.DASHBOARD_MANAGE, label: 'ניהול' },
+    ],
+  },
+  {
+    label: 'לוח מודעות',
+    permissions: [
+      { key: Permission.BULLETIN_VIEW, label: 'צפייה' },
+      { key: Permission.BULLETIN_MANAGE, label: 'פרסום וניהול' },
+    ],
+  },
+  {
+    label: 'לוח טיסות',
+    permissions: [
+      { key: Permission.FLIGHT_BOARD_VIEW, label: 'צפייה' },
+      { key: Permission.FLIGHT_BOARD_MANAGE, label: 'ניהול' },
+      { key: Permission.MCR_FLIGHT_BOARD_VIEW, label: 'צפייה — לוח MCR' },
+      { key: Permission.MCR_FLIGHT_BOARD_MANAGE, label: 'ניהול — לוח MCR' },
     ],
   },
   {

@@ -3,6 +3,7 @@ const { parse } = require('url')
 const next = require('next')
 const path = require('path')
 const fs = require('fs')
+const http = require('http')
 
 const dev = process.env.NODE_ENV !== 'production'
 // cPanel typically sets the hostname and port, so we use 0.0.0.0 to bind to all interfaces
@@ -58,6 +59,73 @@ function serveStatic(filePath, res) {
   })
 }
 
+function proxyToApi(req, res) {
+  const targetPath = req.url
+  const headers = {
+    ...req.headers,
+    host: 'api.lanceloterp.io',
+    origin: 'http://app.lanceloterp.io',
+  }
+
+  const proxyReq = http.request(
+    {
+      hostname: 'api.lanceloterp.io',
+      port: 80,
+      method: req.method,
+      path: targetPath,
+      headers,
+    },
+    (proxyRes) => {
+      res.writeHead(proxyRes.statusCode || 502, proxyRes.headers)
+      proxyRes.pipe(res)
+    },
+  )
+
+  proxyReq.on('error', (err) => {
+    console.error('API proxy error:', err)
+    res.statusCode = 502
+    res.setHeader('Content-Type', 'application/json')
+    res.end(JSON.stringify({ error: 'API proxy failed' }))
+  })
+
+  req.pipe(proxyReq)
+}
+
+// The Excel Parser runs as its own localhost-only Node process (managed
+// by ~/lancelot-ai/lancelot-start-excel-parser.sh and supervised by the
+// watchdog cron). Route the upload endpoint to it directly instead of
+// going through the API gateway — the API has no parser, and proxying
+// through `api.lanceloterp.io` used to 404 because nothing answered.
+const EXCEL_PARSER_PORT = parseInt(process.env.EXCEL_PARSER_PORT || '4002', 10)
+function proxyToExcelParser(req, res) {
+  const headers = {
+    ...req.headers,
+    host: `127.0.0.1:${EXCEL_PARSER_PORT}`,
+  }
+  const proxyReq = http.request(
+    {
+      hostname: '127.0.0.1',
+      port: EXCEL_PARSER_PORT,
+      method: req.method,
+      path: req.url,
+      headers,
+    },
+    (proxyRes) => {
+      res.writeHead(proxyRes.statusCode || 502, proxyRes.headers)
+      proxyRes.pipe(res)
+    },
+  )
+
+  proxyReq.on('error', (err) => {
+    console.error('Excel parser proxy error:', err)
+    res.statusCode = 502
+    res.setHeader('Content-Type', 'application/json')
+    res.end(JSON.stringify({ error: 'Excel parser unavailable' }))
+  })
+
+  req.pipe(proxyReq)
+}
+
 // when using middleware `hostname` and `port` must be provided below
 const app = next({ 
   dev, 
@@ -81,6 +149,20 @@ app.prepare().then(() => {
         res.statusCode = 200
         res.setHeader('Content-Type', 'application/json')
         res.end(JSON.stringify({ status: 'ok', timestamp: new Date().toISOString() }))
+        return
+      }
+
+      if (pathname === '/parse-broadcast-schedule') {
+        proxyToExcelParser(req, res)
+        return
+      }
+
+      if (
+        pathname === '/graphql' ||
+        pathname.startsWith('/socket.io') ||
+        pathname.startsWith('/api/')
+      ) {
+        proxyToApi(req, res)
         return
       }
 

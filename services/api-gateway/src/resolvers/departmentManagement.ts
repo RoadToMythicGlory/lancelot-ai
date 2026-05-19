@@ -69,6 +69,20 @@ function toFormConfigDoc(doc: any) {
     hebrewName: obj.hebrewName ?? null,
     description: obj.description ?? null,
     departments: Array.isArray(obj.departments) ? obj.departments : [],
+    columns: Array.isArray(obj.columns)
+      ? obj.columns.map((c: any, i: number) => ({
+          key: c.key,
+          hebrewLabel: c.hebrewLabel,
+          englishLabel: c.englishLabel ?? null,
+          allowedDepartmentCodes: Array.isArray(c.allowedDepartmentCodes)
+            ? c.allowedDepartmentCodes
+            : [],
+          allowedUserIds: Array.isArray(c.allowedUserIds) ? c.allowedUserIds : [],
+          requireUser: !!c.requireUser,
+          defaultCount: typeof c.defaultCount === 'number' ? c.defaultCount : 1,
+          order: typeof c.order === 'number' ? c.order : i,
+        }))
+      : [],
     allowUserPresets: obj.allowUserPresets !== false,
     isActive: obj.isActive !== false,
     createdAt: obj.createdAt,
@@ -264,6 +278,20 @@ export const departmentManagementResolvers = {
         hebrewName: input.hebrewName,
         description: input.description,
         departments: Array.isArray(input.departments) ? input.departments : [],
+        columns: Array.isArray(input.columns)
+          ? input.columns.map((c: any, i: number) => ({
+              key: String(c.key || '').trim(),
+              hebrewLabel: String(c.hebrewLabel || '').trim(),
+              englishLabel: c.englishLabel ? String(c.englishLabel).trim() : undefined,
+              allowedDepartmentCodes: Array.isArray(c.allowedDepartmentCodes)
+                ? c.allowedDepartmentCodes
+                : [],
+              allowedUserIds: Array.isArray(c.allowedUserIds) ? c.allowedUserIds : [],
+              requireUser: !!c.requireUser,
+              defaultCount: typeof c.defaultCount === 'number' ? c.defaultCount : 1,
+              order: typeof c.order === 'number' ? c.order : i,
+            }))
+          : [],
         allowUserPresets: input.allowUserPresets !== false,
         isActive: input.isActive !== false,
       };

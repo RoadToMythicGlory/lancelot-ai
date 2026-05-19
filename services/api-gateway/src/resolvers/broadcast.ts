@@ -259,6 +259,68 @@ export const broadcastResolvers = {
       }
     },
 
+    /**
+     * Slim "all active equipment for pickers" projection. Necessary because
+     * the main `warehouseEquipment` query is hard-capped at 500 rows (it
+     * powers the warehouse list UI and never needs to dump the full
+     * collection), which silently truncated the Preset Items picker on
+     * Equipment Sets — the org has ~4,000 active items.
+     *
+     * This query only returns the small set of fields a Select option
+     * needs (id, name, category, quantityTotal, barcode, isDisabled,
+     * isQuantityBased) so the payload stays small even at the higher cap.
+     */
+    warehouseEquipmentForPicker: async (
+      _: any,
+      args: { search?: string | null },
+      context: any,
+    ) => {
+      try {
+        requirePermission(context, Permission.WAREHOUSE_VIEW);
+        await ensureMongoConnection();
+
+        const query: any = { isDisabled: { $ne: true } };
+        if (args?.search) {
+          const re = new RegExp(args.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+          query.$or = [{ name: re }, { barcode: re }, { equipmentModel: re }];
+        }
+
+        // 5000 keeps the per-item picker functional for the foreseeable
+        // future while still bounding worst-case payload. If/when the
+        // catalog passes this size, swap to a server-side searchable
+        // typeahead instead of raising it further.
+        const PICKER_LIMIT = 5000;
+        const items = await Equipment.find(query)
+          .select({
+            name: 1,
+            category: 1,
+            barcode: 1,
+            quantityTotal: 1,
+            isQuantityBased: 1,
+            isDisabled: 1,
+            company: 1,
+          })
+          .sort({ name: 1 })
+          .limit(PICKER_LIMIT)
+          .lean()
+          .exec();
+
+        return items.map((it: any) => ({
+          id: it._id.toString(),
+          name: it.name,
+          category: it.category,
+          barcode: it.barcode || null,
+          quantityTotal: it.quantityTotal ?? null,
+          isQuantityBased: !!it.isQuantityBased,
+          isDisabled: !!it.isDisabled,
+          brand: it.company || null,
+        }));
+      } catch (err) {
+        console.error('Error fetching warehouse equipment picker list:', err);
+        return [];
+      }
+    },
+
     warehouseEquipmentStats: async (_: any, { filter }: { filter?: any }, context: any) => {
       try {
         requirePermission(context, Permission.WAREHOUSE_VIEW);

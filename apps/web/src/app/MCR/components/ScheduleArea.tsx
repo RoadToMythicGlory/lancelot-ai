@@ -16,6 +16,8 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
+  CopyOutlined,
+  DeleteOutlined,
   DownloadOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
@@ -34,7 +36,7 @@ import {
   ACTIVITY_ROW_UPDATED_SUB,
   ACTIVITY_ROW_DELETED_SUB,
 } from '@/graphql/mcrQueries';
-import { SAVE_ACTIVITY_ROWS } from '@/graphql/mcrMutations';
+import { DELETE_ACTIVITY_ROW, SAVE_ACTIVITY_ROWS } from '@/graphql/mcrMutations';
 import type { ActivityRow, ActivityStatus, BroadcastType } from '../types';
 import {
   ACTIVITY_STATUS_COLORS,
@@ -100,6 +102,9 @@ const ScheduleArea: React.FC<Props> = ({ canManage }) => {
   const [saveRows, { loading: saving }] = useMutation(SAVE_ACTIVITY_ROWS, {
     refetchQueries: ['GetActivityRows'],
   });
+  const [deleteRow, { loading: deleting }] = useMutation(DELETE_ACTIVITY_ROW, {
+    refetchQueries: ['GetActivityRows'],
+  });
 
   // Live updates: any activity row change re-fetches the current day. We
   // intentionally refetch instead of patching the cache because the row
@@ -149,8 +154,52 @@ const ScheduleArea: React.FC<Props> = ({ canManage }) => {
     setRows((prev) => [...prev, makeEmpty(range.date)]);
   };
 
+  // Removes a row by its local id. Only valid for unsaved (`_isNew`) rows
+  // — persisted rows go through `deletePersistedRow` so the server copy
+  // is also removed.
   const removeRow = (id: string) => {
     setRows((prev) => prev.filter((r) => r._localId !== id));
+  };
+
+  const duplicateRow = (row: LocalRow) => {
+    const copy = makeEmpty(range.date);
+    copy.activityName = row.activityName;
+    copy.time = row.time;
+    copy.endTime = row.endTime;
+    copy.source = row.source;
+    copy.equipment = row.equipment;
+    copy.backup = row.backup;
+    copy.routing = row.routing;
+    copy.channel = row.channel;
+    copy.broadcastType = row.broadcastType;
+    copy.notes = row.notes;
+    copy.status = row.status || 'UNKNOWN';
+    copy.isHidden = false;
+    copy.isManual = true;
+    // Drop the broadcast link on the duplicate so it doesn't shadow the
+    // original row's link to a planner event.
+    copy.broadcastEventId = undefined as any;
+    setRows((prev) => {
+      const idx = prev.findIndex((r) => (r._localId || r.id) === (row._localId || row.id));
+      if (idx < 0) return [...prev, copy];
+      const next = [...prev];
+      next.splice(idx + 1, 0, copy);
+      return next;
+    });
+  };
+
+  const deletePersistedRow = async (row: LocalRow) => {
+    if (!row.id || row._isNew) {
+      removeRow(row._localId!);
+      return;
+    }
+    try {
+      await deleteRow({ variables: { id: row.id } });
+      setRows((prev) => prev.filter((r) => r.id !== row.id));
+      message.success('השורה נמחקה');
+    } catch (err: any) {
+      message.error('מחיקה נכשלה: ' + (err?.message || 'שגיאה לא ידועה'));
+    }
   };
 
   const handleSave = async () => {
@@ -370,7 +419,7 @@ const ScheduleArea: React.FC<Props> = ({ canManage }) => {
     {
       title: '',
       key: 'actions',
-      width: 80,
+      width: 130,
       align: 'center',
       render: (_, r) => (
         <Space size={2}>
@@ -383,18 +432,32 @@ const ScheduleArea: React.FC<Props> = ({ canManage }) => {
               onClick={() => updateRow(r._localId || r.id, { isHidden: !r.isHidden })}
             />
           </Tooltip>
-          {r._isNew && (
-            <Popconfirm
-              title="הסרת שורה חדשה?"
-              okText="כן"
-              cancelText="לא"
-              onConfirm={() => removeRow(r._localId!)}
-            >
-              <Button size="small" type="text" danger>
-                ✕
-              </Button>
-            </Popconfirm>
-          )}
+          <Tooltip title="שכפל שורה">
+            <Button
+              size="small"
+              type="text"
+              disabled={!canManage}
+              icon={<CopyOutlined />}
+              onClick={() => duplicateRow(r)}
+            />
+          </Tooltip>
+          <Popconfirm
+            title={r._isNew ? 'הסרת שורה חדשה?' : 'למחוק את השורה לצמיתות?'}
+            okText="כן"
+            cancelText="לא"
+            okButtonProps={{ danger: true, loading: deleting }}
+            onConfirm={() => (r._isNew ? removeRow(r._localId!) : deletePersistedRow(r))}
+          >
+            <Tooltip title="מחק שורה">
+              <Button
+                size="small"
+                type="text"
+                danger
+                disabled={!canManage}
+                icon={<DeleteOutlined />}
+              />
+            </Tooltip>
+          </Popconfirm>
         </Space>
       ),
     },

@@ -18,12 +18,13 @@ import isoWeek from 'dayjs/plugin/isoWeek';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { useQuery, useMutation } from '@apollo/client';
-import { GET_BROADCAST_EVENTS, GET_EMPLOYEES_BY_DEPARTMENT, GET_DEPARTMENTS, GET_EXTERNAL_BROADCAST_PRESETS } from '@/graphql/queries';
+import { GET_BROADCAST_EVENTS, GET_EMPLOYEES_BY_DEPARTMENT, GET_DEPARTMENTS, GET_EXTERNAL_BROADCAST_PRESETS, GET_VENUES } from '@/graphql/queries';
 import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA, CREATE_EXTERNAL_BROADCAST_PRESET, UPDATE_EXTERNAL_BROADCAST_PRESET, DELETE_EXTERNAL_BROADCAST_PRESET } from '@/graphql/mutations';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { Permission } from '@/rbac';
 import { useAuth } from '@/contexts/AuthContext';
 import DynamicDepartmentJobsPanel, { AssignmentJob } from '@/components/assignments/DynamicDepartmentJobsPanel';
+import VenuesManager from '@/components/externalBroadcasts/VenuesManager';
 
 dayjs.extend(isoWeek);
 dayjs.extend(utc);
@@ -224,6 +225,43 @@ const ExternalBroadcastsPage: React.FC = () => {
     fetchPolicy: 'cache-and-network',
   });
   const presets: Preset[] = presetsData?.externalBroadcastPresets || [];
+
+  const { data: venuesData } = useQuery(GET_VENUES, {
+    variables: { includeInactive: false },
+    fetchPolicy: 'cache-and-network',
+  });
+  const venues: any[] = venuesData?.venues || [];
+  const [selectedVenueId, setSelectedVenueId] = useState<string | null>(null);
+  const selectedVenue = useMemo(
+    () => venues.find((v) => v.id === selectedVenueId) || null,
+    [venues, selectedVenueId],
+  );
+  const venuePresets = useMemo(() => {
+    if (!selectedVenue) return [] as Preset[];
+    const allowed = new Set<string>(selectedVenue.equipmentPresetIds || []);
+    return presets.filter((p) => allowed.has(p.id));
+  }, [selectedVenue, presets]);
+
+  // Hydrate crew from a venue's saved structure. Each `job` becomes
+  // `count` empty slots in the existing crewAssignments shape so the
+  // operator only needs to assign the actual people.
+  const applyVenueCrewStructure = (structure: any) => {
+    if (!structure) return;
+    const newCrew: CrewAssignment[] = [];
+    for (const job of structure.jobs || []) {
+      for (let i = 0; i < (job.count || 1); i++) {
+        newCrew.push({
+          roleKey: job.roleKey || job.departmentCode || 'role',
+          roleLabel: job.roleLabel || job.departmentCode || 'תפקיד',
+          userId: '',
+          name: job.userName || '',
+          isCustom: !job.roleKey,
+        });
+      }
+    }
+    setCrewAssignments(newCrew);
+    messageApi.success(`מבנה צוות "${structure.name}" הוחל`);
+  };
 
   useEffect(() => {
     if (departmentsData?.departments) {
@@ -770,6 +808,24 @@ const ExternalBroadcastsPage: React.FC = () => {
         </Row>
       </Card>
 
+      {/* Venues / stadiums manager — collapsible so it doesn't push the
+          event list below the fold by default. */}
+      <Collapse
+        style={{ marginBottom: 16 }}
+        items={[
+          {
+            key: 'venues',
+            label: (
+              <Space>
+                <GlobalOutlined />
+                <span>אולמות / מקומות שידור</span>
+              </Space>
+            ),
+            children: <VenuesManager />,
+          },
+        ]}
+      />
+
       <Row gutter={16}>
         {/* ─── Left panel: Event list ─── */}
         <Col xs={24} lg={8}>
@@ -867,11 +923,61 @@ const ExternalBroadcastsPage: React.FC = () => {
                 </Row>
               </Card>
 
-              {/* Presets bar */}
+              {/* Venue picker — selecting a venue narrows the presets bar
+                  below to its linked equipment presets and exposes its
+                  pre-defined crew structures for one-click hydration. */}
+              <Card size="small" style={{ marginBottom: 8 }}>
+                <Row gutter={8} align="middle">
+                  <Col><Text strong>אולם:</Text></Col>
+                  <Col flex="200px">
+                    <Select
+                      placeholder="בחר אולם"
+                      value={selectedVenueId || undefined}
+                      onChange={(v) => setSelectedVenueId(v || null)}
+                      allowClear
+                      showSearch
+                      optionFilterProp="label"
+                      style={{ width: '100%' }}
+                      options={venues.map((v) => ({
+                        value: v.id,
+                        label: v.hebrewName || v.name,
+                      }))}
+                    />
+                  </Col>
+                  {selectedVenue && (
+                    <>
+                      <Col>
+                        <Text type="secondary">
+                          {selectedVenue.city || ''} {selectedVenue.address || ''}
+                        </Text>
+                      </Col>
+                      {(selectedVenue.crewStructures || []).map((s: any, i: number) => (
+                        <Col key={i}>
+                          <Button
+                            size="small"
+                            icon={<CopyOutlined />}
+                            onClick={() => applyVenueCrewStructure(s)}
+                          >
+                            {s.name}
+                          </Button>
+                        </Col>
+                      ))}
+                    </>
+                  )}
+                </Row>
+              </Card>
+
+              {/* Presets bar — if a venue is selected we show only its
+                  linked presets; otherwise we show every preset. */}
               <Card size="small" style={{ marginBottom: 16 }}>
                 <Row gutter={8} align="middle">
-                  <Col><Text strong>פריסטים:</Text></Col>
-                  {presets.map(p => (
+                  <Col><Text strong>פריסטים{selectedVenue ? ' (לפי אולם)' : ''}:</Text></Col>
+                  {(selectedVenue ? venuePresets : presets).length === 0 && selectedVenue && (
+                    <Col>
+                      <Text type="secondary">לאולם זה לא מקושרות תבניות ציוד</Text>
+                    </Col>
+                  )}
+                  {(selectedVenue ? venuePresets : presets).map(p => (
                     <Col key={p.id}>
                       <Tooltip title={p.description || `${p.roles.length} תפקידים, ${p.equipment.length} קטגוריות ציוד`}>
                         <Button size="small" icon={<CopyOutlined />} onClick={() => applyPreset(p)}>

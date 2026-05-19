@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import { BroadcastScheduleParser } from './broadcast-schedule-parser';
+import { BroadcastArrayParser } from './broadcast-array-parser';
 
 const app = express();
 
@@ -54,7 +55,7 @@ app.use(express.json({ limit: '1mb' }));
 
 // Optional shared-secret auth: when EXCEL_PARSER_API_KEY is set, every parse
 // request must present the same key in `x-api-key`. Recommended for production.
-app.use('/parse-broadcast-schedule', (req, res, next) => {
+function apiKeyGuard(req: express.Request, res: express.Response, next: express.NextFunction) {
   const expected = process.env.EXCEL_PARSER_API_KEY;
   if (!expected) return next();
   const provided = req.headers['x-api-key'];
@@ -62,7 +63,10 @@ app.use('/parse-broadcast-schedule', (req, res, next) => {
     return res.status(401).json({ success: false, error: 'Invalid API key' });
   }
   next();
-});
+}
+
+app.use('/parse-broadcast-schedule', apiKeyGuard);
+app.use('/parse-broadcast-array', apiKeyGuard);
 
 // Routes
 app.get('/health', (req, res) => {
@@ -134,6 +138,50 @@ app.post(
 }
 );
 
+// Parse broadcast ARRAY (weekly מערך) Excel file
+app.post(
+  '/parse-broadcast-array',
+  (req, res, next) => {
+    upload.single('file')(req, res, (err: any) => {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(413).json({ success: false, error: `File exceeds ${MAX_EXCEL_BYTES} bytes` });
+        }
+        return res.status(400).json({ success: false, error: err.message });
+      }
+      if (err) {
+        return res.status(400).json({ success: false, error: err.message || 'Upload failed' });
+      }
+      next();
+    });
+  },
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ success: false, error: 'No file uploaded' });
+      }
+      if (!req.file.buffer || req.file.buffer.length === 0) {
+        return res.status(400).json({ success: false, error: 'Empty file' });
+      }
+      const parser = new BroadcastArrayParser();
+      const result = parser.parseExcelFile(req.file.buffer);
+      res.json({
+        success: result.success,
+        rows: result.rows,
+        errors: result.errors,
+        weekHint: result.weekHint,
+        message: `Successfully parsed ${result.rows.length} broadcast-array rows`,
+      });
+    } catch (error) {
+      console.error('Error parsing broadcast array:', error);
+      const message = process.env.NODE_ENV === 'production'
+        ? 'Failed to parse Excel file'
+        : (error instanceof Error ? error.message : 'Unknown error');
+      res.status(500).json({ success: false, error: message });
+    }
+  },
+);
+
 app.post('/parse-hebrew-excel', (req, res) => {
   res.json({
     message: 'Hebrew Excel parsing endpoint ready',
@@ -146,6 +194,7 @@ app.listen(port, () => {
   console.log(`🚀 Excel Parser running on http://localhost:${port}`);
   console.log(`🔍 Health check: http://localhost:${port}/health`);
   console.log(`📊 Parse broadcast schedule: POST http://localhost:${port}/parse-broadcast-schedule`);
+  console.log(`🎬 Parse broadcast array:    POST http://localhost:${port}/parse-broadcast-array`);
 });
 
 export default app; 

@@ -94,8 +94,11 @@ export const config: AIConfig = {
   llm: {
     provider: (process.env.LLM_PROVIDER as 'ollama' | 'llamacpp') || 'ollama',
     baseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-    primaryModel: process.env.LLM_PRIMARY_MODEL || 'qwen2.5:7b',
-    hebrewModel: process.env.LLM_HEBREW_MODEL || 'qwen2.5:7b',
+    // aya-expanse:8b is Cohere's explicitly-multilingual model — handles both
+    // Hebrew and English without "language drift" (qwen2.5 leaks Chinese on
+    // ambiguous Hebrew prompts, which broke the chat assistant in prod).
+    primaryModel: process.env.LLM_PRIMARY_MODEL || 'aya-expanse:8b',
+    hebrewModel: process.env.LLM_HEBREW_MODEL || 'aya-expanse:8b',
     timeout: parseInt(process.env.LLM_TIMEOUT || '30000', 10),
     maxRetries: parseInt(process.env.LLM_MAX_RETRIES || '3', 10),
     temperature: parseFloat(process.env.LLM_TEMPERATURE || '0.7'),

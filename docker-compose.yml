@@ -92,18 +92,25 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       AI_AGENT_PORT: 4001
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      LLM_PRIMARY_MODEL: ${LLM_PRIMARY_MODEL:-llama3.1:8b-instruct-q4_K_M}
-      LLM_HEBREW_MODEL: ${LLM_HEBREW_MODEL:-qwen2.5:7b}
+      # aya-expanse:8b is multilingual (Hebrew + English) without Chinese drift.
+      # Override LLM_HEBREW_MODEL to e.g. dictalm2.0 if you want a Hebrew-fine-tuned model.
+      LLM_PRIMARY_MODEL: ${LLM_PRIMARY_MODEL:-aya-expanse:8b}
+      LLM_HEBREW_MODEL: ${LLM_HEBREW_MODEL:-aya-expanse:8b}
       MONGODB_URL: mongodb://${MONGO_USERNAME:?MONGO_USERNAME must be set in .env}:${MONGO_PASSWORD:?MONGO_PASSWORD must be set in .env}@mongodb:27017/broadcast?authSource=admin
       MONGO_DATABASE: broadcast
       SHIFT_SOLVER_ENGINE: ${SHIFT_SOLVER_ENGINE:-ortools}
       OR_TOOLS_SOLVER_URL: http://or-tools-solver:5003
       RSS_PIPELINE_ENABLED: "true"
+      # Curated markdown corpus indexed for help-search ("how do I..." Qs).
+      AI_KNOWLEDGE_DIR: ${AI_KNOWLEDGE_DIR:-/app/knowledge/user-manual}
     ports:
       - "4001:4001"
     depends_on:
       mongodb:
         condition: service_healthy
+    volumes:
+      # Mount the repo's user-manual read-only so the AI can RAG over it.
+      - ./docs/user-manual:/app/knowledge/user-manual:ro
     networks:
       - broadcast-network
     restart: unless-stopped

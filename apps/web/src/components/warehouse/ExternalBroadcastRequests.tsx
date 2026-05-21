@@ -9,6 +9,8 @@ import {
 import { useQuery, useMutation } from '@apollo/client';
 import { GET_EXTERNAL_BROADCAST_PRESETS, GET_WAREHOUSE_EQUIPMENT } from '@/graphql/queries';
 import { UPDATE_EXTERNAL_BROADCAST_PRESET } from '@/graphql/mutations';
+import WarehouseExportButtons from './WarehouseExportButtons';
+import type { ExportColumn, ExportReport } from '@/utils/warehouseReportExport';
 
 const { Text } = Typography;
 const { Option } = Select;
@@ -160,11 +162,184 @@ const ExternalBroadcastRequests: React.FC<Props> = ({ message, canManage = false
     setAssignments({});
   };
 
+  /** Build a two-track report:
+   *
+   *  1. Preset catalog – one row per preset with its category mix.
+   *  2. Assignment matrix – grouped by preset, one row per unit slot.
+   *
+   *  Unsaved local overrides (`assignments` state) are merged in so the
+   *  export reflects the operator's current screen state, not just the
+   *  last-saved version. */
+  const buildReport = (): ExportReport | null => {
+    if (presetsWithEquipment.length === 0) return null;
+
+    type PresetRow = {
+      name: string;
+      description: string;
+      tags: string;
+      totalUnits: number;
+      assignedUnits: number;
+      categories: string;
+    };
+
+    type UnitRow = {
+      unitNumber: number;
+      purpose: string;
+      audio: string;
+      assignedName: string;
+      pending: boolean;
+    };
+
+    const presetRows: PresetRow[] = presetsWithEquipment.map((p) => {
+      const totalUnits = p.equipment.reduce((s, e) => s + e.count, 0);
+      const assignedUnits = p.equipment.reduce(
+        (s, e) => s + (e.unitSettings?.filter((u) => u.assignedEquipmentId)?.length || 0),
+        0,
+      );
+      const categories = p.equipment
+        .map((e) => `${e.categoryLabel} ×${e.count}`)
+        .join(' · ');
+      return {
+        name: p.name,
+        description: p.description || '',
+        tags: (p.tags || []).join(', '),
+        totalUnits,
+        assignedUnits,
+        categories,
+      };
+    });
+
+    const presetCols: ExportColumn<PresetRow>[] = [
+      { key: 'name', label: 'פריסט', emphasis: true, value: (r) => r.name },
+      { key: 'description', label: 'תיאור', value: (r) => r.description },
+      { key: 'tags', label: 'תגיות', value: (r) => r.tags },
+      { key: 'categories', label: 'דרישות', value: (r) => r.categories },
+      { key: 'total', label: 'יחידות', numeric: true, value: (r) => r.totalUnits },
+      { key: 'assigned', label: 'הוקצו', numeric: true, value: (r) => r.assignedUnits },
+      {
+        key: 'fulfillment',
+        label: 'מצב',
+        value: (r) => `${r.assignedUnits}/${r.totalUnits}`,
+        status: (r) => {
+          if (r.assignedUnits >= r.totalUnits && r.totalUnits > 0)
+            return { label: 'הוקצה במלואו', variant: 'active' };
+          if (r.assignedUnits > 0) return { label: 'הוקצה חלקית', variant: 'warn' };
+          return { label: 'טרם הוקצה', variant: 'neutral' };
+        },
+      },
+    ];
+
+    const unitCols: ExportColumn<UnitRow>[] = [
+      { key: 'unit', label: 'יחידה', numeric: true, value: (r) => r.unitNumber },
+      { key: 'purpose', label: 'ייעוד', value: (r) => r.purpose || '' },
+      { key: 'audio', label: 'אודיו', value: (r) => r.audio || '' },
+      {
+        key: 'assigned',
+        label: 'ציוד שהוקצה',
+        emphasis: true,
+        value: (r) => r.assignedName || '',
+        status: (r) =>
+          r.assignedName
+            ? {
+                label: r.pending ? 'ממתין לשמירה' : 'הוקצה',
+                variant: r.pending ? 'warn' : 'active',
+              }
+            : { label: 'טרם הוקצה', variant: 'neutral' },
+      },
+    ];
+
+    const groups = presetsWithEquipment
+      .map((p) => {
+        const rows: UnitRow[] = [];
+        let unitNumber = 1;
+        p.equipment.forEach((eq) => {
+          const localCat = assignments[eq.category] || {};
+          for (let idx = 0; idx < eq.count; idx += 1) {
+            const saved = eq.unitSettings?.find((u) => u.unitIndex === idx);
+            const local = localCat[idx];
+            const assignedName = local?.name || saved?.assignedEquipmentName || '';
+            rows.push({
+              unitNumber: unitNumber++,
+              purpose: `${eq.categoryLabel}${saved?.purpose ? ` · ${saved.purpose}` : ''}`,
+              audio: saved?.audioConfig || '',
+              assignedName,
+              pending: !!local,
+            });
+          }
+        });
+        const totalUnits = p.equipment.reduce((s, e) => s + e.count, 0);
+        const assignedUnits = rows.filter((r) => r.assignedName).length;
+        return {
+          key: p.id,
+          title: p.name,
+          subtitle: p.description || '',
+          secondary: (p.tags || []).join(' · '),
+          badge: `${assignedUnits}/${totalUnits} הוקצו`,
+          rows,
+        };
+      })
+      .filter((g) => g.rows.length > 0);
+
+    const hasPending = Object.keys(assignments).length > 0;
+    const chips: string[] = [];
+    if (hasPending) chips.push('כולל שינויים שלא נשמרו');
+    if (selectedPreset) chips.push(`נבחר: ${selectedPreset.name}`);
+
+    return {
+      title: 'דוח שידורי חוץ – הקצאות ציוד',
+      subtitle:
+        'רשימת הפריסטים המכילים דרישות ציוד, כולל מצב הקצאה מפורט לכל יחידה.',
+      filenameStem: 'מחסן-שידורי-חוץ',
+      origin: 'מחסן · שידורי חוץ',
+      metaChips: chips,
+      summary: [
+        { label: 'פריסטים', value: presetsWithEquipment.length, accent: 'requests' },
+        {
+          label: 'סה״כ יחידות',
+          value: presetRows.reduce((s, r) => s + r.totalUnits, 0),
+          accent: 'warehouse',
+        },
+        {
+          label: 'יחידות שהוקצו',
+          value: presetRows.reduce((s, r) => s + r.assignedUnits, 0),
+          accent: 'events',
+        },
+      ],
+      sections: [
+        {
+          kind: 'table',
+          key: 'preset-summary',
+          title: 'סיכום פריסטים',
+          accent: 'requests',
+          meta: `${presetRows.length} פריסטים`,
+          columns: presetCols,
+          rows: presetRows,
+        },
+        {
+          kind: 'grouped',
+          key: 'preset-units',
+          title: 'הקצאות ליחידות',
+          accent: 'staff',
+          meta: `${groups.reduce((n, g) => n + g.rows.length, 0)} יחידות`,
+          columns: unitCols,
+          groups,
+          emptyText: 'אין פריסטים עם הקצאות',
+        },
+      ],
+    };
+  };
+
   if (presetsLoading) return <Spin size="large" style={{ display: 'block', textAlign: 'center', padding: 40 }} />;
   if (presetsError) return <Alert message="שגיאה בטעינת פריסטים" type="error" showIcon />;
 
   return (
     <div style={{ direction: 'rtl' }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <WarehouseExportButtons
+          buildReport={buildReport}
+          disabled={presetsLoading || presetsWithEquipment.length === 0}
+        />
+      </div>
       <Row gutter={16}>
         {/* Preset list */}
         <Col xs={24} lg={8}>

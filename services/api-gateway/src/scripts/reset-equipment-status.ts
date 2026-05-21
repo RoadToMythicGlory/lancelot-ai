@@ -1,48 +1,97 @@
 import mongoose from 'mongoose';
-import { Equipment } from '../models/equipment.models';
+import { Equipment, EquipmentAssignment } from '../models/equipment.models';
+import { InternalEquipmentAssignment } from '../models/internalEquipmentAssignment.models';
 
+// One-shot "make everything available and unassigned" reset.
+//
+// This script is intentionally bulky: in addition to flipping the
+// per-equipment `status`, it also closes out any *active* event-based and
+// internal assignment rows so the UI (warehouse / internal / event screens)
+// doesn't keep showing stale "currently checked out" lines that have no
+// matching quantity on the equipment doc.
+//
+// Run with:    npx ts-node src/scripts/reset-equipment-status.ts
+// or:          npm run reset:equipment   (if the script is wired into package.json)
 async function resetEquipmentStatuses() {
+  const startedAt = Date.now();
   try {
-    // Connect to MongoDB
     const mongoUrl = process.env.MONGODB_URL || 'mongodb://127.0.0.1:27017/broadcast';
     await mongoose.connect(mongoUrl);
-    console.log('✅ Connected to MongoDB');
+    console.log(`✅ Connected to MongoDB at ${mongoUrl.replace(/:[^:@]+@/, ':***@')}`);
 
-    // Find all equipment
-    const allEquipment = await Equipment.find({});
-    console.log(`📦 Found ${allEquipment.length} equipment items to reset`);
+    const equipmentCount = await Equipment.countDocuments({});
+    const activeEventAssignments = await EquipmentAssignment.countDocuments({ status: 'active' });
+    const activeInternalAssignments = await InternalEquipmentAssignment.countDocuments({ status: 'active' });
 
-    let updatedCount = 0;
-    for (const equipment of allEquipment) {
-      // Reset status to available
-      equipment.status = 'available';
-      
-      // Reset quantities - make all quantity available
-      equipment.quantityAvailable = equipment.quantityTotal;
-      equipment.quantityAssigned = 0;
-      
-      // Clear current location if it was set to an event
-      if (equipment.currentLocation && equipment.currentLocation.includes('אירוע')) {
-        equipment.currentLocation = equipment.storage ? 
-          `${equipment.storage.row || ''} ${equipment.storage.shelf || ''} ${equipment.storage.cell || ''}`.trim() : 
-          undefined;
-      }
-      
-      await equipment.save();
-      updatedCount++;
-      console.log(`✅ Reset: ${equipment.name} (${equipment.barcode}) - Status: available, Available: ${equipment.quantityAvailable}/${equipment.quantityTotal}`);
-    }
+    console.log(
+      `📦 Found ${equipmentCount} equipment items, ${activeEventAssignments} active event ` +
+        `assignments, and ${activeInternalAssignments} active internal assignments to reset.`,
+    );
 
-    console.log(`\n✅ Successfully reset ${updatedCount} equipment items`);
-    console.log('All equipment statuses have been reset to "available"');
-    console.log('All quantities have been reset (Available = Total, Assigned = 0)');
+    // 1. Equipment — single bulk pass using an aggregation-pipeline update so
+    //    we can set `quantityAvailable` from `quantityTotal` per-document
+    //    without N round trips. Pre-save hooks are skipped (this is direct
+    //    update), which is fine: we set every relevant field explicitly.
+    const equipmentResult = await Equipment.updateMany({}, [
+      {
+        $set: {
+          status: 'available',
+          quantityAssigned: 0,
+          quantityAvailable: '$quantityTotal',
+          currentLocation: null,
+        },
+      },
+    ]);
+    console.log(
+      `✅ Equipment: matched=${equipmentResult.matchedCount}, modified=${equipmentResult.modifiedCount}`,
+    );
 
+    // 2. Close out active event-based assignments — mark completed and stamp
+    //    a return so the row stops showing in "currently checked out" lists.
+    const now = new Date();
+    const eventResult = await EquipmentAssignment.updateMany(
+      { status: 'active' },
+      {
+        $set: {
+          status: 'completed',
+          returnedAt: now,
+          returnedByName: 'Bulk reset',
+          notes: 'Closed by reset-equipment-status admin script',
+        },
+      },
+    );
+    console.log(
+      `✅ Event assignments closed: matched=${eventResult.matchedCount}, modified=${eventResult.modifiedCount}`,
+    );
+
+    // 3. Close out active internal (worker) assignments.
+    const internalResult = await InternalEquipmentAssignment.updateMany(
+      { status: 'active' },
+      {
+        $set: {
+          status: 'returned',
+          returnedAt: now,
+          returnedByName: 'Bulk reset',
+          returnNotes: 'Closed by reset-equipment-status admin script',
+        },
+      },
+    );
+    console.log(
+      `✅ Internal assignments closed: matched=${internalResult.matchedCount}, modified=${internalResult.modifiedCount}`,
+    );
+
+    const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+    console.log(
+      `\n🎉 Reset complete in ${elapsed}s. All equipment is now status="available", ` +
+        `quantityAssigned=0, quantityAvailable=quantityTotal. No active assignment rows remain.`,
+    );
   } catch (error) {
     console.error('❌ Error resetting equipment statuses:', error);
+    process.exitCode = 1;
   } finally {
-    process.exit(0);
+    await mongoose.disconnect().catch(() => {});
+    process.exit(process.exitCode ?? 0);
   }
 }
 
-// Run the script
-resetEquipmentStatuses(); 
+resetEquipmentStatuses();

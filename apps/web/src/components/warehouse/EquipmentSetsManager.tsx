@@ -9,6 +9,8 @@ import { PlusOutlined, EditOutlined, DeleteOutlined, BarcodeOutlined } from '@an
 import { useQuery, useMutation } from '@apollo/client';
 import { GET_EQUIPMENT_SETS, GET_WAREHOUSE_EQUIPMENT_FOR_PICKER } from '../../graphql/queries';
 import { CREATE_EQUIPMENT_SET, UPDATE_EQUIPMENT_SET, DELETE_EQUIPMENT_SET } from '../../graphql/mutations';
+import WarehouseExportButtons from './WarehouseExportButtons';
+import type { ExportColumn, ExportReport } from '@/utils/warehouseReportExport';
 
 const EQUIPMENT_CATEGORIES: Record<string, string> = {
   cameras: 'מצלמות',
@@ -248,6 +250,126 @@ const EquipmentSetsManager: React.FC<EquipmentSetsManagerProps> = ({ canManage =
     label: `${eq.name} (${EQUIPMENT_CATEGORIES[eq.category] || eq.category}) — ${eq.barcode}`,
   }));
 
+  /** Build a report with two views of the same data: a "Sets" summary
+   *  (one row per set) and a flat "Items" table (one row per item × set)
+   *  so the export is useful both for a high-level audit and a detailed
+   *  pick list. */
+  const buildReport = (): ExportReport | null => {
+    if (filteredSets.length === 0) return null;
+
+    type SetRow = {
+      id: string;
+      name: string;
+      barcode: string;
+      description?: string;
+      isActive: boolean;
+      itemCount: number;
+    };
+    type ItemRow = {
+      setName: string;
+      setBarcode: string;
+      equipmentName: string;
+      equipmentBarcode: string;
+      category: string;
+      quantity: number;
+      required: boolean;
+    };
+
+    const setRows: SetRow[] = filteredSets.map((s: any) => ({
+      id: s.id,
+      name: s.name,
+      barcode: s.barcode,
+      description: s.description,
+      isActive: s.isActive !== false,
+      itemCount: s.items?.length || 0,
+    }));
+
+    const itemRows: ItemRow[] = [];
+    filteredSets.forEach((s: any) => {
+      (s.items || []).forEach((it: any) => {
+        itemRows.push({
+          setName: s.name,
+          setBarcode: s.barcode,
+          equipmentName: it.equipment?.name || it.equipmentId,
+          equipmentBarcode: it.equipment?.barcode || '',
+          category:
+            EQUIPMENT_CATEGORIES[it.equipment?.category] ||
+            it.equipment?.category ||
+            '',
+          quantity: it.quantity || 0,
+          required: !!it.required,
+        });
+      });
+    });
+
+    const setCols: ExportColumn<SetRow>[] = [
+      { key: 'name', label: 'שם הסט', emphasis: true, value: (r) => r.name },
+      { key: 'barcode', label: 'ברקוד', code: true, value: (r) => r.barcode },
+      { key: 'itemCount', label: 'מס׳ פריטים', numeric: true, value: (r) => r.itemCount },
+      { key: 'description', label: 'תיאור', value: (r) => r.description || '' },
+      {
+        key: 'status',
+        label: 'סטטוס',
+        value: (r) => (r.isActive ? 'פעיל' : 'לא פעיל'),
+        status: (r) =>
+          r.isActive
+            ? { label: 'פעיל', variant: 'active' }
+            : { label: 'לא פעיל', variant: 'danger' },
+      },
+    ];
+
+    const itemCols: ExportColumn<ItemRow>[] = [
+      { key: 'setName', label: 'סט', emphasis: true, value: (r) => r.setName },
+      { key: 'setBarcode', label: 'ברקוד סט', code: true, value: (r) => r.setBarcode },
+      { key: 'equipmentName', label: 'שם ציוד', value: (r) => r.equipmentName },
+      { key: 'equipmentBarcode', label: 'ברקוד ציוד', code: true, value: (r) => r.equipmentBarcode },
+      { key: 'category', label: 'קטגוריה', value: (r) => r.category },
+      { key: 'quantity', label: 'כמות', numeric: true, value: (r) => r.quantity },
+      {
+        key: 'required',
+        label: 'חובה',
+        value: (r) => (r.required ? 'חובה' : 'אופציונלי'),
+        status: (r) =>
+          r.required
+            ? { label: 'חובה', variant: 'danger' }
+            : { label: 'אופציונלי', variant: 'neutral' },
+      },
+    ];
+
+    return {
+      title: 'דוח סטים של ציוד',
+      subtitle: 'רשימת הסטים המוגדרים במערכת והפריטים הכלולים בכל אחד.',
+      filenameStem: 'מחסן-סטים',
+      origin: 'מחסן · סטים',
+      metaChips: searchText.trim() ? [`חיפוש: ${searchText.trim()}`] : undefined,
+      summary: [
+        { label: 'סה״כ סטים', value: filteredSets.length, accent: 'sets' },
+        { label: 'סה״כ פריטים', value: itemRows.length, accent: 'warehouse' },
+      ],
+      sections: [
+        {
+          kind: 'table',
+          key: 'sets',
+          title: 'סטים',
+          accent: 'sets',
+          meta: `${setRows.length} סטים`,
+          columns: setCols,
+          rows: setRows,
+        },
+        {
+          kind: 'table',
+          key: 'items',
+          title: 'פירוט פריטים',
+          accent: 'warehouse',
+          meta: `${itemRows.length} שורות`,
+          columns: itemCols,
+          rows: itemRows,
+          emptyText: 'אין פריטים בסטים שנבחרו',
+        },
+      ],
+    };
+  };
+
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
@@ -258,11 +380,17 @@ const EquipmentSetsManager: React.FC<EquipmentSetsManagerProps> = ({ canManage =
           onChange={(e) => setSearchText(e.target.value)}
           allowClear
         />
-        {canManage && (
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenCreate}>
-            צור סט חדש
-          </Button>
-        )}
+        <Space>
+          <WarehouseExportButtons
+            buildReport={buildReport}
+            disabled={setsLoading || filteredSets.length === 0}
+          />
+          {canManage && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenCreate}>
+              צור סט חדש
+            </Button>
+          )}
+        </Space>
       </div>
 
       <Table

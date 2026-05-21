@@ -14,7 +14,6 @@ import {
   ToolOutlined,
   HistoryOutlined,
   CalendarOutlined,
-  DownloadOutlined,
   ExclamationCircleOutlined,
   PhoneOutlined,
   FilePdfOutlined,

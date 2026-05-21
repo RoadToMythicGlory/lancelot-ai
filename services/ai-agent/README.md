@@ -49,18 +49,24 @@ The AI Agent requires Ollama running locally with a compatible model:
 # Install Ollama
 curl -fsSL https://ollama.com/install.sh | sh
 
-# Pull the recommended chat model
-ollama pull llama3.1:8b-instruct-q4_K_M
+# Pull the recommended chat model — Cohere Aya Expanse is multilingual
+# (Hebrew + English first-class, zero Chinese drift).
+ollama pull aya-expanse:8b
 
-# For Hebrew support
-ollama pull qwen2.5:7b
-
-# Required for the new RAG help/preset search (small ~270MB embedding model)
+# Required for the RAG help/preset search (small ~270MB embedding model)
 ollama pull nomic-embed-text
 
 # Verify Ollama is running
 curl http://localhost:11434/api/tags
 ```
+
+> **Why `aya-expanse:8b`?** The previous default (`qwen2.5:7b`) is heavily
+> trained on Chinese and was observed to "leak" Chinese characters into
+> Hebrew responses on ambiguous prompts. Aya Expanse 8B (Cohere) is
+> explicitly multilingual across 23 languages including Hebrew, so the
+> chat assistant stays in Hebrew when the user writes Hebrew. If you
+> already have `llama3.1:8b-instruct-q4_K_M` pulled it also works well
+> for English; just override `LLM_PRIMARY_MODEL`.
 
 > The agent will fall back to a deterministic trigram-hash embedder when
 > `nomic-embed-text` is unavailable, so search will still function — but
@@ -73,8 +79,8 @@ curl http://localhost:11434/api/tags
 |----------|---------|-------------|
 | `AI_AGENT_PORT` | `4001` | Service port |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API URL |
-| `LLM_PRIMARY_MODEL` | `qwen2.5:7b` | Primary LLM model |
-| `LLM_HEBREW_MODEL` | `qwen2.5:7b` | Model for Hebrew content |
+| `LLM_PRIMARY_MODEL` | `aya-expanse:8b` | Primary LLM model (multilingual) |
+| `LLM_HEBREW_MODEL` | `aya-expanse:8b` | Model used when the prompt contains Hebrew |
 | `LLM_TIMEOUT` | `30000` | LLM request timeout (ms) |
 | `LLM_TEMPERATURE` | `0.7` | Generation temperature |
 | `MONGODB_URL` | - | MongoDB connection URL |
@@ -87,7 +93,7 @@ curl http://localhost:11434/api/tags
 | `EMBEDDING_MODEL` | `nomic-embed-text` | Local Ollama model used for text embeddings |
 | `AI_INDEX_REFRESH_MS` | `600000` (10 min) | Interval for re-indexing help articles + presets |
 | `AI_HELP_COLLECTION_NAME` | `helparticles` | Mongo collection storing help-center articles |
-| `AI_KNOWLEDGE_DIR` | _(unset)_ | Optional folder of `.md` files to index alongside DB articles |
+| `AI_KNOWLEDGE_DIR` | _(unset)_ | Folder of `.md` files indexed for help-search. Recommended: `../../docs/user-manual` for local dev, `/app/knowledge/user-manual` in Docker (already wired in `docker-compose.yml`). |
 | `AI_PERSIST_EMBEDDINGS` | `true` | Cache embeddings in Mongo so restarts don't re-embed |
 | `AI_VECTOR_INDEX_COLLECTION` | `aiVectorIndex` | Mongo collection for persisted vectors |
 

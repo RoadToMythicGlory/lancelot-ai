@@ -15,6 +15,8 @@ import { GET_TRACKER_SITES, GET_TRACKER_TAGS, GET_TRACKER_LATEST_POSITIONS, TRAC
 import dynamic from 'next/dynamic';
 import FieldMap from './FieldMap';
 import TrackerSiteAdmin from './TrackerSiteAdmin';
+import WarehouseExportButtons from '../WarehouseExportButtons';
+import type { ExportColumn, ExportReport } from '@/utils/warehouseReportExport';
 
 // react-konva requires browser-only APIs — load FloorPlanMap with SSR disabled
 const FloorPlanMap = dynamic(() => import('./FloorPlanMap'), {
@@ -137,6 +139,180 @@ const EquipmentLiveTracking: React.FC = () => {
 
   const activeSite = sites.find((s: any) => s.id === activeSiteId);
 
+  /** Build the live-tracking report. Mirrors what the user sees in the
+   *  current view: the filtered tag sidebar, plus a positions table
+   *  split into indoor/outdoor sections. The "פעיל/חודר/בשטח" status
+   *  classification matches the badge logic in the sidebar so the export
+   *  is a faithful snapshot of the screen. */
+  const buildReport = (): ExportReport | null => {
+    if (filteredTags.length === 0 && mergedPositions.length === 0) return null;
+
+    const isStale = (lastSeenAt?: string) => {
+      if (!lastSeenAt) return true;
+      return dayjs().diff(dayjs(lastSeenAt), 'minute') > 5;
+    };
+
+    const tagCols: ExportColumn<TrackerTagItem>[] = [
+      {
+        key: 'name',
+        label: 'תגית',
+        emphasis: true,
+        value: (r) => r.equipmentName || r.label,
+      },
+      { key: 'ble', label: 'BLE', code: true, value: (r) => r.bleAddress },
+      {
+        key: 'status',
+        label: 'מצב',
+        value: (r) => {
+          const stale = isStale(r.lastSeenAt);
+          if (stale) return 'לא עדכני';
+          const pos = r.latestPosition || mergedPositions.find((p) => p.tagId === r.id);
+          if (!pos) return 'ללא מיקום';
+          return pos.kind === 'indoor' ? 'במחסן' : pos.kind === 'outdoor' ? 'בשטח' : 'לא עדכני';
+        },
+        status: (r) => {
+          const stale = isStale(r.lastSeenAt);
+          if (stale) return { label: 'לא עדכני', variant: 'neutral' };
+          const pos = r.latestPosition || mergedPositions.find((p) => p.tagId === r.id);
+          if (!pos) return { label: 'ללא מיקום', variant: 'neutral' };
+          return pos.kind === 'indoor'
+            ? { label: 'במחסן', variant: 'active' }
+            : pos.kind === 'outdoor'
+              ? { label: 'בשטח', variant: 'warn' }
+              : { label: 'לא עדכני', variant: 'neutral' };
+        },
+      },
+      {
+        key: 'zone',
+        label: 'אזור',
+        value: (r) => {
+          const pos = r.latestPosition || mergedPositions.find((p) => p.tagId === r.id);
+          return pos?.zoneName || '';
+        },
+      },
+      {
+        key: 'battery',
+        label: 'סוללה',
+        numeric: true,
+        value: (r) => (r.lastBattery != null ? `${r.lastBattery}%` : ''),
+      },
+      {
+        key: 'temperature',
+        label: 'טמפ׳',
+        numeric: true,
+        value: (r) => (r.lastTemperature != null ? `${r.lastTemperature}°C` : ''),
+      },
+      {
+        key: 'lastSeen',
+        label: 'נראה לאחרונה',
+        value: (r) =>
+          r.lastSeenAt && dayjs(r.lastSeenAt).isValid()
+            ? dayjs(r.lastSeenAt).format('DD/MM/YYYY HH:mm')
+            : '',
+      },
+    ];
+
+    const positionCols: ExportColumn<TrackerPosition>[] = [
+      { key: 'label', label: 'תגית', value: (r) => r.label || r.tagId },
+      { key: 'tagId', label: 'מזהה תגית', code: true, value: (r) => r.tagId },
+      {
+        key: 'kind',
+        label: 'סוג',
+        value: (r) =>
+          r.kind === 'indoor' ? 'פנים' : r.kind === 'outdoor' ? 'חוץ' : 'לא עדכני',
+        status: (r) =>
+          r.kind === 'indoor'
+            ? { label: 'פנים', variant: 'active' }
+            : r.kind === 'outdoor'
+              ? { label: 'חוץ', variant: 'warn' }
+              : { label: 'לא עדכני', variant: 'neutral' },
+      },
+      { key: 'zone', label: 'אזור', value: (r) => r.zoneName || '' },
+      { key: 'gateway', label: 'גייטוויי', value: (r) => r.gatewayName || r.gatewayId },
+      {
+        key: 'coords',
+        label: 'קואורדינטות',
+        value: (r) =>
+          r.lat != null && r.lng != null
+            ? `${r.lat.toFixed(5)}, ${r.lng.toFixed(5)}`
+            : r.x != null && r.y != null
+              ? `(${r.x.toFixed(2)}, ${r.y.toFixed(2)})`
+              : '',
+      },
+      {
+        key: 'rssi',
+        label: 'RSSI',
+        numeric: true,
+        value: (r) => (r.rssi != null ? r.rssi : ''),
+      },
+      {
+        key: 'confidence',
+        label: 'ביטחון',
+        numeric: true,
+        value: (r) => (r.confidence != null ? `${Math.round(r.confidence * 100)}%` : ''),
+      },
+      {
+        key: 'computedAt',
+        label: 'עודכן',
+        value: (r) =>
+          r.computedAt && dayjs(r.computedAt).isValid()
+            ? dayjs(r.computedAt).format('DD/MM/YYYY HH:mm:ss')
+            : '',
+      },
+    ];
+
+    const chips: string[] = [
+      viewMode === 'warehouse' ? 'תצוגה: מחסן' : 'תצוגה: בשטח',
+    ];
+    if (viewMode === 'warehouse' && activeSite) chips.push(`אתר: ${activeSite.name}`);
+    if (searchText.trim()) chips.push(`חיפוש: ${searchText.trim()}`);
+
+    return {
+      title: 'דוח מעקב חי',
+      subtitle: 'מצב התגיות והמיקומים האחרונים שהוצגו במסך המעקב.',
+      filenameStem: 'מחסן-מעקב-חי',
+      origin: 'מחסן · מעקב חי',
+      metaChips: chips,
+      summary: [
+        { label: 'תגיות מסוננות', value: filteredTags.length, accent: 'tracking' },
+        { label: 'במחסן', value: indoorPositions.length, accent: 'warehouse' },
+        { label: 'בשטח', value: outdoorPositions.length, accent: 'staff' },
+      ],
+      sections: [
+        {
+          kind: 'table',
+          key: 'tags',
+          title: 'תגיות',
+          accent: 'tracking',
+          meta: `${filteredTags.length} תגיות`,
+          columns: tagCols,
+          rows: filteredTags,
+          emptyText: 'אין תגיות תואמות',
+        },
+        {
+          kind: 'table',
+          key: 'indoor',
+          title: 'מיקומי פנים',
+          accent: 'warehouse',
+          meta: `${indoorPositions.length} שורות`,
+          columns: positionCols,
+          rows: indoorPositions,
+          emptyText: 'אין מיקומי פנים',
+        },
+        {
+          kind: 'table',
+          key: 'outdoor',
+          title: 'מיקומי שטח',
+          accent: 'staff',
+          meta: `${outdoorPositions.length} שורות`,
+          columns: positionCols,
+          rows: outdoorPositions,
+          emptyText: 'אין מיקומי שטח',
+        },
+      ],
+    };
+  };
+
   if (viewMode === 'admin') {
     return (
       <div>
@@ -172,6 +348,11 @@ const EquipmentLiveTracking: React.FC = () => {
           <Tag color="blue">{mergedPositions.length} תגיות פעילות</Tag>
           <Tag color="green">{indoorPositions.length} במחסן</Tag>
           <Tag color="orange">{outdoorPositions.length} בשטח</Tag>
+          <WarehouseExportButtons
+            buildReport={buildReport}
+            disabled={tagsLoading || (filteredTags.length === 0 && mergedPositions.length === 0)}
+            size="small"
+          />
           <Button icon={<ReloadOutlined />} size="small" onClick={() => refetchTags()}>
             רענן
           </Button>

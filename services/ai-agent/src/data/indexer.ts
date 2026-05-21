@@ -150,25 +150,47 @@ export async function reindexAll(): Promise<IndexerStats> {
     }
 
     // ── Curated markdown knowledge files (optional) ──────────────
+    // Indexed alongside Mongo `helparticles` so the same RAG tool can
+    // serve both DB-backed and repo-backed documentation (e.g.
+    // docs/user-manual/05-broadcast-planning.md).
     try {
       const dir = config.knowledge.knowledgeDir;
-      if (dir && fs.existsSync(dir)) {
-        const files = fs.readdirSync(dir).filter((f) => f.endsWith('.md'));
+      const resolvedDir = dir ? path.resolve(dir) : undefined;
+      if (resolvedDir && fs.existsSync(resolvedDir)) {
+        const files = fs
+          .readdirSync(resolvedDir)
+          .filter((f) => f.endsWith('.md') && !f.startsWith('_'));
         for (const file of files) {
-          const fullPath = path.join(dir, file);
-          const content = fs.readFileSync(fullPath, 'utf-8');
+          const fullPath = path.join(resolvedDir, file);
+          const raw = fs.readFileSync(fullPath, 'utf-8');
+          const title = extractMarkdownTitle(raw) || file.replace(/\.md$/, '');
+          const slug = file.replace(/\.md$/, '');
+          // Prepend an explicit title line so the embedding model gets a
+          // strong signal about what the chunk is about.
           docs.push({
             id: `knowledge:${file}`,
             source: 'knowledge_file',
-            content: `${file}\n\n${content}`,
+            content: `${title}\n\n${raw}`,
             metadata: {
               source: 'knowledge_file',
               filename: file,
               path: fullPath,
+              slug,
+              title,
+              category: 'user_manual',
             },
           });
         }
         stats.knowledgeFiles = files.length;
+        logger.info('Indexer: loaded knowledge files', {
+          dir: resolvedDir,
+          count: files.length,
+        });
+      } else if (dir) {
+        logger.warn('Indexer: AI_KNOWLEDGE_DIR set but path not found', {
+          dir,
+          resolved: resolvedDir,
+        });
       }
     } catch (err) {
       logger.warn('Indexer: knowledge files failed', { error: (err as Error).message });
@@ -354,6 +376,30 @@ async function persistVectors(vectors: PersistedVector[]): Promise<void> {
 
 function sha256(s: string): string {
   return crypto.createHash('sha256').update(s, 'utf8').digest('hex');
+}
+
+/**
+ * Pull the first `# Heading` line from a markdown file. Used to give curated
+ * knowledge files a real title in citations instead of the raw filename.
+ */
+function extractMarkdownTitle(content: string): string | null {
+  // Strip a YAML frontmatter block if present.
+  let body = content;
+  if (body.startsWith('---')) {
+    const end = body.indexOf('\n---', 3);
+    if (end !== -1) body = body.slice(end + 4);
+  }
+  const lines = body.split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('# ')) {
+      return trimmed.slice(2).trim();
+    }
+    // Stop scanning after the first ~20 non-empty lines — titles always
+    // appear near the top.
+    if (trimmed.length > 0 && !trimmed.startsWith('#')) break;
+  }
+  return null;
 }
 
 export default {

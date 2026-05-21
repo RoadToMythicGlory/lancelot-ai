@@ -175,9 +175,24 @@ class InMemoryVectorStore {
     source: string,
     topK: number = 5,
   ): SearchResult[] {
+    return this.searchBySources(queryEmbedding, [source], topK);
+  }
+
+  /**
+   * Search for similar documents filtered by ANY of the given metadata.source
+   * values. Used by help-search to query both `help` (Mongo articles) and
+   * `knowledge_file` (curated markdown like docs/user-manual/) in one pass.
+   */
+  searchBySources(
+    queryEmbedding: number[],
+    sources: string[],
+    topK: number = 5,
+  ): SearchResult[] {
+    const allowed = new Set(sources);
     const results: SearchResult[] = [];
     for (const doc of this.documents.values()) {
-      if (doc.metadata?.source !== source) continue;
+      const src = doc.metadata?.source;
+      if (typeof src !== 'string' || !allowed.has(src)) continue;
       results.push({ document: doc, score: this.cosineSimilarity(queryEmbedding, doc.embedding) });
     }
     return results.sort((a, b) => b.score - a.score).slice(0, topK);

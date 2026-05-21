@@ -46,12 +46,16 @@ NODE_ENV=development
 
 # LLM Configuration (Ollama)
 OLLAMA_BASE_URL=http://localhost:11434
-LLM_PRIMARY_MODEL=llama3.1:8b-instruct-q4_K_M
-LLM_HEBREW_MODEL=qwen2.5:7b
+# aya-expanse:8b is multilingual (Hebrew + English) with no Chinese drift.
+LLM_PRIMARY_MODEL=aya-expanse:8b
+LLM_HEBREW_MODEL=aya-expanse:8b
 
 # MongoDB (same as main app)
 MONGODB_URL=mongodb://localhost:27017/broadcast
 MONGO_DATABASE=broadcast
+
+# Knowledge / RAG — index the local user manual markdown alongside DB help articles
+AI_KNOWLEDGE_DIR=../../docs/user-manual
 "@ | Out-File -FilePath ".env" -Encoding utf8
     Write-Host "  Created .env file - please update MongoDB URL if needed" -ForegroundColor Yellow
 }
@@ -74,8 +78,9 @@ Write-Host "=====================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "1. Make sure Ollama is running with a model:" -ForegroundColor White
-Write-Host "   ollama run llama3.1:8b-instruct-q4_K_M" -ForegroundColor Gray
+Write-Host "1. Make sure Ollama is running with the multilingual chat model:" -ForegroundColor White
+Write-Host "   ollama pull aya-expanse:8b" -ForegroundColor Gray
+Write-Host "   ollama pull nomic-embed-text   # for RAG (help-search)" -ForegroundColor Gray
 Write-Host ""
 Write-Host "2. Start the AI Agent service:" -ForegroundColor White
 Write-Host "   cd services\ai-agent" -ForegroundColor Gray

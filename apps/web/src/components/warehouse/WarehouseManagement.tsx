@@ -169,36 +169,44 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
 
   const handleOpenCreateWarehouse = () => {
     setEditingWarehouse(null);
-    warehouseForm.resetFields();
-    warehouseForm.setFieldsValue({
-      isActive: true,
-      dimensions: { unit: 'meters' },
-    });
     setIsWarehouseModalOpen(true);
   };
 
   const handleOpenEditWarehouse = (warehouse: Warehouse) => {
     setEditingWarehouse(warehouse);
-    warehouseForm.setFieldsValue({
-      name: warehouse.name,
-      description: warehouse.description ?? undefined,
-      address: warehouse.address ?? undefined,
-      isActive: warehouse.isActive,
-      dimensions: {
-        length: warehouse.dimensions?.length ?? undefined,
-        width: warehouse.dimensions?.width ?? undefined,
-        height: warehouse.dimensions?.height ?? undefined,
-        unit: warehouse.dimensions?.unit || 'meters',
-      },
-    });
     setIsWarehouseModalOpen(true);
   };
 
   const handleCloseWarehouseModal = () => {
     setIsWarehouseModalOpen(false);
     setEditingWarehouse(null);
-    warehouseForm.resetFields();
   };
+
+  // The warehouse modal uses `destroyOnHidden`, so the <Form> is unmounted
+  // while closed. We must populate the form only after it (re)mounts,
+  // otherwise rc-field-form warns that the useForm instance is not connected.
+  React.useEffect(() => {
+    if (!isWarehouseModalOpen) return;
+    if (editingWarehouse) {
+      warehouseForm.setFieldsValue({
+        name: editingWarehouse.name,
+        description: editingWarehouse.description ?? undefined,
+        address: editingWarehouse.address ?? undefined,
+        isActive: editingWarehouse.isActive,
+        dimensions: {
+          length: editingWarehouse.dimensions?.length ?? undefined,
+          width: editingWarehouse.dimensions?.width ?? undefined,
+          height: editingWarehouse.dimensions?.height ?? undefined,
+          unit: editingWarehouse.dimensions?.unit || 'meters',
+        },
+      });
+    } else {
+      warehouseForm.setFieldsValue({
+        isActive: true,
+        dimensions: { unit: 'meters' },
+      });
+    }
+  }, [isWarehouseModalOpen, editingWarehouse, warehouseForm]);
 
   const handleSubmitWarehouse = async () => {
     try {
@@ -230,29 +238,36 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
   const handleOpenCreatePlace = (warehouse: Warehouse) => {
     setActiveWarehouseId(warehouse.id);
     setEditingPlace(null);
-    placeForm.resetFields();
-    placeForm.setFieldsValue({ type: 'shelf', isActive: true });
     setIsPlaceModalOpen(true);
   };
 
   const handleOpenEditPlace = (warehouse: Warehouse, place: WarehouseStoragePlace) => {
     setActiveWarehouseId(warehouse.id);
     setEditingPlace(place);
-    placeForm.setFieldsValue({
-      name: place.name,
-      type: place.type || 'shelf',
-      code: place.code ?? undefined,
-      notes: place.notes ?? undefined,
-      isActive: place.isActive,
-    });
     setIsPlaceModalOpen(true);
   };
 
   const handleClosePlaceModal = () => {
     setIsPlaceModalOpen(false);
     setEditingPlace(null);
-    placeForm.resetFields();
   };
+
+  // Same caveat as the warehouse modal: populate the place form only after
+  // the modal (and its inner Form) has mounted.
+  React.useEffect(() => {
+    if (!isPlaceModalOpen) return;
+    if (editingPlace) {
+      placeForm.setFieldsValue({
+        name: editingPlace.name,
+        type: editingPlace.type || 'shelf',
+        code: editingPlace.code ?? undefined,
+        notes: editingPlace.notes ?? undefined,
+        isActive: editingPlace.isActive,
+      });
+    } else {
+      placeForm.setFieldsValue({ type: 'shelf', isActive: true });
+    }
+  }, [isPlaceModalOpen, editingPlace, placeForm]);
 
   const handleSubmitPlace = async () => {
     if (!activeWarehouseId) return;

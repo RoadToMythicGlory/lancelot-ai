@@ -251,7 +251,7 @@ export default function SchedulingRulesPage() {
           onOk={handleSave}
           okText={LABELS.SAVE}
           cancelText={LABELS.CANCEL}
-          destroyOnClose
+          destroyOnHidden
           width={640}
         >
           <Form form={form} layout="vertical">

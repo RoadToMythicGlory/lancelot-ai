@@ -351,6 +351,18 @@ export const GET_WAREHOUSE_EQUIPMENT = gql`
         shelf
         cell
       }
+      warehouseId
+      storagePlaceId
+      warehouse {
+        id
+        name
+      }
+      storagePlace {
+        id
+        name
+        type
+        code
+      }
       isQuantityBased
       isSharedEngineeringEquipment
       isDisabled
@@ -391,6 +403,15 @@ export const GET_WAREHOUSE_EQUIPMENT_STATS = gql`
       totalMaintenance
       totalDisabled
     }
+  }
+`;
+
+// Distinct, sorted list of categories across the entire active equipment
+// catalog. Used to populate the warehouse list category filter; see the
+// matching server resolver for the rationale.
+export const GET_WAREHOUSE_EQUIPMENT_CATEGORIES = gql`
+  query GetWarehouseEquipmentCategories {
+    warehouseEquipmentCategories
   }
 `;
 
@@ -1143,5 +1164,4 @@ export const GET_VENUE = gql`
     }
   }
 `;
- 
- 
+

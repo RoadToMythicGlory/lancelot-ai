@@ -165,7 +165,7 @@ export default function AiSuggestionsModal({
           החל ({selected.size})
         </Button>,
       ]}
-      destroyOnClose
+      destroyOnHidden
     >
       <div className="space-y-3">
         <div>

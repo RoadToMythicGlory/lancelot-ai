@@ -3,6 +3,8 @@ import { Table, Button, Modal, Form, Input, Select, Card, Space, Tag, App, Popco
 import { PlusOutlined, EditOutlined, DeleteOutlined, PhoneOutlined, MailOutlined, GlobalOutlined } from '@ant-design/icons';
 import { useQuery, useMutation } from '@apollo/client';
 import { GET_VENDORS, CREATE_VENDOR, UPDATE_VENDOR, DELETE_VENDOR, TOGGLE_VENDOR_STATUS } from '../../graphql/vendor-queries';
+import WarehouseExportButtons from './WarehouseExportButtons';
+import type { ExportColumn, ExportReport } from '@/utils/warehouseReportExport';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -139,6 +141,106 @@ const VendorManagement: React.FC<VendorManagementProps> = ({ canManage = false }
       notes: vendor.notes
     });
     setIsModalVisible(true);
+  };
+
+  const buildVendorReport = (): ExportReport | null => {
+    if (vendors.length === 0) return null;
+
+    const cols: ExportColumn<Vendor>[] = [
+      {
+        key: 'name',
+        label: 'שם ספק',
+        emphasis: true,
+        value: (r) => [r.name, r.hebrewName].filter(Boolean).join(' / '),
+      },
+      {
+        key: 'category',
+        label: 'קטגוריה',
+        value: (r) =>
+          r.category === 'equipment'
+            ? 'ציוד'
+            : r.category === 'services'
+              ? 'שירותים'
+              : r.category === 'both'
+                ? 'משולב'
+                : r.category || '',
+      },
+      { key: 'contactName', label: 'איש קשר', value: (r) => r.contactName || '' },
+      { key: 'contactPhone', label: 'טלפון', value: (r) => r.contactPhone || '' },
+      { key: 'contactEmail', label: 'דוא״ל', value: (r) => r.contactEmail || '' },
+      {
+        key: 'address',
+        label: 'כתובת',
+        value: (r) =>
+          [r.address?.street, r.address?.city, r.address?.country]
+            .filter(Boolean)
+            .join(', '),
+      },
+      { key: 'website', label: 'אתר אינטרנט', value: (r) => r.website || '' },
+      {
+        key: 'altContact',
+        label: 'איש קשר משני',
+        value: (r) =>
+          [r.alternateContactName, r.alternateContactPhone]
+            .filter(Boolean)
+            .join(' · '),
+      },
+      {
+        key: 'status',
+        label: 'סטטוס',
+        value: (r) => (r.isActive ? 'פעיל' : 'לא פעיל'),
+        status: (r) =>
+          r.isActive
+            ? { label: 'פעיל', variant: 'active' }
+            : { label: 'לא פעיל', variant: 'danger' },
+      },
+      { key: 'notes', label: 'הערות', value: (r) => r.notes || '' },
+    ];
+
+    const active = vendors.filter((v: Vendor) => v.isActive).length;
+    const inactive = vendors.length - active;
+    const equipmentVendors = vendors.filter((v: Vendor) => v.category === 'equipment' || v.category === 'both').length;
+    const serviceVendors = vendors.filter((v: Vendor) => v.category === 'services' || v.category === 'both').length;
+
+    const chips: string[] = [];
+    if (filterCategory) {
+      chips.push(
+        `קטגוריה: ${
+          filterCategory === 'equipment'
+            ? 'ציוד'
+            : filterCategory === 'services'
+              ? 'שירותים'
+              : 'משולב'
+        }`,
+      );
+    }
+    if (searchText.trim()) chips.push(`חיפוש: ${searchText.trim()}`);
+
+    return {
+      title: 'דוח ספקים',
+      subtitle: 'רשימת ספקים פעילים ולא פעילים, כולל פרטי קשר וכתובות.',
+      filenameStem: 'מחסן-ספקים',
+      origin: 'מחסן · ספקים',
+      metaChips: chips,
+      summary: [
+        { label: 'סה״כ ספקים', value: vendors.length, accent: 'vendors' },
+        { label: 'פעילים', value: active, accent: 'events' },
+        { label: 'לא פעילים', value: inactive, accent: 'history' },
+        { label: 'ספקי ציוד', value: equipmentVendors, accent: 'warehouse' },
+        { label: 'ספקי שירות', value: serviceVendors, accent: 'sets' },
+      ],
+      sections: [
+        {
+          kind: 'table',
+          key: 'vendors',
+          title: 'ספקים',
+          accent: 'vendors',
+          meta: `${vendors.length} שורות`,
+          columns: cols,
+          rows: vendors,
+        },
+      ],
+    };
   };
 
   const columns = [
@@ -278,17 +380,23 @@ const VendorManagement: React.FC<VendorManagementProps> = ({ canManage = false }
               <Option value="both">משולב</Option>
             </Select>
           </Col>
-          {canManage && (
-            <Col span={6} style={{ textAlign: 'left' }}>
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={() => setIsModalVisible(true)}
-              >
-                הוסף ספק חדש
-              </Button>
-            </Col>
-          )}
+          <Col span={6} style={{ textAlign: 'left' }}>
+            <Space>
+              <WarehouseExportButtons
+                buildReport={() => buildVendorReport()}
+                disabled={loading || vendors.length === 0}
+              />
+              {canManage && (
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => setIsModalVisible(true)}
+                >
+                  הוסף ספק חדש
+                </Button>
+              )}
+            </Space>
+          </Col>
         </Row>
       </div>
 

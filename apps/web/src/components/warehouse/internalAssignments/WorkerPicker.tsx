@@ -97,11 +97,17 @@ const WorkerPicker: React.FC<WorkerPickerProps> = ({
 
   return (
     <>
+      {/*
+        Default value is intentionally set by the parent <Form initialValues> so
+        the field name (configurable via `typeFieldName`) and the form-level
+        initialValues stay the single source of truth. Setting `initialValue`
+        here as well triggers rc-field-form's "Form already set 'initialValues'
+        with path 'workerType'" warning on mount.
+      */}
       <Form.Item
         name={typeFieldName}
         label="סוג העובד"
         rules={[{ required: true }]}
-        initialValue="internal"
       >
         <Radio.Group buttonStyle="solid">
           <Radio.Button value="internal">עובד פנימי (משתמש במערכת)</Radio.Button>

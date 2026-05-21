@@ -1,0 +1,742 @@
+'use client';
+
+import React, { useState } from 'react';
+import {
+  Alert,
+  App,
+  Button,
+  Card,
+  Col,
+  Empty,
+  Form,
+  Input,
+  InputNumber,
+  List,
+  Modal,
+  Popconfirm,
+  Row,
+  Select,
+  Space,
+  Spin,
+  Switch,
+  Table,
+  Tag,
+} from 'antd';
+import {
+  DeleteOutlined,
+  EditOutlined,
+  EnvironmentOutlined,
+  HomeOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
+import { useMutation, useQuery } from '@apollo/client';
+import {
+  CREATE_WAREHOUSE,
+  CREATE_WAREHOUSE_STORAGE_PLACE,
+  DELETE_WAREHOUSE,
+  DELETE_WAREHOUSE_STORAGE_PLACE,
+  GET_WAREHOUSES,
+  UPDATE_WAREHOUSE,
+  UPDATE_WAREHOUSE_STORAGE_PLACE,
+  WAREHOUSE_DIMENSION_UNIT_OPTIONS,
+  WAREHOUSE_STORAGE_PLACE_TYPE_OPTIONS,
+  getDimensionUnitLabel,
+  getStoragePlaceTypeLabel,
+} from '../../graphql/warehouse-queries';
+import { GET_WAREHOUSE_EQUIPMENT } from '../../graphql/queries';
+import WarehouseExportButtons from './WarehouseExportButtons';
+import type { ExportColumn, ExportReport } from '@/utils/warehouseReportExport';
+
+interface WarehouseStoragePlace {
+  id: string;
+  name: string;
+  type: string;
+  code?: string | null;
+  notes?: string | null;
+  isActive: boolean;
+}
+
+interface WarehouseDimensions {
+  length?: number | null;
+  width?: number | null;
+  height?: number | null;
+  unit: string;
+}
+
+interface Warehouse {
+  id: string;
+  name: string;
+  description?: string | null;
+  address?: string | null;
+  dimensions?: WarehouseDimensions | null;
+  storagePlaces: WarehouseStoragePlace[];
+  isActive: boolean;
+}
+
+interface WarehouseManagementProps {
+  canManage?: boolean;
+}
+
+const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = false }) => {
+  const { message } = App.useApp();
+  const [warehouseForm] = Form.useForm();
+  const [placeForm] = Form.useForm();
+  const [isWarehouseModalOpen, setIsWarehouseModalOpen] = useState(false);
+  const [isPlaceModalOpen, setIsPlaceModalOpen] = useState(false);
+  const [editingWarehouse, setEditingWarehouse] = useState<Warehouse | null>(null);
+  const [activeWarehouseId, setActiveWarehouseId] = useState<string | null>(null);
+  const [editingPlace, setEditingPlace] = useState<WarehouseStoragePlace | null>(null);
+
+  const { data, loading, refetch } = useQuery(GET_WAREHOUSES, {
+    fetchPolicy: 'cache-and-network',
+  });
+  const warehouses: Warehouse[] = data?.warehouses || [];
+  const activeWarehouse =
+    warehouses.find((w) => w.id === activeWarehouseId) || warehouses[0] || null;
+
+  React.useEffect(() => {
+    if (!activeWarehouseId && warehouses.length > 0) {
+      setActiveWarehouseId(warehouses[0].id);
+    }
+  }, [warehouses, activeWarehouseId]);
+
+  const [createWarehouse, { loading: creatingWarehouse }] = useMutation(CREATE_WAREHOUSE, {
+    onCompleted: () => {
+      message.success('המחסן נוצר בהצלחה');
+      handleCloseWarehouseModal();
+      refetch();
+    },
+    onError: (error) => {
+      message.error(`שגיאה ביצירת מחסן: ${error.message}`);
+    },
+  });
+
+  const [updateWarehouse, { loading: updatingWarehouse }] = useMutation(UPDATE_WAREHOUSE, {
+    onCompleted: () => {
+      message.success('המחסן עודכן בהצלחה');
+      handleCloseWarehouseModal();
+      refetch();
+    },
+    onError: (error) => {
+      message.error(`שגיאה בעדכון מחסן: ${error.message}`);
+    },
+  });
+
+  const [deleteWarehouse] = useMutation(DELETE_WAREHOUSE, {
+    onCompleted: () => {
+      message.success('המחסן נמחק');
+      setActiveWarehouseId(null);
+      refetch();
+    },
+    refetchQueries: [{ query: GET_WAREHOUSE_EQUIPMENT }],
+    onError: (error) => {
+      message.error(`שגיאה במחיקת מחסן: ${error.message}`);
+    },
+  });
+
+  const [createPlace, { loading: creatingPlace }] = useMutation(CREATE_WAREHOUSE_STORAGE_PLACE, {
+    onCompleted: () => {
+      message.success('המיקום נוסף בהצלחה');
+      handleClosePlaceModal();
+      refetch();
+    },
+    onError: (error) => {
+      message.error(`שגיאה ביצירת מיקום: ${error.message}`);
+    },
+  });
+
+  const [updatePlace, { loading: updatingPlace }] = useMutation(UPDATE_WAREHOUSE_STORAGE_PLACE, {
+    onCompleted: () => {
+      message.success('המיקום עודכן');
+      handleClosePlaceModal();
+      refetch();
+    },
+    onError: (error) => {
+      message.error(`שגיאה בעדכון מיקום: ${error.message}`);
+    },
+  });
+
+  const [deletePlace] = useMutation(DELETE_WAREHOUSE_STORAGE_PLACE, {
+    onCompleted: () => {
+      message.success('המיקום נמחק');
+      refetch();
+    },
+    refetchQueries: [{ query: GET_WAREHOUSE_EQUIPMENT }],
+    onError: (error) => {
+      message.error(`שגיאה במחיקת מיקום: ${error.message}`);
+    },
+  });
+
+  const handleOpenCreateWarehouse = () => {
+    setEditingWarehouse(null);
+    warehouseForm.resetFields();
+    warehouseForm.setFieldsValue({
+      isActive: true,
+      dimensions: { unit: 'meters' },
+    });
+    setIsWarehouseModalOpen(true);
+  };
+
+  const handleOpenEditWarehouse = (warehouse: Warehouse) => {
+    setEditingWarehouse(warehouse);
+    warehouseForm.setFieldsValue({
+      name: warehouse.name,
+      description: warehouse.description ?? undefined,
+      address: warehouse.address ?? undefined,
+      isActive: warehouse.isActive,
+      dimensions: {
+        length: warehouse.dimensions?.length ?? undefined,
+        width: warehouse.dimensions?.width ?? undefined,
+        height: warehouse.dimensions?.height ?? undefined,
+        unit: warehouse.dimensions?.unit || 'meters',
+      },
+    });
+    setIsWarehouseModalOpen(true);
+  };
+
+  const handleCloseWarehouseModal = () => {
+    setIsWarehouseModalOpen(false);
+    setEditingWarehouse(null);
+    warehouseForm.resetFields();
+  };
+
+  const handleSubmitWarehouse = async () => {
+    try {
+      const values = await warehouseForm.validateFields();
+      const input = {
+        name: values.name?.trim(),
+        description: values.description?.trim() || null,
+        address: values.address?.trim() || null,
+        isActive: values.isActive ?? true,
+        dimensions: values.dimensions
+          ? {
+              length: values.dimensions.length ?? null,
+              width: values.dimensions.width ?? null,
+              height: values.dimensions.height ?? null,
+              unit: values.dimensions.unit || 'meters',
+            }
+          : null,
+      };
+      if (editingWarehouse) {
+        await updateWarehouse({ variables: { id: editingWarehouse.id, input } });
+      } else {
+        await createWarehouse({ variables: { input } });
+      }
+    } catch (err) {
+      // antd validation errors are surfaced inline; nothing else to do
+    }
+  };
+
+  const handleOpenCreatePlace = (warehouse: Warehouse) => {
+    setActiveWarehouseId(warehouse.id);
+    setEditingPlace(null);
+    placeForm.resetFields();
+    placeForm.setFieldsValue({ type: 'shelf', isActive: true });
+    setIsPlaceModalOpen(true);
+  };
+
+  const handleOpenEditPlace = (warehouse: Warehouse, place: WarehouseStoragePlace) => {
+    setActiveWarehouseId(warehouse.id);
+    setEditingPlace(place);
+    placeForm.setFieldsValue({
+      name: place.name,
+      type: place.type || 'shelf',
+      code: place.code ?? undefined,
+      notes: place.notes ?? undefined,
+      isActive: place.isActive,
+    });
+    setIsPlaceModalOpen(true);
+  };
+
+  const handleClosePlaceModal = () => {
+    setIsPlaceModalOpen(false);
+    setEditingPlace(null);
+    placeForm.resetFields();
+  };
+
+  const handleSubmitPlace = async () => {
+    if (!activeWarehouseId) return;
+    try {
+      const values = await placeForm.validateFields();
+      const input = {
+        name: values.name?.trim(),
+        type: values.type || 'other',
+        code: values.code?.trim() || null,
+        notes: values.notes?.trim() || null,
+        isActive: values.isActive ?? true,
+      };
+      if (editingPlace) {
+        await updatePlace({
+          variables: {
+            warehouseId: activeWarehouseId,
+            placeId: editingPlace.id,
+            input,
+          },
+        });
+      } else {
+        await createPlace({
+          variables: { warehouseId: activeWarehouseId, input },
+        });
+      }
+    } catch (err) {
+      // validation handled by antd
+    }
+  };
+
+  /** Build a two-section report: one row per warehouse, plus a flat
+   *  storage-places table (the flat table carries `warehouseName` so the
+   *  CSV is filter-friendly downstream). */
+  const buildReport = (): ExportReport | null => {
+    if (warehouses.length === 0) return null;
+
+    const dimToString = (d?: WarehouseDimensions | null): string => {
+      if (!d) return '';
+      const unit = getDimensionUnitLabel(d.unit || 'meters');
+      const parts = [
+        d.length != null && `אורך ${d.length}`,
+        d.width != null && `רוחב ${d.width}`,
+        d.height != null && `גובה ${d.height}`,
+      ].filter(Boolean) as string[];
+      if (parts.length === 0) return '';
+      return `${parts.join(' × ')} ${unit}`;
+    };
+
+    const warehouseCols: ExportColumn<Warehouse>[] = [
+      { key: 'name', label: 'שם', emphasis: true, value: (r) => r.name },
+      {
+        key: 'status',
+        label: 'סטטוס',
+        value: (r) => (r.isActive ? 'פעיל' : 'לא פעיל'),
+        status: (r) =>
+          r.isActive
+            ? { label: 'פעיל', variant: 'active' }
+            : { label: 'לא פעיל', variant: 'danger' },
+      },
+      { key: 'address', label: 'כתובת', value: (r) => r.address || '' },
+      { key: 'description', label: 'תיאור', value: (r) => r.description || '' },
+      { key: 'dimensions', label: 'מידות', value: (r) => dimToString(r.dimensions) },
+      {
+        key: 'placesCount',
+        label: 'מקומות אחסון',
+        numeric: true,
+        value: (r) => r.storagePlaces.length,
+      },
+    ];
+
+    type FlatPlace = WarehouseStoragePlace & { warehouseName: string };
+    const places: FlatPlace[] = [];
+    warehouses.forEach((w) => {
+      w.storagePlaces.forEach((p) =>
+        places.push({ ...p, warehouseName: w.name }),
+      );
+    });
+
+    const placeCols: ExportColumn<FlatPlace>[] = [
+      { key: 'warehouse', label: 'מחסן', emphasis: true, value: (r) => r.warehouseName },
+      { key: 'name', label: 'שם המקום', value: (r) => r.name },
+      { key: 'type', label: 'סוג', value: (r) => getStoragePlaceTypeLabel(r.type) },
+      { key: 'code', label: 'קוד', code: true, value: (r) => r.code || '' },
+      {
+        key: 'status',
+        label: 'סטטוס',
+        value: (r) => (r.isActive ? 'פעיל' : 'לא פעיל'),
+        status: (r) =>
+          r.isActive
+            ? { label: 'פעיל', variant: 'active' }
+            : { label: 'לא פעיל', variant: 'danger' },
+      },
+      { key: 'notes', label: 'הערות', value: (r) => r.notes || '' },
+    ];
+
+    const totalPlaces = places.length;
+    const activeWarehouses = warehouses.filter((w) => w.isActive).length;
+
+    return {
+      title: 'דוח מחסנים ומקומות אחסון',
+      subtitle: 'רשימת המחסנים, מידותיהם ומקומות האחסון המוגדרים בכל אחד.',
+      filenameStem: 'מחסן-מבנה',
+      origin: 'מחסן · מחסנים',
+      summary: [
+        { label: 'סה״כ מחסנים', value: warehouses.length, accent: 'warehouse' },
+        { label: 'פעילים', value: activeWarehouses, accent: 'events' },
+        { label: 'מקומות אחסון', value: totalPlaces, accent: 'sets' },
+      ],
+      sections: [
+        {
+          kind: 'table',
+          key: 'warehouses',
+          title: 'מחסנים',
+          accent: 'warehouse',
+          meta: `${warehouses.length} מחסנים`,
+          columns: warehouseCols,
+          rows: warehouses,
+        },
+        {
+          kind: 'table',
+          key: 'places',
+          title: 'מקומות אחסון',
+          accent: 'sets',
+          meta: `${totalPlaces} מקומות`,
+          columns: placeCols,
+          rows: places,
+          emptyText: 'אין מקומות אחסון מוגדרים',
+        },
+      ],
+    };
+  };
+
+  const renderDimensions = (warehouse: Warehouse | null) => {
+    if (!warehouse?.dimensions) {
+      return <span className="text-gray-400">ללא מידות</span>;
+    }
+    const { length, width, height, unit } = warehouse.dimensions;
+    const unitLabel = getDimensionUnitLabel(unit || 'meters');
+    const parts = [
+      length != null && `אורך ${length}`,
+      width != null && `רוחב ${width}`,
+      height != null && `גובה ${height}`,
+    ].filter(Boolean);
+    if (parts.length === 0) {
+      return <span className="text-gray-400">ללא מידות</span>;
+    }
+    return (
+      <span>
+        {parts.join(' × ')} {unitLabel}
+      </span>
+    );
+  };
+
+  return (
+    <div>
+      <Alert
+        message="ניהול מחסנים ומקומות אחסון"
+        description="צרו מחסנים פיזיים, הגדירו את גודלם, והוסיפו ידנית את מקומות האחסון (שורות, מדפים, תאים וכו') שלהם. המקומות יופיעו כאופציה בבחירת מיקום הציוד."
+        type="info"
+        showIcon
+        className="mb-4"
+      />
+
+      <Row gutter={16}>
+        <Col xs={24} md={9}>
+          <Card
+            title={
+              <span>
+                <HomeOutlined className="ml-2" /> מחסנים ({warehouses.length})
+              </span>
+            }
+            extra={
+              <Space>
+                <WarehouseExportButtons
+                  buildReport={buildReport}
+                  disabled={loading || warehouses.length === 0}
+                />
+                {canManage && (
+                  <Button
+                    type="primary"
+                    icon={<PlusOutlined />}
+                    onClick={handleOpenCreateWarehouse}
+                  >
+                    מחסן חדש
+                  </Button>
+                )}
+              </Space>
+            }
+          >
+            {loading ? (
+              <div className="text-center py-6">
+                <Spin />
+              </div>
+            ) : warehouses.length === 0 ? (
+              <Empty description="עדיין לא נוצרו מחסנים" />
+            ) : (
+              <List
+                dataSource={warehouses}
+                renderItem={(warehouse) => (
+                  <List.Item
+                    onClick={() => setActiveWarehouseId(warehouse.id)}
+                    className={`cursor-pointer ${
+                      activeWarehouse?.id === warehouse.id ? 'bg-blue-50' : ''
+                    }`}
+                    actions={
+                      canManage
+                        ? [
+                            <Button
+                              key="edit"
+                              size="small"
+                              icon={<EditOutlined />}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenEditWarehouse(warehouse);
+                              }}
+                            />,
+                            <Popconfirm
+                              key="delete"
+                              title="מחיקת מחסן"
+                              description="פעולה זו תסיר את המחסן וכל מקומות האחסון שבו. הציוד שהיה משויך אליו יעבור למצב 'ללא מיקום'."
+                              onConfirm={(e) => {
+                                e?.stopPropagation();
+                                deleteWarehouse({ variables: { id: warehouse.id } });
+                              }}
+                              okText="מחיקה"
+                              cancelText="ביטול"
+                            >
+                              <Button
+                                size="small"
+                                danger
+                                icon={<DeleteOutlined />}
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            </Popconfirm>,
+                          ]
+                        : undefined
+                    }
+                  >
+                    <List.Item.Meta
+                      title={
+                        <Space>
+                          <strong>{warehouse.name}</strong>
+                          {!warehouse.isActive && <Tag color="default">לא פעיל</Tag>}
+                          <Tag color="blue">
+                            {warehouse.storagePlaces.length} מיקומים
+                          </Tag>
+                        </Space>
+                      }
+                      description={
+                        <div>
+                          {warehouse.description && (
+                            <div className="text-sm text-gray-600">
+                              {warehouse.description}
+                            </div>
+                          )}
+                          <div className="text-xs text-gray-500 mt-1">
+                            {renderDimensions(warehouse)}
+                          </div>
+                        </div>
+                      }
+                    />
+                  </List.Item>
+                )}
+              />
+            )}
+          </Card>
+        </Col>
+
+        <Col xs={24} md={15}>
+          <Card
+            title={
+              <span>
+                <EnvironmentOutlined className="ml-2" />
+                {activeWarehouse
+                  ? `מקומות אחסון – ${activeWarehouse.name}`
+                  : 'מקומות אחסון'}
+              </span>
+            }
+            extra={
+              activeWarehouse && canManage ? (
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => handleOpenCreatePlace(activeWarehouse)}
+                >
+                  מקום אחסון חדש
+                </Button>
+              ) : null
+            }
+          >
+            {!activeWarehouse ? (
+              <Empty description="בחרו מחסן מימין כדי לנהל את מקומות האחסון שלו" />
+            ) : activeWarehouse.storagePlaces.length === 0 ? (
+              <Empty description="עדיין לא נוספו מקומות אחסון למחסן זה" />
+            ) : (
+              <Table<WarehouseStoragePlace>
+                dataSource={activeWarehouse.storagePlaces}
+                rowKey="id"
+                size="small"
+                pagination={false}
+                columns={[
+                  {
+                    title: 'שם',
+                    dataIndex: 'name',
+                    key: 'name',
+                    render: (value: string, record) => (
+                      <Space>
+                        <strong>{value}</strong>
+                        {!record.isActive && <Tag color="default">לא פעיל</Tag>}
+                      </Space>
+                    ),
+                  },
+                  {
+                    title: 'סוג',
+                    dataIndex: 'type',
+                    key: 'type',
+                    render: (type: string) => (
+                      <Tag color="geekblue">{getStoragePlaceTypeLabel(type)}</Tag>
+                    ),
+                  },
+                  {
+                    title: 'קוד',
+                    dataIndex: 'code',
+                    key: 'code',
+                    render: (code: string | null) =>
+                      code ? <code>{code}</code> : <span className="text-gray-400">-</span>,
+                  },
+                  {
+                    title: 'הערות',
+                    dataIndex: 'notes',
+                    key: 'notes',
+                    render: (notes: string | null) =>
+                      notes ? notes : <span className="text-gray-400">-</span>,
+                  },
+                  ...(canManage
+                    ? [
+                        {
+                          title: 'פעולות',
+                          key: 'actions',
+                          width: 120,
+                          render: (_: unknown, record: WarehouseStoragePlace) => (
+                            <Space size="small">
+                              <Button
+                                size="small"
+                                icon={<EditOutlined />}
+                                onClick={() => handleOpenEditPlace(activeWarehouse, record)}
+                              />
+                              <Popconfirm
+                                title="מחיקת מקום אחסון"
+                                description="פריטי ציוד שהיו משויכים למקום זה יעברו למצב 'ללא מיקום ספציפי'."
+                                onConfirm={() =>
+                                  deletePlace({
+                                    variables: {
+                                      warehouseId: activeWarehouse.id,
+                                      placeId: record.id,
+                                    },
+                                  })
+                                }
+                                okText="מחיקה"
+                                cancelText="ביטול"
+                              >
+                                <Button size="small" danger icon={<DeleteOutlined />} />
+                              </Popconfirm>
+                            </Space>
+                          ),
+                        },
+                      ]
+                    : []),
+                ]}
+              />
+            )}
+          </Card>
+        </Col>
+      </Row>
+
+      <Modal
+        title={editingWarehouse ? 'עריכת מחסן' : 'יצירת מחסן חדש'}
+        open={isWarehouseModalOpen}
+        onCancel={handleCloseWarehouseModal}
+        onOk={handleSubmitWarehouse}
+        okText={editingWarehouse ? 'שמירה' : 'יצירה'}
+        cancelText="ביטול"
+        confirmLoading={creatingWarehouse || updatingWarehouse}
+        destroyOnHidden
+      >
+        <Form form={warehouseForm} layout="vertical">
+          <Form.Item
+            name="name"
+            label="שם המחסן"
+            rules={[{ required: true, message: 'נא להזין שם מחסן' }]}
+          >
+            <Input placeholder="לדוגמה: מחסן ראשי" />
+          </Form.Item>
+          <Form.Item name="description" label="תיאור">
+            <Input.TextArea rows={2} placeholder="תיאור פנימי, מטרה, וכו'" />
+          </Form.Item>
+          <Form.Item name="address" label="כתובת / מיקום פיזי">
+            <Input placeholder="לדוגמה: רחוב הברזל 12, תל אביב" />
+          </Form.Item>
+
+          <div className="mb-2 font-medium">מידות</div>
+          <Row gutter={8}>
+            <Col span={6}>
+              <Form.Item name={['dimensions', 'length']} label="אורך">
+                <InputNumber min={0} style={{ width: '100%' }} placeholder="0" />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item name={['dimensions', 'width']} label="רוחב">
+                <InputNumber min={0} style={{ width: '100%' }} placeholder="0" />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item name={['dimensions', 'height']} label="גובה">
+                <InputNumber min={0} style={{ width: '100%' }} placeholder="0" />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item name={['dimensions', 'unit']} label="יחידה" initialValue="meters">
+                <Select
+                  options={WAREHOUSE_DIMENSION_UNIT_OPTIONS.map((opt) => ({
+                    value: opt.value,
+                    label: opt.label,
+                  }))}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item
+            name="isActive"
+            label="מחסן פעיל"
+            valuePropName="checked"
+            initialValue={true}
+          >
+            <Switch />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={editingPlace ? 'עריכת מקום אחסון' : 'מקום אחסון חדש'}
+        open={isPlaceModalOpen}
+        onCancel={handleClosePlaceModal}
+        onOk={handleSubmitPlace}
+        okText={editingPlace ? 'שמירה' : 'יצירה'}
+        cancelText="ביטול"
+        confirmLoading={creatingPlace || updatingPlace}
+        destroyOnHidden
+      >
+        <Form form={placeForm} layout="vertical">
+          <Form.Item
+            name="name"
+            label="שם המיקום"
+            rules={[{ required: true, message: 'נא להזין שם מיקום' }]}
+          >
+            <Input placeholder="לדוגמה: מדף A1, ארון 3, חדר ציוד" />
+          </Form.Item>
+          <Form.Item name="type" label="סוג">
+            <Select
+              options={WAREHOUSE_STORAGE_PLACE_TYPE_OPTIONS.map((opt) => ({
+                value: opt.value,
+                label: opt.label,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="code" label="קוד (אופציונלי)">
+            <Input placeholder="לדוגמה: A1-03" />
+          </Form.Item>
+          <Form.Item name="notes" label="הערות">
+            <Input.TextArea rows={2} placeholder="הערות פנימיות" />
+          </Form.Item>
+          <Form.Item
+            name="isActive"
+            label="מיקום פעיל"
+            valuePropName="checked"
+            initialValue={true}
+          >
+            <Switch />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </div>
+  );
+};
+
+export default WarehouseManagement;

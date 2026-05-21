@@ -72,7 +72,7 @@ export default function AssignShiftModal({
       confirmLoading={loading}
       okText="שבץ"
       cancelText="ביטול"
-      destroyOnClose
+      destroyOnHidden
     >
       <Form form={form} layout="vertical">
         <Form.Item

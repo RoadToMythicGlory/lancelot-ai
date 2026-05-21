@@ -76,7 +76,7 @@ export default function EditHoursModal({
       confirmLoading={loading}
       okText="שמור"
       cancelText="ביטול"
-      destroyOnClose
+      destroyOnHidden
     >
       <Form form={form} layout="vertical">
         <Form.Item

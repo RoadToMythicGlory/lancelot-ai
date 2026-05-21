@@ -18,6 +18,8 @@ import { useMutation, useQuery } from '@apollo/client';
 import { GET_BROADCAST_EVENTS } from '../../graphql/queries';
 import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA } from '../../graphql/mutations';
 import WarehouseModal from '../broadcast/WarehouseModal';
+import WarehouseExportButtons from './WarehouseExportButtons';
+import type { ExportColumn, ExportReport } from '@/utils/warehouseReportExport';
 import { useAuth } from '@/contexts/AuthContext';
 import { Permission } from '@/rbac';
 import dayjs from 'dayjs';
@@ -478,6 +480,85 @@ const UpcomingEvents: React.FC<UpcomingEventsProps> = ({ onEventClick }) => {
     );
   };
 
+  const buildReport = (): ExportReport | null => {
+    if (events.length === 0) return null;
+
+    const cols: ExportColumn<BroadcastEvent>[] = [
+      { key: 'eventNumber', label: 'מס׳ אירוע', code: true, value: (r) => r.eventNumber || '' },
+      {
+        key: 'title',
+        label: 'אירוע',
+        emphasis: true,
+        value: (r) => r.hebrewTitle || r.title || '',
+      },
+      { key: 'channel', label: 'ערוץ', value: (r) => r.channel || '' },
+      { key: 'parallel', label: 'ערוץ מקביל', value: (r) => r.parallelChannel || '' },
+      {
+        key: 'startTime',
+        label: 'התחלה',
+        value: (r) =>
+          r.startTime && dayjs(r.startTime).isValid()
+            ? dayjs(r.startTime).format('DD/MM/YYYY HH:mm')
+            : '',
+      },
+      {
+        key: 'endTime',
+        label: 'סיום',
+        value: (r) =>
+          r.endTime && dayjs(r.endTime).isValid() ? dayjs(r.endTime).format('HH:mm') : '',
+      },
+      { key: 'location', label: 'מיקום', value: (r) => r.location || '' },
+      { key: 'venue', label: 'מתחם', value: (r) => r.venue || '' },
+      {
+        key: 'teams',
+        label: 'קבוצות',
+        value: (r) =>
+          r.homeTeam && r.awayTeam ? `${r.homeTeam} – ${r.awayTeam}` : r.sport || '',
+      },
+      { key: 'eventType', label: 'סוג', value: (r) => r.eventType || '' },
+      {
+        key: 'flags',
+        label: 'דגלים',
+        value: (r) =>
+          [r.live ? 'שידור חי' : '', r.channel1_4k ? '4K' : '']
+            .filter(Boolean)
+            .join(' · '),
+      },
+    ];
+
+    const rangeChip =
+      viewMode === 'day'
+        ? `יום: ${selectedDate.format('DD/MM/YYYY')}`
+        : `שבוע: ${selectedWeek.startOf('week').format('DD/MM/YYYY')} – ${selectedWeek.endOf('week').format('DD/MM/YYYY')}`;
+
+    const liveCount = events.filter((e) => e.live).length;
+
+    return {
+      title: 'דוח אירועים קרובים',
+      subtitle: 'אירועי שידור שלמחסן יש בהם עניין (בוקש להם ציוד או יובאו ידנית).',
+      filenameStem: 'מחסן-אירועים',
+      origin: 'מחסן · אירועים קרובים',
+      metaChips: [rangeChip, viewMode === 'day' ? 'תצוגה יומית' : 'תצוגה שבועית'],
+      summary: [
+        { label: 'סה״כ אירועים', value: events.length, accent: 'events' },
+        { label: 'שידורים חיים', value: liveCount, accent: 'requests' },
+      ],
+      sections: [
+        {
+          kind: 'table',
+          key: 'events',
+          title: 'אירועים',
+          accent: 'events',
+          meta: `${events.length} אירועים`,
+          columns: cols,
+          rows: [...events].sort(
+            (a, b) => dayjs(a.startTime).valueOf() - dayjs(b.startTime).valueOf(),
+          ),
+        },
+      ],
+    };
+  };
+
   return (
     <div className="p-4">
       <div className="mb-6 flex justify-between items-center">
@@ -486,6 +567,10 @@ const UpcomingEvents: React.FC<UpcomingEventsProps> = ({ onEventClick }) => {
           אירועים קרובים
         </Title>
         <Space>
+          <WarehouseExportButtons
+            buildReport={buildReport}
+            disabled={loading || events.length === 0}
+          />
           {canManageWarehouse && (
             <Button
               icon={<ImportOutlined />}

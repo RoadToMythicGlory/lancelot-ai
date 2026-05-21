@@ -996,7 +996,7 @@ export default function Home() {
               // antd surfaces field-level validation errors directly on the form.
             }
           }}
-          destroyOnClose
+          destroyOnHidden
         >
           <Form
             form={bulletinForm}

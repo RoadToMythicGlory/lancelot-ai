@@ -7,6 +7,7 @@ import { GET_WAREHOUSE_EQUIPMENT } from '../../graphql/queries';
 import type { UploadFile } from 'antd/es/upload';
 import type { TabsProps } from 'antd';
 import dayjs from 'dayjs';
+import WarehouseLocationPicker from './WarehouseLocationPicker';
 
 const { TextArea } = Input;
 
@@ -63,8 +64,12 @@ const EquipmentRegistrationModal: React.FC<EquipmentRegistrationModalProps> = ({
     try {
       setLoading(true);
       const values = await form.validateFields();
-      
-      // Convert dates to ISO strings
+
+      // Only send the legacy storage strings when the user actually
+      // entered something — otherwise the warehouse/place picker is the
+      // sole source of truth.
+      const hasLegacyStorage = !!(values.row || values.shelf || values.cell);
+
       const input = {
         name: values.name,
         category: values.category,
@@ -76,18 +81,22 @@ const EquipmentRegistrationModal: React.FC<EquipmentRegistrationModalProps> = ({
         contactPerson: values.contactPerson || null,
         manualLink: values.manualLink || null,
         imageUrl: fileList.length > 0 ? fileList[0].url || fileList[0].response?.url : null,
-        storage: {
-          row: values.row || null,
-          shelf: values.shelf || null,
-          cell: values.cell || null
-        },
+        storage: hasLegacyStorage
+          ? {
+              row: values.row || null,
+              shelf: values.shelf || null,
+              cell: values.cell || null,
+            }
+          : null,
+        warehouseId: values.warehouseId || null,
+        storagePlaceId: values.storagePlaceId || null,
         quantityTotal: values.quantityTotal || 1,
         isQuantityBased: values.isQuantityBased ?? false,
-        isSharedEngineeringEquipment: values.isSharedEngineeringEquipment ?? false
+        isSharedEngineeringEquipment: values.isSharedEngineeringEquipment ?? false,
       };
 
       await createEquipment({
-        variables: { input }
+        variables: { input },
       });
     } catch (error) {
       console.error('Validation error:', error);
@@ -282,28 +291,48 @@ const EquipmentRegistrationModal: React.FC<EquipmentRegistrationModalProps> = ({
               key: '3',
               label: 'אחסון',
               children: (
-                <>
-                  <Form.Item
-                    name="row"
-                    label="שורה"
-                  >
-                    <Input placeholder="לדוגמה: A" />
-                  </Form.Item>
+                <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                  <div>
+                    <div style={{ marginBottom: 8, fontWeight: 500 }}>
+                      מחסן ומיקום אחסון
+                    </div>
+                    <Form.Item shouldUpdate noStyle>
+                      {() => (
+                        <WarehouseLocationPicker
+                          warehouseId={form.getFieldValue('warehouseId')}
+                          storagePlaceId={form.getFieldValue('storagePlaceId')}
+                          onChange={({ warehouseId, storagePlaceId }) => {
+                            form.setFieldsValue({ warehouseId, storagePlaceId });
+                          }}
+                        />
+                      )}
+                    </Form.Item>
+                    <Form.Item name="warehouseId" hidden>
+                      <Input />
+                    </Form.Item>
+                    <Form.Item name="storagePlaceId" hidden>
+                      <Input />
+                    </Form.Item>
+                  </div>
 
-                  <Form.Item
-                    name="shelf"
-                    label="מדף"
-                  >
-                    <Input placeholder="לדוגמה: 1" />
-                  </Form.Item>
-
-                  <Form.Item
-                    name="cell"
-                    label="תא"
-                  >
-                    <Input placeholder="לדוגמה: 3B" />
-                  </Form.Item>
-                </>
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ marginBottom: 8, fontWeight: 500 }}>
+                      פרטי מיקום חופשיים (אופציונלי)
+                    </div>
+                    <div style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>
+                      ניתן להזין כאן ערכי טקסט חופשי לציוד שעדיין לא הותאם למחסן מוגדר.
+                    </div>
+                    <Form.Item name="row" label="שורה">
+                      <Input placeholder="לדוגמה: A" />
+                    </Form.Item>
+                    <Form.Item name="shelf" label="מדף">
+                      <Input placeholder="לדוגמה: 1" />
+                    </Form.Item>
+                    <Form.Item name="cell" label="תא">
+                      <Input placeholder="לדוגמה: 3B" />
+                    </Form.Item>
+                  </div>
+                </Space>
               ),
             },
           ]}

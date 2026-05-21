@@ -113,6 +113,10 @@ export interface MCRSharedEngineeringEventAssignment extends MCRSharedEngineerin
   broadcastEventTitle?: string | null;
   broadcastEventStart?: string | null;
   broadcastEventEnd?: string | null;
+  // Venue / location of the broadcast event (used by the warehouse page
+  // to surface the physical location for external broadcasts).
+  broadcastEventVenue?: string | null;
+  broadcastEventLocation?: string | null;
   mcrEventId?: string | null;
   mcrEventTitle?: string | null;
   mcrEventStart?: string | null;
@@ -144,6 +148,15 @@ export interface MCRSharedEngineeringWarehouseEquipment {
   category?: string | null;
   quantity: number;
   status: 'warehouse' | string;
+  // Structured warehouse location, used by the warehouse-side tab to
+  // render the elaborated "במחסן ראשי – מדף 4" label. Optional so it
+  // stays backward-compatible with MCR consumers.
+  warehouseId?: string | null;
+  warehouseName?: string | null;
+  storagePlaceId?: string | null;
+  storagePlaceName?: string | null;
+  storagePlaceCode?: string | null;
+  currentLocation?: string | null;
 }
 
 export interface MCRSharedEngineeringTracking {

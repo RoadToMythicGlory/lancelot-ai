@@ -31,7 +31,7 @@ export default function NewRequestModal({
       onCancel={onClose}
       footer={null}
       width={760}
-      destroyOnClose
+      destroyOnHidden
     >
       <Tabs
         activeKey={tab}

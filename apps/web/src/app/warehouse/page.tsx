@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
-import { Alert, List, Card, Input, Button, Space, Tag, Row, Col, Empty, App, Breadcrumb, Select, Statistic, Tabs, DatePicker, Modal } from 'antd';
+import React, { useCallback, useMemo, useState } from 'react';
+import { Alert, List, Card, Input, Button, Space, Tag, Row, Col, Empty, App, Breadcrumb, Select, Statistic, DatePicker, Modal } from 'antd';
 import {
   InboxOutlined,
   CheckCircleOutlined,
@@ -20,9 +20,17 @@ import {
   FilePdfOutlined,
   EnvironmentOutlined,
   UserSwitchOutlined,
+  ShareAltOutlined,
 } from '@ant-design/icons';
-import { useQuery } from '@apollo/client';
-import { GET_WAREHOUSE_EQUIPMENT, GET_WAREHOUSE_EQUIPMENT_STATS, GET_BROADCAST_EVENTS, GET_STALE_EQUIPMENT } from '../../graphql/queries';
+import { useApolloClient, useQuery } from '@apollo/client';
+import { GET_WAREHOUSE_EQUIPMENT, GET_WAREHOUSE_EQUIPMENT_STATS, GET_WAREHOUSE_EQUIPMENT_CATEGORIES, GET_BROADCAST_EVENTS, GET_STALE_EQUIPMENT } from '../../graphql/queries';
+import { GET_WAREHOUSES } from '../../graphql/warehouse-queries';
+import WarehouseExportButtons from '../../components/warehouse/WarehouseExportButtons';
+import type {
+  ExportColumn,
+  ExportReport,
+} from '../../utils/warehouseReportExport';
+import { formatDateTime as fmtExportDateTime } from '../../utils/warehouseReportExport';
 import Link from 'next/link';
 import EquipmentRegistrationModal from '../../components/warehouse/EquipmentRegistrationModal';
 import EquipmentEditModal from '../../components/warehouse/EquipmentEditModal';
@@ -31,12 +39,14 @@ import EquipmentDetailsModal from '../../components/warehouse/EquipmentDetailsMo
 import EquipmentQuantityAdjustment from '../../components/warehouse/EquipmentQuantityAdjustment';
 import EquipmentDisableModal from '../../components/warehouse/EquipmentDisableModal';
 import VendorManagement from '../../components/warehouse/VendorManagement';
+import WarehouseManagement from '../../components/warehouse/WarehouseManagement';
 import UpcomingEvents from '../../components/warehouse/UpcomingEvents';
 import ExternalBroadcastRequests from '../../components/warehouse/ExternalBroadcastRequests';
 import WarehousePdfImportModal from '../../components/warehouse/WarehousePdfImportModal';
 import EquipmentSetsManager from '../../components/warehouse/EquipmentSetsManager';
 import EquipmentLiveTracking from '../../components/warehouse/tracking/EquipmentLiveTracking';
 import InternalAssignmentsTab from '../../components/warehouse/internalAssignments/InternalAssignmentsTab';
+import SharedEngineeringEquipmentArea from '../MCR/components/SharedEngineeringEquipmentArea';
 import dayjs from 'dayjs';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { Permission } from '@/rbac';
@@ -70,6 +80,10 @@ interface Equipment {
     shelf: string;
     cell: string;
   };
+  warehouseId?: string | null;
+  storagePlaceId?: string | null;
+  warehouse?: { id: string; name: string } | null;
+  storagePlace?: { id: string; name: string; type?: string; code?: string | null } | null;
   isQuantityBased: boolean;
   isSharedEngineeringEquipment?: boolean;
   isDisabled: boolean;
@@ -96,6 +110,7 @@ function legacyEquipmentStrings(equipmentList: unknown): string[] {
 
 const WarehousePage: React.FC = () => {
   const { message } = App.useApp();
+  const apolloClient = useApolloClient();
   const { hasPermission } = useAuth();
   const canManageWarehouse = hasPermission(Permission.WAREHOUSE_MANAGE);
   const canDisableEquipment = hasPermission(Permission.WAREHOUSE_DISABLE_EQUIPMENT);
@@ -109,6 +124,7 @@ const WarehousePage: React.FC = () => {
   const [searchText, setSearchText] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
+  const [selectedWarehouse, setSelectedWarehouse] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [isRegistrationModalVisible, setIsRegistrationModalVisible] = useState(false);
@@ -128,28 +144,75 @@ const WarehousePage: React.FC = () => {
 
   const dateRangeValid = Boolean(dateRange[0] && dateRange[1]);
   const debouncedSearchText = useDebouncedValue(searchText.trim(), 300);
+  // The server-side `warehouseEquipment` list is hard-capped at 500 rows
+  // per request, so the warehouse tab paginates server-side. The filter
+  // mirrors what the user sees: when no specific status is selected we
+  // ask the server to hide disabled rows (matching the "active" total in
+  // `warehouseEquipmentStats`); when the user explicitly picks
+  // `disabled` / `under_maintenance`, the server's own status handling
+  // pins `isDisabled = true` for us.
   const equipmentFilter = useMemo(() => {
-    const filter: Record<string, string> = {};
+    const filter: Record<string, string | boolean> = {};
     if (debouncedSearchText) filter.searchText = debouncedSearchText;
     if (selectedCategory !== 'all') filter.category = selectedCategory;
     if (selectedStatus !== 'all') filter.status = selectedStatus;
+    if (selectedWarehouse !== 'all') filter.warehouseId = selectedWarehouse;
+    if (selectedStatus !== 'disabled' && selectedStatus !== 'under_maintenance') {
+      filter.excludeDisabled = true;
+    }
     return Object.keys(filter).length > 0 ? filter : undefined;
-  }, [debouncedSearchText, selectedCategory, selectedStatus]);
+  }, [debouncedSearchText, selectedCategory, selectedStatus, selectedWarehouse]);
 
-  // Query for warehouse equipment
-  const { data: equipmentData, loading: equipmentLoading, error: equipmentError, refetch } = useQuery(GET_WAREHOUSE_EQUIPMENT, {
-    variables: {
-      filter: equipmentFilter,
-      limit: 500,
-      offset: 0,
-    },
-    fetchPolicy: 'cache-and-network',
-  });
-  const equipment: Equipment[] = equipmentData?.warehouseEquipment || [];
   const { data: equipmentStatsData } = useQuery(GET_WAREHOUSE_EQUIPMENT_STATS, {
     variables: { filter: equipmentFilter },
     fetchPolicy: 'cache-and-network',
   });
+
+  // Pagination total mirrors what the user is currently viewing. The
+  // stats resolver already excludes disabled rows from
+  // `totalEquipment`/`totalAvailable`/`totalAssigned`/`totalMaintenance`,
+  // and disabled / under-maintenance views collapse onto `totalDisabled`.
+  const stats = equipmentStatsData?.warehouseEquipmentStats;
+  const equipmentTotal: number = (() => {
+    if (!stats) return 0;
+    switch (selectedStatus) {
+      case 'available': return stats.totalAvailable ?? 0;
+      case 'assigned': return stats.totalAssigned ?? 0;
+      case 'maintenance': return stats.totalMaintenance ?? 0;
+      case 'disabled':
+      case 'under_maintenance':
+        return stats.totalDisabled ?? 0;
+      default:
+        return stats.totalEquipment ?? 0;
+    }
+  })();
+
+  // Cap page size at 100 — the server enforces a 500-row hard cap on the
+  // `warehouseEquipment` resolver, so any value at or below that works.
+  const safePageSize = Math.min(Math.max(pageSize, 1), 100);
+  const offset = (currentPage - 1) * safePageSize;
+
+  const { data: equipmentData, loading: equipmentLoading, error: equipmentError, refetch } = useQuery(GET_WAREHOUSE_EQUIPMENT, {
+    variables: {
+      filter: equipmentFilter,
+      limit: safePageSize,
+      offset,
+    },
+    fetchPolicy: 'cache-and-network',
+  });
+  const equipment: Equipment[] = equipmentData?.warehouseEquipment || [];
+
+  // Distinct categories across the full active catalog so the dropdown
+  // doesn't shrink to "categories present on the current page".
+  const { data: categoriesData } = useQuery(GET_WAREHOUSE_EQUIPMENT_CATEGORIES, {
+    fetchPolicy: 'cache-first',
+  });
+
+  // Warehouses (populates the location filter dropdown)
+  const { data: warehousesData } = useQuery(GET_WAREHOUSES, {
+    fetchPolicy: 'cache-first',
+  });
+  const warehouses: { id: string; name: string }[] = warehousesData?.warehouses || [];
 
   // Stale equipment (unused 14+ days)
   const { data: staleData } = useQuery(GET_STALE_EQUIPMENT, { variables: { daysUnused: 14 } });
@@ -165,37 +228,20 @@ const WarehousePage: React.FC = () => {
     skip: activeTab !== 'history' || !dateRangeValid || !canViewBroadcasts
   });
 
-  // Get unique categories for filter
-  const categories = Array.from(new Set(equipment.map(e => e.category))).filter(Boolean);
+  // Categories for the filter dropdown — pulled from a dedicated lightweight
+  // query so it covers the full ~4k-row catalog regardless of which page
+  // the user is currently viewing.
+  const categories: string[] = categoriesData?.warehouseEquipmentCategories ?? [];
 
   // Reset to first page whenever filters/search change
   React.useEffect(() => {
     setCurrentPage(1);
-  }, [searchText, selectedCategory, selectedStatus]);
+  }, [searchText, selectedCategory, selectedStatus, selectedWarehouse]);
 
-  // Filter equipment based on search and filters
-  const filteredEquipment = equipment.filter(item => {
-    // Exclude disabled equipment by default unless specifically filtered
-    if (item.isDisabled && selectedStatus !== 'disabled' && selectedStatus !== 'under_maintenance') {
-      return false;
-    }
-    
-    const q = debouncedSearchText.toLowerCase();
-    const matchesSearch = !debouncedSearchText ||
-      String(item.name ?? '').toLowerCase().includes(q) ||
-      String(item.barcode ?? '').toLowerCase().includes(q) ||
-      String(item.brand ?? '').toLowerCase().includes(q) ||
-      String(item.company ?? '').toLowerCase().includes(q) ||
-      String(item.equipmentModel ?? '').toLowerCase().includes(q);
-    
-    const matchesCategory = selectedCategory === 'all' || item.category === selectedCategory;
-    const matchesStatus = selectedStatus === 'all' || 
-      (selectedStatus === 'disabled' ? item.isDisabled :
-       selectedStatus === 'under_maintenance' ? item.suspensionStatus === 'under_maintenance' :
-       item.status === selectedStatus);
-    
-    return matchesSearch && matchesCategory && matchesStatus;
-  });
+  // The server already applies search/category/status/warehouse filters
+  // and the disabled-row exclusion (via `excludeDisabled`), so the page
+  // renders the resolver output directly.
+  const visibleEquipment = equipment;
 
   const statistics = {
     totalEquipment: equipmentStatsData?.warehouseEquipmentStats?.totalEquipment ?? 0,
@@ -228,169 +274,343 @@ const WarehousePage: React.FC = () => {
     setIsDetailsModalVisible(true);
   };
 
-  // Export equipment history to Excel
-  const exportToExcel = (eventsWithEquipment: any[]) => {
-    // Prepare data for export
-    const exportData: any[] = [];
-    
-    eventsWithEquipment.forEach((event: any) => {
-      // Extract equipment data from various sources
-      const equipmentItems: any[] = [];
+  /**
+   * Build the report for the "ציוד" tab. The list itself is paginated
+   * server-side (and capped at 500 rows per request), so we page through
+   * the same filter the user has applied until we either hit the
+   * `equipmentTotal` from the stats query or run out of rows. The result
+   * is a single flat table covering every matching row, including ones
+   * the user hasn't scrolled to.
+   */
+  const buildEquipmentReport = useCallback(async (): Promise<ExportReport | null> => {
+    const PAGE = 500;
+    const all: Equipment[] = [];
+    const safeCap = Math.max(equipmentTotal, equipment.length);
+    let pageOffset = 0;
+    let safety = 0;
+    while (safety < 20) {
+      safety += 1;
+      const { data: pageData } = await apolloClient.query<{
+        warehouseEquipment: Equipment[];
+      }>({
+        query: GET_WAREHOUSE_EQUIPMENT,
+        variables: { filter: equipmentFilter, limit: PAGE, offset: pageOffset },
+        fetchPolicy: 'network-only',
+      });
+      const chunk: Equipment[] = pageData?.warehouseEquipment ?? [];
+      if (chunk.length === 0) break;
+      all.push(...chunk);
+      pageOffset += chunk.length;
+      if (chunk.length < PAGE) break;
+      if (safeCap > 0 && all.length >= safeCap) break;
+    }
 
-      // From warehouse metadata (permanent history)
+    if (all.length === 0) return null;
+
+    const cols: ExportColumn<Equipment>[] = [
+      { key: 'name', label: 'שם הציוד', emphasis: true, value: (r) => r.name },
+      { key: 'category', label: 'קטגוריה', value: (r) => r.category || '' },
+      { key: 'brand', label: 'מותג', value: (r) => r.brand || '' },
+      { key: 'model', label: 'דגם', value: (r) => r.equipmentModel || '' },
+      { key: 'barcode', label: 'ברקוד', code: true, value: (r) => r.barcode || '' },
+      {
+        key: 'status',
+        label: 'סטטוס',
+        value: (r) => getStatusText(r.status) || r.status,
+        status: (r) => {
+          const label = getStatusText(r.status) || r.status;
+          if (r.isDisabled) return { label: 'מושבת', variant: 'danger' };
+          if (r.status === 'available') return { label, variant: 'active' };
+          if (r.status === 'assigned') return { label, variant: 'info' };
+          if (r.status === 'maintenance') return { label, variant: 'warn' };
+          return { label, variant: 'neutral' };
+        },
+      },
+      { key: 'qtyAvail', label: 'זמין', numeric: true, value: (r) => r.quantityAvailable },
+      { key: 'qtyTotal', label: 'סה״כ', numeric: true, value: (r) => r.quantityTotal },
+      { key: 'qtyAssigned', label: 'מוקצה', numeric: true, value: (r) => r.quantityAssigned },
+      {
+        key: 'location',
+        label: 'מיקום',
+        value: (r) => {
+          if (r.warehouse?.name) {
+            const parts: string[] = [r.warehouse.name];
+            if (r.storagePlace?.name) {
+              parts.push(
+                r.storagePlace.code
+                  ? `${r.storagePlace.name} (${r.storagePlace.code})`
+                  : r.storagePlace.name,
+              );
+            }
+            return parts.join(' – ');
+          }
+          return r.currentLocation || '';
+        },
+      },
+      { key: 'condition', label: 'מצב', value: (r) => r.condition || '' },
+      {
+        key: 'flags',
+        label: 'הערות',
+        value: (r) => {
+          const flags: string[] = [];
+          if (r.isSharedEngineeringEquipment) flags.push('ציוד הנדסה שיתופי');
+          if (r.suspensionStatus) flags.push(`השעיה: ${r.suspensionStatus}`);
+          if (r.disabledReason) flags.push(`סיבת השבתה: ${r.disabledReason}`);
+          return flags.join(' · ');
+        },
+      },
+    ];
+
+    const filterChips: string[] = [];
+    if (debouncedSearchText) filterChips.push(`חיפוש: ${debouncedSearchText}`);
+    if (selectedCategory !== 'all') filterChips.push(`קטגוריה: ${selectedCategory}`);
+    if (selectedStatus !== 'all') filterChips.push(`סטטוס: ${getStatusText(selectedStatus)}`);
+    if (selectedWarehouse !== 'all') {
+      const w = warehouses.find((x) => x.id === selectedWarehouse);
+      if (w) filterChips.push(`מחסן: ${w.name}`);
+    }
+
+    return {
+      title: 'דוח ציוד מחסן',
+      subtitle: 'רשימת ציוד פעיל המסונן לפי המאפיינים הנוכחיים בלשונית "ציוד".',
+      filenameStem: 'מחסן-ציוד',
+      origin: 'מחסן · ציוד',
+      metaChips: filterChips,
+      summary: [
+        { label: 'סה״כ פריטים', value: all.length, accent: 'warehouse' },
+        { label: 'זמין', value: statistics.totalAvailable, hint: 'יחידות פנויות', accent: 'sets' },
+        { label: 'מוקצה', value: statistics.totalAssigned, hint: 'יחידות בשימוש', accent: 'events' },
+        { label: 'בתחזוקה', value: statistics.totalMaintenance, accent: 'maintenance' },
+        { label: 'מושבת', value: statistics.totalDisabled, accent: 'history' },
+      ],
+      sections: [
+        {
+          kind: 'table',
+          key: 'equipment',
+          title: 'רשימת ציוד',
+          accent: 'warehouse',
+          meta: `${all.length} פריטים`,
+          columns: cols,
+          rows: all,
+          emptyText: 'לא נמצאו פריטים תואמים',
+        },
+      ],
+    };
+  }, [apolloClient, equipmentFilter, equipmentTotal, equipment.length, debouncedSearchText, selectedCategory, selectedStatus, selectedWarehouse, warehouses, statistics]);
+
+  /**
+   * Build the report for the history tab. We reuse the same item flattening
+   * logic the screen uses so the export mirrors exactly what the user sees
+   * (one row per equipment line item, grouped by event in the PDF).
+   */
+  const buildHistoryReport = useCallback((eventsWithEquipment: any[]): ExportReport | null => {
+    if (eventsWithEquipment.length === 0) return null;
+
+    type HistoryRow = {
+      name: string;
+      barcode: string;
+      category: string;
+      quantity: number;
+      statusKey: 'returned' | 'requested' | 'transferred' | 'scanned' | 'legacy';
+      statusLabel: string;
+      assignedAt: string;
+      returnedAt: string;
+      transferredTo: string;
+    };
+
+    const flatten = (event: any): HistoryRow[] => {
+      const items: HistoryRow[] = [];
+
       const warehouseData = event.metadata?.departments?.warehouse;
       const warehouseCustomData = warehouseData?.customData || {};
-      
-      // First check equipmentHistory (permanent record)
       const equipmentHistory = asArray(
-        warehouseCustomData.equipmentHistory ?? warehouseData?.equipmentHistory
+        warehouseCustomData.equipmentHistory ?? warehouseData?.equipmentHistory,
       );
-
-      // If no history, fall back to current assignedItems
       const assignedItems = equipmentHistory.length > 0
         ? equipmentHistory
         : asArray(warehouseCustomData.assignedItems ?? warehouseData?.assignedItems);
-      
-      // Add items from history or current assignments
+
       assignedItems.forEach((item: any) => {
-        equipmentItems.push({
+        const statusKey: HistoryRow['statusKey'] =
+          item.action === 'returned'
+            ? 'returned'
+            : item.action === 'transferred'
+              ? 'transferred'
+              : 'scanned';
+        items.push({
           name: item.name || 'ציוד',
-          type: item.action === 'returned' ? 'returned' : 'scanned',
-          barcode: item.barcode,
-          category: item.category,
-          assignedAt: item.assignedAt || item.scannedAt,
-          returnedAt: item.returnedAt
+          barcode: item.barcode || '',
+          category: item.category || '',
+          quantity: item.quantity || 1,
+          statusKey,
+          statusLabel:
+            statusKey === 'returned'
+              ? 'הוחזר'
+              : statusKey === 'transferred'
+                ? `הועבר${item.transferredTo ? ` ל${item.transferredTo}` : ''}`
+                : 'מוקצה',
+          assignedAt: fmtExportDateTime(item.assignedAt || item.scannedAt),
+          returnedAt: fmtExportDateTime(item.returnedAt),
+          transferredTo: item.transferredTo || '',
         });
       });
-      
-      // From external broadcasts (requested equipment)
+
       const externalBroadcastsData = event.metadata?.departments?.externalBroadcasts;
       const externalCustomData = externalBroadcastsData?.customData || {};
       const requestedEquipment = asArray(
-        externalCustomData.equipmentList ?? externalBroadcastsData?.equipmentList
+        externalCustomData.equipmentList ?? externalBroadcastsData?.equipmentList,
       );
-      
-      // Add requested equipment
       requestedEquipment.forEach((item: any) => {
-        equipmentItems.push({
+        items.push({
           name: item.name || 'ציוד מבוקש',
-          type: 'requested',
-          quantity: item.quantity,
-          category: item.category
+          barcode: '',
+          category: item.category || '',
+          quantity: item.quantity || 1,
+          statusKey: 'requested',
+          statusLabel: 'מבוקש',
+          assignedAt: '',
+          returnedAt: '',
+          transferredTo: '',
         });
       });
-      
-      // From legacy equipment_list field (string or string[])
+
       legacyEquipmentStrings(event.equipment_list).forEach((item: string) => {
-        equipmentItems.push({
+        items.push({
           name: item,
-          type: 'legacy'
+          barcode: '',
+          category: '',
+          quantity: 1,
+          statusKey: 'legacy',
+          statusLabel: 'ישן',
+          assignedAt: '',
+          returnedAt: '',
+          transferredTo: '',
         });
       });
-      
-      // Check backward compatibility location
+
       const rootWarehouseData = event.metadata?.warehouseData;
       if (rootWarehouseData) {
-        // Check history first
         const rootHistory = asArray(rootWarehouseData.equipmentHistory);
         if (rootHistory.length > 0) {
           rootHistory.forEach((item: any) => {
-            equipmentItems.push({
+            const statusKey: HistoryRow['statusKey'] =
+              item.action === 'returned'
+                ? 'returned'
+                : item.action === 'transferred'
+                  ? 'transferred'
+                  : 'scanned';
+            items.push({
               name: item.name || 'ציוד',
-              type: item.action === 'returned' ? 'returned' : 'scanned',
-              barcode: item.barcode,
-              category: item.category,
-              assignedAt: item.assignedAt || item.scannedAt,
-              returnedAt: item.returnedAt
+              barcode: item.barcode || '',
+              category: item.category || '',
+              quantity: item.quantity || 1,
+              statusKey,
+              statusLabel:
+                statusKey === 'returned'
+                  ? 'הוחזר'
+                  : statusKey === 'transferred'
+                    ? `הועבר${item.transferredTo ? ` ל${item.transferredTo}` : ''}`
+                    : 'מוקצה',
+              assignedAt: fmtExportDateTime(item.assignedAt || item.scannedAt),
+              returnedAt: '',
+              transferredTo: item.transferredTo || '',
             });
           });
         } else if (rootWarehouseData.assignedItems) {
-          // Fall back to assigned items if no history
           asArray(rootWarehouseData.assignedItems).forEach((item: any) => {
-            equipmentItems.push({
+            items.push({
               name: item.name || 'ציוד',
-              type: 'scanned',
-              barcode: item.barcode,
-              category: item.category
+              barcode: item.barcode || '',
+              category: item.category || '',
+              quantity: item.quantity || 1,
+              statusKey: 'scanned',
+              statusLabel: 'מוקצה',
+              assignedAt: '',
+              returnedAt: '',
+              transferredTo: '',
             });
           });
         }
       }
-      
-      // Add each equipment item as a row
-      equipmentItems.forEach((item: any) => {
-        exportData.push({
-          'מספר אירוע': event.eventNumber || '',
-          'שם האירוע': event.title || event.hebrewTitle || '',
-          'ערוץ': event.channel || '',
-          'תאריך אירוע': event.startTime && dayjs(event.startTime).isValid()
-            ? dayjs(event.startTime).format('DD/MM/YYYY')
-            : '',
-          'שעת התחלה': event.startTime && dayjs(event.startTime).isValid()
-            ? dayjs(event.startTime).format('HH:mm')
-            : '',
-          'שעת סיום': event.endTime && dayjs(event.endTime).isValid()
-            ? dayjs(event.endTime).format('HH:mm')
-            : '',
-          'מיקום': event.location || event.venue || '',
-          'שם ציוד': item.name || '',
-          'ברקוד': item.barcode || '',
-          'קטגוריה': item.category || '',
-          'כמות': item.quantity || 1,
-          'סטטוס': item.type === 'returned' ? 'הוחזר' : item.type === 'requested' ? 'מבוקש' : 'מוקצה',
-          'תאריך הקצאה': item.assignedAt && dayjs(item.assignedAt).isValid()
-            ? dayjs(item.assignedAt).format('DD/MM/YYYY HH:mm')
-            : '',
-          'תאריך החזרה': item.returnedAt && dayjs(item.returnedAt).isValid()
-            ? dayjs(item.returnedAt).format('DD/MM/YYYY HH:mm')
-            : ''
-        });
-      });
-    });
-    
-    // Convert data to CSV format
-    if (exportData.length === 0) {
-      message.warning('אין נתונים לייצוא');
-      return;
-    }
-    
-    // Create CSV content with BOM for Hebrew support
-    const headers = Object.keys(exportData[0]);
-    const csvContent = '\ufeff' + // BOM for UTF-8
-      headers.join(',') + '\n' +
-      exportData.map(row => 
-        headers.map(header => {
-          const value = row[header];
-          // Escape quotes and handle commas
-          const stringValue = String(value || '');
-          if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
-            return `"${stringValue.replace(/"/g, '""')}"`;
-          }
-          return stringValue;
-        }).join(',')
-      ).join('\n');
-    
-    // Create filename with date range
-    const startDateStr = (dateRange[0] ?? dayjs().subtract(30, 'days')).format('DD.MM.YYYY');
-    const endDateStr = (dateRange[1] ?? dayjs().add(30, 'days')).format('DD.MM.YYYY');
-    const filename = `רשימות ציוד שהוקצה תאריכים - ${startDateStr}-${endDateStr}.csv`;
+      return items;
+    };
 
-    // Create blob and download
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    if (link.download !== undefined) {
-      const url = URL.createObjectURL(blob);
-      link.setAttribute('href', url);
-      link.setAttribute('download', filename);
-      link.style.visibility = 'hidden';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const cols: ExportColumn<HistoryRow>[] = [
+      { key: 'name', label: 'שם הציוד', emphasis: true, value: (r) => r.name },
+      { key: 'category', label: 'קטגוריה', value: (r) => r.category },
+      { key: 'barcode', label: 'ברקוד', code: true, value: (r) => r.barcode },
+      { key: 'quantity', label: 'כמות', numeric: true, value: (r) => r.quantity },
+      {
+        key: 'status',
+        label: 'סטטוס',
+        value: (r) => r.statusLabel,
+        status: (r) => {
+          if (r.statusKey === 'returned') return { label: r.statusLabel, variant: 'returned' };
+          if (r.statusKey === 'requested') return { label: r.statusLabel, variant: 'info' };
+          if (r.statusKey === 'transferred') return { label: r.statusLabel, variant: 'warn' };
+          if (r.statusKey === 'legacy') return { label: r.statusLabel, variant: 'neutral' };
+          return { label: r.statusLabel, variant: 'active' };
+        },
+      },
+      { key: 'assignedAt', label: 'תאריך הקצאה', value: (r) => r.assignedAt },
+      { key: 'returnedAt', label: 'תאריך החזרה', value: (r) => r.returnedAt },
+    ];
 
-      message.success(`הקובץ "${filename}" יורד כעת`);
-    }
-  };
+    const groups = eventsWithEquipment
+      .map((event: any) => {
+        const rows = flatten(event);
+        if (rows.length === 0) return null;
+        const startD = event.startTime && dayjs(event.startTime).isValid() ? dayjs(event.startTime) : null;
+        const endD = event.endTime && dayjs(event.endTime).isValid() ? dayjs(event.endTime) : null;
+        const subtitleParts: string[] = [];
+        if (startD) {
+          subtitleParts.push(startD.format('DD/MM/YYYY HH:mm'));
+          if (endD && !endD.isSame(startD)) subtitleParts.push(`עד ${endD.format('HH:mm')}`);
+        }
+        const secondaryParts: string[] = [];
+        if (event.channel) secondaryParts.push(event.channel);
+        if (event.location || event.venue) secondaryParts.push(`📍 ${event.location || event.venue}`);
+        return {
+          key: event.id || event.eventNumber || event.title,
+          title: `${event.title || event.hebrewTitle || 'אירוע'}${event.eventNumber ? ` · #${event.eventNumber}` : ''}`,
+          subtitle: subtitleParts.join(' '),
+          secondary: secondaryParts.join(' · '),
+          badge: `${rows.length} פריטים`,
+          rows,
+        };
+      })
+      .filter(Boolean) as Array<{ key: string; title: string; subtitle?: string; secondary?: string; badge?: string; rows: HistoryRow[] }>;
+
+    if (groups.length === 0) return null;
+
+    const totalItems = groups.reduce((n, g) => n + g.rows.length, 0);
+    const startStr = (dateRange[0] ?? dayjs().subtract(30, 'days')).format('DD/MM/YYYY');
+    const endStr = (dateRange[1] ?? dayjs().add(30, 'days')).format('DD/MM/YYYY');
+
+    return {
+      title: 'דוח היסטוריית ציוד לאירועים',
+      subtitle: 'פירוט ציוד שהוקצה לאירועים בטווח התאריכים שנבחר.',
+      filenameStem: `מחסן-היסטוריה-${startStr}-${endStr}`,
+      origin: 'מחסן · היסטוריה',
+      metaChips: [`טווח: ${startStr} – ${endStr}`],
+      summary: [
+        { label: 'אירועים', value: groups.length, accent: 'events' },
+        { label: 'פריטי ציוד', value: totalItems, accent: 'warehouse' },
+      ],
+      sections: [
+        {
+          kind: 'grouped',
+          key: 'history',
+          title: 'אירועים עם ציוד מוקצה',
+          accent: 'history',
+          meta: `${groups.length} אירועים · ${totalItems} פריטים`,
+          columns: cols,
+          emptyText: 'לא נמצאו אירועים עם ציוד',
+          groups,
+        },
+      ],
+    };
+  }, [dateRange]);
 
   const renderEquipmentTab = () => (
     <>
@@ -468,8 +688,8 @@ const WarehousePage: React.FC = () => {
 
       {/* Filters and Search */}
       <Card className="mb-6">
-        <Row gutter={16} align="middle">
-          <Col span={8}>
+        <Row gutter={[16, 16]} align="middle">
+          <Col xs={24} md={8}>
             <Input
               placeholder="חיפוש לפי שם, ברקוד או מותג"
               prefix={<SearchOutlined />}
@@ -478,7 +698,7 @@ const WarehousePage: React.FC = () => {
               allowClear
             />
           </Col>
-          <Col span={6}>
+          <Col xs={12} md={5}>
             <Select
               placeholder="סנן לפי קטגוריה"
               style={{ width: '100%' }}
@@ -492,7 +712,21 @@ const WarehousePage: React.FC = () => {
               ))}
             </Select>
           </Col>
-          <Col span={6}>
+          <Col xs={12} md={4}>
+            <Select
+              placeholder="סנן לפי מחסן"
+              style={{ width: '100%' }}
+              value={selectedWarehouse}
+              onChange={setSelectedWarehouse}
+              suffixIcon={<EnvironmentOutlined />}
+            >
+              <Select.Option value="all">כל המחסנים</Select.Option>
+              {warehouses.map((w) => (
+                <Select.Option key={w.id} value={w.id}>{w.name}</Select.Option>
+              ))}
+            </Select>
+          </Col>
+          <Col xs={12} md={4}>
             <Select
               placeholder="סנן לפי סטטוס"
               style={{ width: '100%' }}
@@ -508,13 +742,14 @@ const WarehousePage: React.FC = () => {
               <Select.Option value="disabled">מושבת</Select.Option>
             </Select>
           </Col>
-          <Col span={4}>
-            <Button 
+          <Col xs={12} md={3}>
+            <Button
               icon={<ClearOutlined />}
               onClick={() => {
                 setSearchText('');
                 setSelectedCategory('all');
                 setSelectedStatus('all');
+                setSelectedWarehouse('all');
               }}
             >
               נקה סינון
@@ -528,31 +763,38 @@ const WarehousePage: React.FC = () => {
         title={
           <span>
             <InboxOutlined className="ml-2" style={{ color: '#1890ff' }} />
-            רשימת ציוד ({filteredEquipment.length} פריטים)
+            רשימת ציוד ({equipmentTotal} פריטים)
           </span>
         }
+        extra={
+          <WarehouseExportButtons
+            buildReport={buildEquipmentReport}
+            disabled={equipmentLoading || equipmentTotal === 0}
+          />
+        }
       >
-        {equipmentLoading ? (
+        {equipmentLoading && visibleEquipment.length === 0 ? (
           <div className="text-center py-8">טוען נתוני ציוד...</div>
         ) : equipmentError ? (
           <Alert message="שגיאה בטעינת נתוני ציוד" type="error" showIcon />
-        ) : filteredEquipment.length === 0 ? (
+        ) : visibleEquipment.length === 0 ? (
           <Empty description="לא נמצא ציוד תואם לחיפוש" />
         ) : (
           <List
-            dataSource={filteredEquipment}
+            dataSource={visibleEquipment}
             pagination={{
               current: currentPage,
-              pageSize: pageSize,
-              total: filteredEquipment.length,
+              pageSize: safePageSize,
+              total: equipmentTotal,
               showSizeChanger: true,
               pageSizeOptions: ['20', '50', '100'],
               showTotal: (total, range) => `${range[0]}-${range[1]} מתוך ${total} פריטים`,
               onChange: (page, size) => {
-                setCurrentPage(page);
-                if (size !== pageSize) {
+                if (size !== safePageSize) {
                   setPageSize(size);
                   setCurrentPage(1);
+                } else {
+                  setCurrentPage(page);
                 }
               },
               position: 'both',
@@ -646,9 +888,21 @@ const WarehousePage: React.FC = () => {
                         <span className="text-blue-600">| מוקצה: {item.quantityAssigned}</span>
                       )}
                     </Space>
-                    {item.currentLocation && (
+                    {item.warehouse?.name ? (
+                      <span>
+                        <EnvironmentOutlined />{' '}
+                        {item.warehouse.name}
+                        {item.storagePlace?.name && (
+                          <>
+                            {' – '}
+                            {item.storagePlace.name}
+                            {item.storagePlace.code && ` (${item.storagePlace.code})`}
+                          </>
+                        )}
+                      </span>
+                    ) : item.currentLocation ? (
                       <span>מיקום: {item.currentLocation}</span>
-                    )}
+                    ) : null}
                   </div>
                   {item.isDisabled && item.disabledReason && (
                     <div className="text-sm text-red-600 mt-1">
@@ -750,13 +1004,10 @@ const WarehousePage: React.FC = () => {
                 <Tag color="blue">
                   {dateRangeValid ? `${eventsWithEquipment.length} אירועים עם ציוד` : 'בחר טווח תאריכים'}
                 </Tag>
-                <Button 
-                  icon={<DownloadOutlined />}
-                  onClick={() => exportToExcel(eventsWithEquipment)}
+                <WarehouseExportButtons
+                  buildReport={() => buildHistoryReport(eventsWithEquipment)}
                   disabled={!dateRangeValid || eventsWithEquipment.length === 0}
-                >
-                  ייצוא CSV
-                </Button>
+                />
               </Space>
             </Col>
           </Row>
@@ -1006,95 +1257,87 @@ const WarehousePage: React.FC = () => {
           </div>
         </div>
 
-        {/* Tabs. Broadcast-dependent tabs are filtered out for users who
-            don't have BROADCAST_VIEW so they don't accidentally trip a
-            "Missing permission: BROADCAST_VIEW" 500 from the resolver. */}
-        <Tabs 
-          activeKey={activeTab} 
-          onChange={setActiveTab}
-          items={([
-            {
-              key: 'equipment',
-              label: (
-                <span>
-                  <InboxOutlined />
-                  רשימת ציוד
-                </span>
-              ),
-              children: renderEquipmentTab(),
-            },
-            canViewBroadcasts && {
-              key: 'history',
-              label: (
-                <span>
-                  <HistoryOutlined />
-                  היסטוריית ציוד לאירועים
-                </span>
-              ),
-              children: renderHistoryTab(),
-            },
-            {
-              key: 'internal-assignments',
-              label: (
-                <span>
-                  <UserSwitchOutlined />
-                  הקצאות פנימיות
-                </span>
-              ),
-              children: <InternalAssignmentsTab canManage={canManageWarehouse} />,
-            },
-            {
-              key: 'vendors',
-              label: (
-                <span>
-                  <PhoneOutlined />
-                  ניהול ספקים
-                </span>
-              ),
-              children: <VendorManagement canManage={canManageWarehouse} />,
-            },
-            canViewBroadcasts && {
-              key: 'upcoming-events',
-              label: (
-                <span>
-                  <CalendarOutlined />
-                  אירועים קרובים
-                </span>
-              ),
-              children: <UpcomingEvents />,
-            },
-            {
-              key: 'equipment-sets',
-              label: (
-                <span>
-                  <InboxOutlined />
-                  סטים / פריסטים
-                </span>
-              ),
-              children: <EquipmentSetsManager canManage={canManageWarehouse} />,
-            },
-            canViewBroadcasts && {
-              key: 'external-requests',
-              label: (
-                <span>
-                  <ToolOutlined />
-                  בקשות שידורי חוץ
-                </span>
-              ),
-              children: <ExternalBroadcastRequests message={message} canManage={canManageWarehouse} />,
-            },
-            {
-              key: 'tracking',
-              label: (
-                <span>
-                  <EnvironmentOutlined />
-                  מעקב חי
-                </span>
-              ),
-              children: <EquipmentLiveTracking />,
-            },
-          ].filter(Boolean) as { key: string; label: React.ReactNode; children: React.ReactNode }[])}
-        />
+        {/* Section pill bar. Broadcast-dependent items are filtered out for
+            users who don't have BROADCAST_VIEW so they don't accidentally
+            trip a "Missing permission: BROADCAST_VIEW" 500 from the resolver.
+            Pills wrap onto a second row on narrow screens instead of
+            scrolling or hiding behind an overflow menu. */}
+        {(() => {
+          const navItems = ([
+            { key: 'equipment', icon: <InboxOutlined />, label: 'ציוד' },
+            canViewBroadcasts && { key: 'history', icon: <HistoryOutlined />, label: 'היסטוריה' },
+            { key: 'internal-assignments', icon: <UserSwitchOutlined />, label: 'הקצאות פנימיות' },
+            { key: 'vendors', icon: <PhoneOutlined />, label: 'ספקים' },
+            { key: 'warehouses', icon: <HomeOutlined />, label: 'מחסנים' },
+            canViewBroadcasts && { key: 'upcoming-events', icon: <CalendarOutlined />, label: 'אירועים קרובים' },
+            { key: 'equipment-sets', icon: <InboxOutlined />, label: 'סטים' },
+            { key: 'shared-engineering', icon: <ShareAltOutlined />, label: 'ציוד הנדסה שיתופי' },
+            canViewBroadcasts && { key: 'external-requests', icon: <ToolOutlined />, label: 'שידורי חוץ' },
+            { key: 'tracking', icon: <EnvironmentOutlined />, label: 'מעקב חי' },
+          ].filter(Boolean) as { key: string; icon: React.ReactNode; label: string }[]);
+
+          const renderActiveTab = () => {
+            switch (activeTab) {
+              case 'equipment':
+                return renderEquipmentTab();
+              case 'history':
+                return canViewBroadcasts ? renderHistoryTab() : null;
+              case 'internal-assignments':
+                return <InternalAssignmentsTab canManage={canManageWarehouse} />;
+              case 'vendors':
+                return <VendorManagement canManage={canManageWarehouse} />;
+              case 'warehouses':
+                return <WarehouseManagement canManage={canManageWarehouse} />;
+              case 'upcoming-events':
+                return canViewBroadcasts ? <UpcomingEvents /> : null;
+              case 'equipment-sets':
+                return <EquipmentSetsManager canManage={canManageWarehouse} />;
+              case 'shared-engineering':
+                return <SharedEngineeringEquipmentArea canManage={canManageWarehouse} verbose />;
+              case 'external-requests':
+                return canViewBroadcasts ? <ExternalBroadcastRequests message={message} canManage={canManageWarehouse} /> : null;
+              case 'tracking':
+                return <EquipmentLiveTracking />;
+              default:
+                return renderEquipmentTab();
+            }
+          };
+
+          return (
+            <>
+              <div
+                className="flex flex-wrap gap-1.5 mb-6 p-1.5 bg-white rounded-xl border border-gray-200 shadow-sm"
+                role="tablist"
+                aria-label="ניווט מחסן"
+              >
+                {navItems.map((item) => {
+                  const isActive = activeTab === item.key;
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      onClick={() => setActiveTab(item.key)}
+                      className={[
+                        'inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium',
+                        'transition-all duration-150 whitespace-nowrap select-none',
+                        'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-1',
+                        isActive
+                          ? 'bg-blue-500 text-white shadow-sm hover:bg-blue-600'
+                          : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+                      ].join(' ')}
+                    >
+                      <span className="text-base leading-none">{item.icon}</span>
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {renderActiveTab()}
+            </>
+          );
+        })()}
 
         {/* Equipment Registration Modal */}
         <EquipmentRegistrationModal

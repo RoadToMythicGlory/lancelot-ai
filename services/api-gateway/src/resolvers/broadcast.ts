@@ -1,6 +1,7 @@
 import { connectMongoose } from '../config/mongodb';
 import { BroadcastEvent, RoutingConfig } from '../models/broadcast.models';
 import { Equipment, generateBarcode, EquipmentAssignment, EquipmentHistory, QUANTITY_BASED_DEFAULT_CATEGORIES } from '../models/equipment.models';
+import { Warehouse } from '../models/warehouse.models';
 import { ExternalBroadcastPreset } from '../models/externalBroadcastPreset.models';
 import mongoose from 'mongoose';
 import { requireAuth, requirePermission } from '../middleware/auth';
@@ -69,6 +70,12 @@ function buildWarehouseEquipmentQuery(filter?: any): any {
   if (filter.location) {
     query.currentLocation = { $regex: filter.location, $options: 'i' };
   }
+  if (filter.warehouseId && mongoose.Types.ObjectId.isValid(filter.warehouseId)) {
+    query.warehouseId = new mongoose.Types.ObjectId(filter.warehouseId);
+  }
+  if (filter.storagePlaceId && mongoose.Types.ObjectId.isValid(filter.storagePlaceId)) {
+    query.storagePlaceId = new mongoose.Types.ObjectId(filter.storagePlaceId);
+  }
   if (filter.searchText && String(filter.searchText).trim()) {
     const searchRegex = { $regex: escapeRegex(String(filter.searchText).trim()), $options: 'i' };
     query.$or = [
@@ -82,8 +89,133 @@ function buildWarehouseEquipmentQuery(filter?: any): any {
   if (filter.isSharedEngineeringEquipment !== undefined && filter.isSharedEngineeringEquipment !== null) {
     query.isSharedEngineeringEquipment = !!filter.isSharedEngineeringEquipment;
   }
+  // Default-hide disabled equipment when the caller asks for it. The
+  // `disabled` / `under_maintenance` status filters above already pin
+  // `isDisabled = true`, so we only honour `excludeDisabled` when those
+  // didn't claim the field — otherwise the two would clash.
+  if (filter.excludeDisabled === true && query.isDisabled === undefined) {
+    query.isDisabled = { $ne: true };
+  }
 
   return query;
+}
+
+// Resolve a (warehouseId, storagePlaceId) pair into a human-readable
+// location string, used to keep the legacy `currentLocation` field in
+// sync so older UIs and reports keep working. Returns `null` if the
+// warehouse can't be found.
+async function buildLocationStringFromWarehouse(
+  warehouseId: string | null | undefined,
+  storagePlaceId?: string | null,
+): Promise<string | null> {
+  if (!warehouseId || !mongoose.Types.ObjectId.isValid(warehouseId)) {
+    return null;
+  }
+  const warehouse = await Warehouse.findById(warehouseId).exec();
+  if (!warehouse) {
+    return null;
+  }
+  if (storagePlaceId && mongoose.Types.ObjectId.isValid(storagePlaceId)) {
+    const place = warehouse.storagePlaces.id(storagePlaceId);
+    if (place) {
+      const codeSuffix = place.code ? ` (${place.code})` : '';
+      return `${warehouse.name} - ${place.name}${codeSuffix}`;
+    }
+  }
+  return warehouse.name;
+}
+
+// Build the new structured "warehouse"/"storagePlace" GraphQL fields
+// alongside the equipment payload. We expose lightweight snapshots so
+// list views don't need a second round-trip.
+function buildEquipmentLocationFields(equipment: any, warehouseCache: Map<string, any>) {
+  const warehouseId = equipment.warehouseId ? equipment.warehouseId.toString() : null;
+  const storagePlaceId = equipment.storagePlaceId ? equipment.storagePlaceId.toString() : null;
+  const warehouse = warehouseId ? warehouseCache.get(warehouseId) : null;
+
+  let storagePlace: any = null;
+  if (warehouse && storagePlaceId) {
+    const place = warehouse.storagePlaces?.find?.(
+      (p: any) => p._id?.toString() === storagePlaceId,
+    );
+    if (place) {
+      storagePlace = {
+        id: place._id.toString(),
+        name: place.name,
+        type: place.type || 'other',
+        code: place.code || null,
+        notes: place.notes || null,
+        isActive: place.isActive !== false,
+        createdAt: place.createdAt ? new Date(place.createdAt).toISOString() : null,
+        updatedAt: place.updatedAt ? new Date(place.updatedAt).toISOString() : null,
+      };
+    }
+  }
+
+  const warehouseSnapshot = warehouse
+    ? {
+        id: warehouse._id.toString(),
+        name: warehouse.name,
+        description: warehouse.description || null,
+        address: warehouse.address || null,
+        dimensions: warehouse.dimensions
+          ? {
+              length: warehouse.dimensions.length ?? null,
+              width: warehouse.dimensions.width ?? null,
+              height: warehouse.dimensions.height ?? null,
+              unit: warehouse.dimensions.unit || 'meters',
+            }
+          : null,
+        storagePlaces: Array.isArray(warehouse.storagePlaces)
+          ? warehouse.storagePlaces.map((p: any) => ({
+              id: p._id.toString(),
+              name: p.name,
+              type: p.type || 'other',
+              code: p.code || null,
+              notes: p.notes || null,
+              isActive: p.isActive !== false,
+              createdAt: p.createdAt ? new Date(p.createdAt).toISOString() : null,
+              updatedAt: p.updatedAt ? new Date(p.updatedAt).toISOString() : null,
+            }))
+          : [],
+        isActive: warehouse.isActive !== false,
+        createdBy: warehouse.createdBy || null,
+        createdAt: warehouse.createdAt
+          ? new Date(warehouse.createdAt).toISOString()
+          : new Date().toISOString(),
+        updatedAt: warehouse.updatedAt
+          ? new Date(warehouse.updatedAt).toISOString()
+          : new Date().toISOString(),
+      }
+    : null;
+
+  return {
+    warehouseId,
+    storagePlaceId,
+    warehouse: warehouseSnapshot,
+    storagePlace,
+  };
+}
+
+// Bulk load warehouses referenced by a list of equipment rows so the
+// `warehouseEquipment` list resolver stays O(1) DB queries instead of
+// O(N).
+async function loadWarehousesForEquipment(items: any[]): Promise<Map<string, any>> {
+  const ids = new Set<string>();
+  for (const item of items) {
+    if (item?.warehouseId) {
+      ids.add(item.warehouseId.toString());
+    }
+  }
+  if (ids.size === 0) return new Map();
+  const docs = await Warehouse.find({
+    _id: { $in: Array.from(ids).map((id) => new mongoose.Types.ObjectId(id)) },
+  }).exec();
+  const cache = new Map<string, any>();
+  for (const doc of docs) {
+    cache.set(doc._id.toString(), doc);
+  }
+  return cache;
 }
 
 // Map database status values to GraphQL BroadcastEventStatus enum values
@@ -220,7 +352,9 @@ export const broadcastResolvers = {
           .skip(cappedOffset)
           .limit(cappedLimit)
           .exec();
-        
+
+        const warehouseCache = await loadWarehousesForEquipment(equipment);
+
         // Map to GraphQL format
         return equipment.map(item => ({
           id: item._id.toString(),
@@ -243,6 +377,7 @@ export const broadcastResolvers = {
           manualLink: item.manualLink || null,
           imageUrl: item.imageUrl || null,
           storage: item.storage || null,
+          ...buildEquipmentLocationFields(item, warehouseCache),
           isQuantityBased: item.isQuantityBased || false,
           isSharedEngineeringEquipment: item.isSharedEngineeringEquipment || false,
           isDisabled: item.isDisabled || false,
@@ -331,6 +466,24 @@ export const broadcastResolvers = {
           }));
       } catch (err) {
         console.error('Error fetching warehouse equipment picker list:', err);
+        return [];
+      }
+    },
+
+    warehouseEquipmentCategories: async (_: any, __: unknown, context: any) => {
+      try {
+        requirePermission(context, Permission.WAREHOUSE_VIEW);
+        await ensureMongoConnection();
+        // Distinct categories across all active (non-disabled) equipment.
+        // Lets the warehouse list UI populate its category filter without
+        // having to fetch the full catalog client-side once we paginate
+        // the main list server-side.
+        const raw = await Equipment.distinct('category', { isDisabled: { $ne: true } });
+        return (raw as unknown[])
+          .filter((c): c is string => typeof c === 'string' && c.trim().length > 0)
+          .sort((a, b) => a.localeCompare(b, 'he'));
+      } catch (error) {
+        console.error('Error fetching warehouse equipment categories:', error);
         return [];
       }
     },
@@ -1313,10 +1466,33 @@ export const broadcastResolvers = {
         requirePermission(context, Permission.WAREHOUSE_MANAGE);
         await ensureMongoConnection();
         console.log('🆕 Creating equipment:', input);
-        
+
         // Generate a unique barcode if not provided
         const barcode = input.barcode || await generateBarcode(input.category);
-        
+
+        // Resolve warehouse + storage place references. We accept either
+        // the structured warehouseId/storagePlaceId pair (preferred) or
+        // the legacy free-text storage strings (kept for backward
+        // compatibility with imports and older clients).
+        const warehouseId =
+          input.warehouseId && mongoose.Types.ObjectId.isValid(input.warehouseId)
+            ? new mongoose.Types.ObjectId(input.warehouseId)
+            : null;
+        const storagePlaceId =
+          input.storagePlaceId && mongoose.Types.ObjectId.isValid(input.storagePlaceId)
+            ? new mongoose.Types.ObjectId(input.storagePlaceId)
+            : null;
+
+        let currentLocation: string | null = null;
+        if (warehouseId) {
+          currentLocation = await buildLocationStringFromWarehouse(
+            warehouseId.toString(),
+            storagePlaceId?.toString(),
+          );
+        } else if (input.storage) {
+          currentLocation = `Row ${input.storage.row}, Shelf ${input.storage.shelf}, Cell ${input.storage.cell}`;
+        }
+
         // Create new equipment with all fields
         const equipment = new Equipment({
           name: input.name,
@@ -1336,15 +1512,19 @@ export const broadcastResolvers = {
           manualLink: input.manualLink,
           imageUrl: input.imageUrl,
           storage: input.storage,
-          currentLocation: input.storage ? `Row ${input.storage.row}, Shelf ${input.storage.shelf}, Cell ${input.storage.cell}` : null,
+          warehouseId,
+          storagePlaceId,
+          currentLocation,
           isQuantityBased: input.isQuantityBased ?? QUANTITY_BASED_DEFAULT_CATEGORIES.has(input.category),
           isSharedEngineeringEquipment: input.isSharedEngineeringEquipment ?? false,
           lastUsedAt: new Date()
         });
-        
+
         const savedEquipment = await equipment.save();
         console.log('✅ Successfully created equipment:', savedEquipment.id);
-        
+
+        const warehouseCache = await loadWarehousesForEquipment([savedEquipment]);
+
         // Map to GraphQL format
         return {
           id: savedEquipment._id.toString(),
@@ -1367,6 +1547,7 @@ export const broadcastResolvers = {
           manualLink: savedEquipment.manualLink || null,
           imageUrl: savedEquipment.imageUrl || null,
           storage: savedEquipment.storage || null,
+          ...buildEquipmentLocationFields(savedEquipment, warehouseCache),
           isQuantityBased: savedEquipment.isQuantityBased || false,
           isSharedEngineeringEquipment: savedEquipment.isSharedEngineeringEquipment || false,
           isDisabled: savedEquipment.isDisabled || false,
@@ -1388,7 +1569,7 @@ export const broadcastResolvers = {
         requirePermission(context, Permission.WAREHOUSE_MANAGE);
         await ensureMongoConnection();
         console.log('🔄 Updating equipment:', id, input);
-        
+
         // Build update object
         const updateData: any = {};
         if (input.name !== undefined) updateData.name = input.name;
@@ -1407,10 +1588,69 @@ export const broadcastResolvers = {
         if (input.imageUrl !== undefined) updateData.imageUrl = input.imageUrl;
         if (input.storage !== undefined) {
           updateData.storage = input.storage;
-          if (input.storage) {
+          if (input.storage && !input.warehouseId) {
             updateData.currentLocation = `Row ${input.storage.row}, Shelf ${input.storage.shelf}, Cell ${input.storage.cell}`;
           }
         }
+
+        // Structured warehouse/place updates. Treat `null` as an explicit
+        // clear (e.g. when the user picks "no warehouse"). When a
+        // warehouse is set we also refresh `currentLocation` so the
+        // legacy free-text view stays useful.
+        if (input.warehouseId !== undefined) {
+          if (input.warehouseId === null) {
+            updateData.warehouseId = null;
+            updateData.storagePlaceId = null;
+            if (input.currentLocation === undefined) {
+              updateData.currentLocation = null;
+            }
+          } else if (mongoose.Types.ObjectId.isValid(input.warehouseId)) {
+            updateData.warehouseId = new mongoose.Types.ObjectId(input.warehouseId);
+            // If a storage place wasn't supplied alongside the warehouse,
+            // clear the previous one so we don't keep dangling references
+            // to places that belong to a different warehouse.
+            if (input.storagePlaceId === undefined) {
+              updateData.storagePlaceId = null;
+            }
+          }
+        }
+        if (input.storagePlaceId !== undefined) {
+          if (input.storagePlaceId === null) {
+            updateData.storagePlaceId = null;
+          } else if (mongoose.Types.ObjectId.isValid(input.storagePlaceId)) {
+            updateData.storagePlaceId = new mongoose.Types.ObjectId(input.storagePlaceId);
+          }
+        }
+
+        // Recompute currentLocation from the (possibly updated) warehouse
+        // selection so the legacy text field stays in sync with the
+        // structured reference.
+        if (
+          (input.warehouseId !== undefined || input.storagePlaceId !== undefined) &&
+          input.currentLocation === undefined
+        ) {
+          const nextWarehouseId =
+            updateData.warehouseId === undefined
+              ? undefined
+              : updateData.warehouseId
+                ? updateData.warehouseId.toString()
+                : null;
+          const nextStoragePlaceId =
+            updateData.storagePlaceId === undefined
+              ? undefined
+              : updateData.storagePlaceId
+                ? updateData.storagePlaceId.toString()
+                : null;
+          if (nextWarehouseId) {
+            updateData.currentLocation = await buildLocationStringFromWarehouse(
+              nextWarehouseId,
+              nextStoragePlaceId ?? null,
+            );
+          } else if (nextWarehouseId === null) {
+            updateData.currentLocation = null;
+          }
+        }
+
         if (input.isDisabled !== undefined) updateData.isDisabled = input.isDisabled;
         if (input.disabledReason !== undefined) updateData.disabledReason = input.disabledReason;
         if (input.suspensionStatus !== undefined) updateData.suspensionStatus = input.suspensionStatus;
@@ -1418,20 +1658,22 @@ export const broadcastResolvers = {
         if (input.isSharedEngineeringEquipment !== undefined) {
           updateData.isSharedEngineeringEquipment = !!input.isSharedEngineeringEquipment;
         }
-        
+
         // Update equipment
         const updatedEquipment = await Equipment.findByIdAndUpdate(
           id,
           { $set: updateData },
           { new: true, runValidators: true }
         );
-        
+
         if (!updatedEquipment) {
           throw new Error(`Equipment with ID ${id} not found`);
         }
-        
+
         console.log('✅ Successfully updated equipment:', id);
-        
+
+        const warehouseCache = await loadWarehousesForEquipment([updatedEquipment]);
+
         // Map to GraphQL format
         return {
           id: updatedEquipment._id.toString(),
@@ -1454,6 +1696,7 @@ export const broadcastResolvers = {
           manualLink: updatedEquipment.manualLink || null,
           imageUrl: updatedEquipment.imageUrl || null,
           storage: updatedEquipment.storage || null,
+          ...buildEquipmentLocationFields(updatedEquipment, warehouseCache),
           isQuantityBased: updatedEquipment.isQuantityBased || false,
           isSharedEngineeringEquipment: updatedEquipment.isSharedEngineeringEquipment || false,
           isDisabled: updatedEquipment.isDisabled || false,
@@ -1522,6 +1765,53 @@ export const broadcastResolvers = {
         }> = [];
         const successfulReturnedKeys = new Set<string>();
         const failures: Array<{ equipmentId: string; reason?: string; error?: string }> = [];
+        // Tracks items that had no active assignment but were still present in
+        // event metadata — we clean them out instead of failing the request.
+        let staleReferenceCleanups = 0;
+
+        // Check whether an equipment id / barcode is still referenced anywhere
+        // in the event metadata the UI uses to populate the return modal. We
+        // use this to distinguish a legitimate failure (the operator asked to
+        // return something the system has no record of) from a stale-metadata
+        // orphan (the item is only "assigned" inside the event document and
+        // can be safely scrubbed).
+        const isReferencedInEventMetadata = (
+          eq: { _id: any; barcode?: string | null },
+          alsoCheck: string,
+        ): boolean => {
+          const eqId = eq._id?.toString?.() ?? String(eq._id);
+          const barcode = eq.barcode || '';
+          const candidates = new Set<string>([eqId, alsoCheck]);
+          if (barcode) candidates.add(barcode);
+
+          const matchesItem = (item: any): boolean => {
+            if (!item) return false;
+            const id = item.equipmentId || item.id;
+            const bc = item.barcode;
+            return (
+              (typeof id === 'string' && candidates.has(id)) ||
+              (typeof bc === 'string' && candidates.has(bc))
+            );
+          };
+
+          const eventDoc = event as any;
+
+          if (Array.isArray(eventDoc.equipment_list)) {
+            if (eventDoc.equipment_list.some((v: any) => typeof v === 'string' && candidates.has(v))) {
+              return true;
+            }
+          }
+
+          const lists: any[][] = [
+            eventDoc?.metadata?.departments?.warehouse?.assignedItems,
+            eventDoc?.metadata?.departments?.warehouse?.customData?.assignedItems,
+            eventDoc?.metadata?.warehouseData?.assignedItems,
+            eventDoc?.metadata?.warehouseData?.customData?.assignedItems,
+            eventDoc?.metadata?.departments?.externalBroadcasts?.equipmentList,
+            eventDoc?.metadata?.departments?.externalBroadcasts?.customData?.equipmentList,
+          ];
+          return lists.some((arr) => Array.isArray(arr) && arr.some(matchesItem));
+        };
 
         for (const requestedId of equipmentIds) {
           // Resolve by Mongo _id first, then fall back to barcode lookup so
@@ -1548,6 +1838,38 @@ export const broadcastResolvers = {
           });
 
           if (!result.success) {
+            // Stale-metadata recovery: the equipment has no active assignment
+            // for this event, but the event document still references it.
+            // The UI builds its returnable list by merging metadata refs with
+            // active assignments, so without this branch the operator would
+            // be permanently stuck — every retry would produce "1 failed"
+            // and the orphan reference would never go away. Treat this as a
+            // metadata cleanup so the existing pruning code below removes
+            // the dangling reference.
+            if (
+              result.reason === 'no_active_assignment' &&
+              isReferencedInEventMetadata(equipment, requestedId)
+            ) {
+              log.info('Cleaning up stale equipment reference (no active assignment)', {
+                equipmentId: equipment._id.toString(),
+                barcode: equipment.barcode,
+                eventId: (event._id as mongoose.Types.ObjectId).toString(),
+              });
+
+              successfulReturnedKeys.add(equipment._id.toString());
+              if (equipment.barcode) successfulReturnedKeys.add(equipment.barcode);
+              successfulReturnedKeys.add(requestedId);
+              staleReferenceCleanups++;
+
+              updatedEquipment.push({
+                id: equipment._id.toString(),
+                status: equipment.status,
+                quantityAvailable: equipment.quantityAvailable,
+                quantityAssigned: equipment.quantityAssigned,
+              });
+              continue;
+            }
+
             log.warn('Equipment return failed', {
               equipmentId: equipment._id.toString(),
               barcode: equipment.barcode,
@@ -1707,13 +2029,27 @@ export const broadcastResolvers = {
         await event.save();
 
         const successCount = updatedEquipment.length;
-        const message = failures.length === 0
-          ? `${successCount} פריטי ציוד הוחזרו בהצלחה למחסן`
-          : `${successCount} פריטי ציוד הוחזרו בהצלחה (${failures.length} נכשלו)`;
+        const realReturnCount = successCount - staleReferenceCleanups;
+        const messageParts: string[] = [];
+        if (realReturnCount > 0) {
+          messageParts.push(`${realReturnCount} פריטי ציוד הוחזרו בהצלחה למחסן`);
+        }
+        if (staleReferenceCleanups > 0) {
+          messageParts.push(`${staleReferenceCleanups} רישומים יתומים נוקו`);
+        }
+        if (failures.length > 0) {
+          messageParts.push(`${failures.length} נכשלו`);
+        }
+        const message =
+          messageParts.length > 0
+            ? messageParts.join(' · ')
+            : 'לא בוצעה פעולה';
 
         log.info('Equipment return completed', {
           eventId,
           successCount,
+          realReturnCount,
+          staleReferenceCleanups,
           failureCount: failures.length,
         });
 

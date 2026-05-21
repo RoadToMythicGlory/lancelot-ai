@@ -36,6 +36,9 @@ import { GET_INTERNAL_EQUIPMENT_ASSIGNMENTS } from '../../../graphql/queries';
 import { RETURN_INTERNAL_EQUIPMENT_ASSIGNMENT } from '../../../graphql/mutations';
 import InternalAssignmentDispatchModal from './InternalAssignmentDispatchModal';
 import InternalAssignmentTransferModal from './InternalAssignmentTransferModal';
+import WarehouseExportButtons from '../WarehouseExportButtons';
+import type { ExportColumn, ExportReport } from '@/utils/warehouseReportExport';
+import { formatDateTime as fmtDT } from '@/utils/warehouseReportExport';
 
 interface InternalAssignment {
   id: string;
@@ -282,6 +285,99 @@ const InternalAssignmentsTab: React.FC<InternalAssignmentsTabProps> = ({ canMana
     [assignments],
   );
 
+  /** Build the export report for the current view (respects status filter,
+   *  worker-type filter and free-text search). Both internal and external
+   *  workers share one table because the row already carries the worker
+   *  type as a column. */
+  const buildReport = (): ExportReport | null => {
+    if (filteredAssignments.length === 0) return null;
+
+    const cols: ExportColumn<InternalAssignment>[] = [
+      { key: 'worker', label: 'עובד', emphasis: true, value: (r) => r.assignedToName },
+      {
+        key: 'workerType',
+        label: 'סוג',
+        value: (r) => (r.assignedToType === 'internal' ? 'פנימי' : 'חיצוני'),
+      },
+      { key: 'phone', label: 'טלפון', value: (r) => r.assignedToPhone || '' },
+      { key: 'equipment', label: 'ציוד', value: (r) => r.equipment?.name || '' },
+      { key: 'category', label: 'קטגוריה', value: (r) => r.equipment?.category || '' },
+      { key: 'barcode', label: 'ברקוד', code: true, value: (r) => r.equipment?.barcode || '' },
+      { key: 'qty', label: 'כמות', numeric: true, value: (r) => r.quantityAssigned },
+      {
+        key: 'status',
+        label: 'סטטוס',
+        value: (r) => STATUS_LABELS[r.status]?.label || r.status,
+        status: (r) => {
+          const label = STATUS_LABELS[r.status]?.label || r.status;
+          if (r.status === 'active') return { label, variant: 'active' };
+          if (r.status === 'returned') return { label, variant: 'returned' };
+          if (r.status === 'transferred') return { label, variant: 'warn' };
+          if (r.status === 'cancelled') return { label, variant: 'danger' };
+          return { label, variant: 'neutral' };
+        },
+      },
+      { key: 'assignedAt', label: 'הוקצה', value: (r) => fmtDT(r.assignedAt) },
+      { key: 'assignedBy', label: 'הוקצה ע"י', value: (r) => r.assignedByName || '' },
+      { key: 'returnedAt', label: 'הוחזר', value: (r) => fmtDT(r.returnedAt) },
+      {
+        key: 'transferredAt',
+        label: 'הועבר',
+        value: (r) => (r.transferredAt ? fmtDT(r.transferredAt) : ''),
+      },
+      { key: 'notes', label: 'הערות', value: (r) => r.notes || '' },
+    ];
+
+    const chips: string[] = [];
+    chips.push(
+      `סטטוס: ${
+        statusFilter === 'all'
+          ? 'הכל'
+          : statusFilter === 'active'
+            ? 'פעילות'
+            : statusFilter === 'returned'
+              ? 'הוחזרו'
+              : 'הועברו'
+      }`,
+    );
+    if (workerTypeFilter !== 'all') {
+      chips.push(`סוג עובד: ${workerTypeFilter === 'internal' ? 'פנימי' : 'חיצוני'}`);
+    }
+    if (searchText.trim()) chips.push(`חיפוש: ${searchText.trim()}`);
+
+    const counts = {
+      active: filteredAssignments.filter((a) => a.status === 'active').length,
+      returned: filteredAssignments.filter((a) => a.status === 'returned').length,
+      transferred: filteredAssignments.filter((a) => a.status === 'transferred').length,
+    };
+
+    return {
+      title: 'דוח הקצאות פנימיות',
+      subtitle: 'הקצאות ציוד פעילות והיסטוריות לעובדים פנימיים וחיצוניים.',
+      filenameStem: 'מחסן-הקצאות-פנימיות',
+      origin: 'מחסן · הקצאות פנימיות',
+      metaChips: chips,
+      summary: [
+        { label: 'סה״כ הקצאות', value: filteredAssignments.length, accent: 'warehouse' },
+        { label: 'פעילות', value: counts.active, accent: 'events' },
+        { label: 'הוחזרו', value: counts.returned, accent: 'history' },
+        { label: 'הועברו', value: counts.transferred, accent: 'staff' },
+      ],
+      sections: [
+        {
+          kind: 'table',
+          key: 'internal-assignments',
+          title: 'הקצאות',
+          accent: 'events',
+          meta: `${filteredAssignments.length} שורות`,
+          columns: cols,
+          rows: filteredAssignments,
+          emptyText: 'אין הקצאות תואמות לסינון',
+        },
+      ],
+    };
+  };
+
   return (
     <>
       <Alert
@@ -346,16 +442,24 @@ const InternalAssignmentsTab: React.FC<InternalAssignmentsTabProps> = ({ canMana
             )}
           </Space>
         }
-        extra={canManage ? (
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => setDispatchOpen(true)}
-            size="large"
-          >
-            הקצה ציוד לעובד
-          </Button>
-        ) : undefined}
+        extra={
+          <Space>
+            <WarehouseExportButtons
+              buildReport={buildReport}
+              disabled={loading || filteredAssignments.length === 0}
+            />
+            {canManage && (
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => setDispatchOpen(true)}
+                size="large"
+              >
+                הקצה ציוד לעובד
+              </Button>
+            )}
+          </Space>
+        }
       >
         {loading && !data ? (
           <div className="text-center py-8">

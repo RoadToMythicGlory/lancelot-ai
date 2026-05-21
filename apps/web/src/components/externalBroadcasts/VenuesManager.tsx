@@ -351,7 +351,7 @@ const VenuesManager: React.FC = () => {
         cancelText="בטל"
         okButtonProps={{ icon: <SaveOutlined /> }}
         width={780}
-        destroyOnClose
+        destroyOnHidden
       >
         {editing && (
           <Form layout="vertical">

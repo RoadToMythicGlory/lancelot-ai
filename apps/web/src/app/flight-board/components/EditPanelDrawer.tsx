@@ -490,7 +490,7 @@ export const EditPanelDrawer: React.FC<Props> = ({
         </Space>
       }
       width={Math.min(960, typeof window !== 'undefined' ? window.innerWidth - 80 : 960)}
-      destroyOnClose
+      destroyOnHidden
       extra={
         <Button
           type="primary"

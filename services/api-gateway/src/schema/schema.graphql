@@ -321,7 +321,14 @@ type WarehouseEquipment {
   manualLink: String
   imageUrl: String
   
-  # Storage location
+  # Storage location — `warehouseId` / `storagePlaceId` is the new
+  # canonical reference (resolved as `warehouse` / `storagePlace`), the
+  # legacy `storage { row, shelf, cell }` is preserved for items that
+  # haven't been reassigned to a configured warehouse yet.
+  warehouseId: ID
+  storagePlaceId: ID
+  warehouse: Warehouse
+  storagePlace: WarehouseStoragePlace
   storage: StorageLocation
   
   # Quantity-based items use pool tracking instead of per-unit barcodes
@@ -373,6 +380,84 @@ type StorageLocation {
   cell: String
 }
 
+# Configurable warehouses (physical locations). Each warehouse has manual
+# `storagePlaces` (rows / shelves / cells / etc.) — they are no longer
+# hardcoded in the equipment form.
+type Warehouse {
+  id: ID!
+  name: String!
+  description: String
+  address: String
+  dimensions: WarehouseDimensions
+  storagePlaces: [WarehouseStoragePlace!]!
+  isActive: Boolean!
+  createdBy: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type WarehouseDimensions {
+  length: Float
+  width: Float
+  height: Float
+  unit: String!
+}
+
+type WarehouseStoragePlace {
+  id: ID!
+  name: String!
+  type: String!
+  code: String
+  notes: String
+  isActive: Boolean!
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input WarehouseDimensionsInput {
+  length: Float
+  width: Float
+  height: Float
+  unit: String
+}
+
+input CreateWarehouseInput {
+  name: String!
+  description: String
+  address: String
+  dimensions: WarehouseDimensionsInput
+  isActive: Boolean
+}
+
+input UpdateWarehouseInput {
+  name: String
+  description: String
+  address: String
+  dimensions: WarehouseDimensionsInput
+  isActive: Boolean
+}
+
+input CreateWarehouseStoragePlaceInput {
+  name: String!
+  type: String
+  code: String
+  notes: String
+  isActive: Boolean
+}
+
+input UpdateWarehouseStoragePlaceInput {
+  name: String
+  type: String
+  code: String
+  notes: String
+  isActive: Boolean
+}
+
+input WarehouseFilter {
+  searchText: String
+  isActive: Boolean
+}
+
 input WarehouseEquipmentFilter {
   category: String
   status: String
@@ -380,6 +465,13 @@ input WarehouseEquipmentFilter {
   location: String
   searchText: String
   isSharedEngineeringEquipment: Boolean
+  warehouseId: ID
+  storagePlaceId: ID
+  # When true, hide rows where `isDisabled = true`. Used by the warehouse
+  # list UI to default-hide disabled equipment (matching the behaviour of
+  # `warehouseEquipmentStats.totalEquipment`) so server-side pagination
+  # totals stay consistent with the rendered list.
+  excludeDisabled: Boolean
 }
 
 # Equipment Input Types
@@ -395,6 +487,8 @@ input CreateEquipmentInput {
   manualLink: String
   imageUrl: String
   storage: StorageLocationInput
+  warehouseId: ID
+  storagePlaceId: ID
   quantityTotal: Int!
   isQuantityBased: Boolean
   isSharedEngineeringEquipment: Boolean
@@ -412,6 +506,8 @@ input UpdateEquipmentInput {
   manualLink: String
   imageUrl: String
   storage: StorageLocationInput
+  warehouseId: ID
+  storagePlaceId: ID
   status: String
   condition: String
   quantityTotal: Int
@@ -1213,6 +1309,10 @@ type Query {
   # equipment-sets Preset Items selector). Up to 5000 items, name-sorted,
   # optionally filtered by a free-text `search` over name/barcode/model.
   warehouseEquipmentForPicker(search: String): [WarehouseEquipmentPickerItem!]!
+  # Distinct, sorted list of categories present in the active (non-disabled)
+  # equipment catalog. Used to populate the warehouse list category filter
+  # without having to download the full catalog client-side.
+  warehouseEquipmentCategories: [String!]!
   
   # Equipment Assignments
   equipmentAssignmentsByEvent(broadcastEventId: ID!): [EquipmentAssignment!]!
@@ -1240,6 +1340,10 @@ type Query {
   # Vendors
   vendors(filter: VendorFilter): [Vendor!]!
   vendor(id: ID!): Vendor
+
+  # Warehouses (physical locations with manually-managed storage places)
+  warehouses(filter: WarehouseFilter): [Warehouse!]!
+  warehouse(id: ID!): Warehouse
   
   # ===== SHIFTS QUERIES =====
   # Shifts
@@ -1378,6 +1482,14 @@ type Mutation {
   updateVendor(id: ID!, input: UpdateVendorInput!): Vendor!
   deleteVendor(id: ID!): Boolean!
   toggleVendorStatus(id: ID!): Vendor!
+
+  # Warehouse mutations
+  createWarehouse(input: CreateWarehouseInput!): Warehouse!
+  updateWarehouse(id: ID!, input: UpdateWarehouseInput!): Warehouse!
+  deleteWarehouse(id: ID!): Boolean!
+  createWarehouseStoragePlace(warehouseId: ID!, input: CreateWarehouseStoragePlaceInput!): Warehouse!
+  updateWarehouseStoragePlace(warehouseId: ID!, placeId: ID!, input: UpdateWarehouseStoragePlaceInput!): Warehouse!
+  deleteWarehouseStoragePlace(warehouseId: ID!, placeId: ID!): Warehouse!
   
   # ===== SHIFTS MUTATIONS =====
   # Shifts
@@ -2766,6 +2878,15 @@ type MCRSharedEngineeringWarehouseEquipment {
   category: String
   quantity: Int!
   status: String!
+  # Structured warehouse location (warehouse page uses this for the
+  # elaborated "במחסן ראשי – מדף 4" display; MCR may ignore it).
+  warehouseId: ID
+  warehouseName: String
+  storagePlaceId: ID
+  storagePlaceName: String
+  storagePlaceCode: String
+  # Legacy free-text location string (pre-migration equipment).
+  currentLocation: String
 }
 
 type MCRSharedEngineeringEventAssignment {
@@ -2785,6 +2906,10 @@ type MCRSharedEngineeringEventAssignment {
   broadcastEventTitle: String
   broadcastEventStart: DateTime
   broadcastEventEnd: DateTime
+  # Venue / location of the broadcast event (used by the warehouse page
+  # to surface "where the equipment physically is" for external broadcasts).
+  broadcastEventVenue: String
+  broadcastEventLocation: String
   # Linked MCR shadow event (when one exists for the broadcast)
   mcrEventId: ID
   mcrEventTitle: String

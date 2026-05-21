@@ -18,6 +18,7 @@ import { chatResolvers } from './resolvers/chat';
 import { dashboardResolvers } from './resolvers/dashboard';
 import { vizrtResolvers } from './resolvers/vizrt';
 import { vendorResolvers } from './resolvers/vendor';
+import { warehouseResolvers } from './resolvers/warehouse';
 import { mcrResolvers } from './resolvers/mcrResolvers';
 import { aiResolvers } from './resolvers/ai';
 import { authResolvers } from './resolvers/auth';
@@ -64,6 +65,7 @@ const resolvers = {
     warehouseEquipment: broadcastResolvers.Query.warehouseEquipment,
     warehouseEquipmentStats: broadcastResolvers.Query.warehouseEquipmentStats,
     warehouseEquipmentForPicker: broadcastResolvers.Query.warehouseEquipmentForPicker,
+    warehouseEquipmentCategories: broadcastResolvers.Query.warehouseEquipmentCategories,
     equipmentAssignmentsByEvent: broadcastResolvers.Query.equipmentAssignmentsByEvent,
     equipmentAssignments: broadcastResolvers.Query.equipmentAssignments,
     equipmentHistory: broadcastResolvers.Query.equipmentHistory,
@@ -91,6 +93,8 @@ const resolvers = {
     ...vizrtResolvers.Query,
     // Add vendor queries
     ...vendorResolvers.Query,
+    // Add warehouse (configurable storage location) queries
+    ...warehouseResolvers.Query,
     // Add MCR queries
     ...mcrResolvers.Query,
     // Add AI queries
@@ -159,6 +163,8 @@ const resolvers = {
     ...vizrtResolvers.Mutation,
     // Add vendor mutations
     ...vendorResolvers.Mutation,
+    // Add warehouse (configurable storage location) mutations
+    ...warehouseResolvers.Mutation,
     // Add MCR mutations
     ...mcrResolvers.Mutation,
     // Add AI mutations

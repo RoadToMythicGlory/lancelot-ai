@@ -62,6 +62,14 @@ function mapEquipmentToGql(item: any) {
     manualLink: item.manualLink || null,
     imageUrl: item.imageUrl || null,
     storage: item.storage || null,
+    // Surface the structured warehouse reference. The expanded
+    // `warehouse` / `storagePlace` objects are intentionally left null
+    // here — callers that need them should use the main
+    // `warehouseEquipment` query which bulk-loads warehouses.
+    warehouseId: item.warehouseId ? item.warehouseId.toString() : null,
+    storagePlaceId: item.storagePlaceId ? item.storagePlaceId.toString() : null,
+    warehouse: null,
+    storagePlace: null,
     isQuantityBased: item.isQuantityBased || false,
     isSharedEngineeringEquipment: item.isSharedEngineeringEquipment || false,
     isDisabled: item.isDisabled || false,

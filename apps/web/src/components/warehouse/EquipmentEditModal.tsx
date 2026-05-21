@@ -19,6 +19,7 @@ import { UPDATE_EQUIPMENT } from '../../graphql/mutations';
 import { GET_WAREHOUSE_EQUIPMENT } from '../../graphql/queries';
 import type { UploadFile } from 'antd/es/upload';
 import dayjs from 'dayjs';
+import WarehouseLocationPicker from './WarehouseLocationPicker';
 
 interface EquipmentLike {
   id: string;
@@ -33,6 +34,10 @@ interface EquipmentLike {
   manualLink?: string | null;
   imageUrl?: string | null;
   storage?: { row?: string | null; shelf?: string | null; cell?: string | null } | null;
+  warehouseId?: string | null;
+  storagePlaceId?: string | null;
+  warehouse?: { id: string; name: string } | null;
+  storagePlace?: { id: string; name: string; type?: string; code?: string | null } | null;
   quantityTotal?: number;
   isQuantityBased?: boolean;
   isSharedEngineeringEquipment?: boolean;
@@ -110,6 +115,10 @@ const EquipmentEditModal: React.FC<EquipmentEditModalProps> = ({
       row: equipment.storage?.row ?? undefined,
       shelf: equipment.storage?.shelf ?? undefined,
       cell: equipment.storage?.cell ?? undefined,
+      warehouseId:
+        equipment.warehouseId ?? equipment.warehouse?.id ?? null,
+      storagePlaceId:
+        equipment.storagePlaceId ?? equipment.storagePlace?.id ?? null,
       quantityTotal: equipment.quantityTotal ?? 1,
       isQuantityBased: !!equipment.isQuantityBased,
       isSharedEngineeringEquipment: !!equipment.isSharedEngineeringEquipment,
@@ -134,6 +143,7 @@ const EquipmentEditModal: React.FC<EquipmentEditModalProps> = ({
       setLoading(true);
       const values = await form.validateFields();
 
+      const hasLegacyStorage = !!(values.row || values.shelf || values.cell);
       const input = {
         name: values.name,
         category: values.category,
@@ -149,11 +159,15 @@ const EquipmentEditModal: React.FC<EquipmentEditModalProps> = ({
         imageUrl: fileList.length > 0
           ? fileList[0].url || fileList[0].response?.url || equipment.imageUrl
           : null,
-        storage: {
-          row: values.row || null,
-          shelf: values.shelf || null,
-          cell: values.cell || null,
-        },
+        storage: hasLegacyStorage
+          ? {
+              row: values.row || null,
+              shelf: values.shelf || null,
+              cell: values.cell || null,
+            }
+          : null,
+        warehouseId: values.warehouseId || null,
+        storagePlaceId: values.storagePlaceId || null,
         quantityTotal: values.quantityTotal || 1,
         isQuantityBased: values.isQuantityBased ?? false,
         isSharedEngineeringEquipment: values.isSharedEngineeringEquipment ?? false,
@@ -319,19 +333,48 @@ const EquipmentEditModal: React.FC<EquipmentEditModalProps> = ({
               key: '3',
               label: 'אחסון',
               children: (
-                <>
-                  <Form.Item name="row" label="שורה">
-                    <Input placeholder="לדוגמה: A" />
-                  </Form.Item>
+                <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                  <div>
+                    <div style={{ marginBottom: 8, fontWeight: 500 }}>
+                      מחסן ומיקום אחסון
+                    </div>
+                    <Form.Item shouldUpdate noStyle>
+                      {() => (
+                        <WarehouseLocationPicker
+                          warehouseId={form.getFieldValue('warehouseId')}
+                          storagePlaceId={form.getFieldValue('storagePlaceId')}
+                          onChange={({ warehouseId, storagePlaceId }) => {
+                            form.setFieldsValue({ warehouseId, storagePlaceId });
+                          }}
+                        />
+                      )}
+                    </Form.Item>
+                    <Form.Item name="warehouseId" hidden>
+                      <Input />
+                    </Form.Item>
+                    <Form.Item name="storagePlaceId" hidden>
+                      <Input />
+                    </Form.Item>
+                  </div>
 
-                  <Form.Item name="shelf" label="מדף">
-                    <Input placeholder="לדוגמה: 1" />
-                  </Form.Item>
-
-                  <Form.Item name="cell" label="תא">
-                    <Input placeholder="לדוגמה: 3B" />
-                  </Form.Item>
-                </>
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ marginBottom: 8, fontWeight: 500 }}>
+                      פרטי מיקום חופשיים (אופציונלי)
+                    </div>
+                    <div style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>
+                      ערכי טקסט חופשי לציוד ישן שעדיין לא הותאם למחסן מוגדר.
+                    </div>
+                    <Form.Item name="row" label="שורה">
+                      <Input placeholder="לדוגמה: A" />
+                    </Form.Item>
+                    <Form.Item name="shelf" label="מדף">
+                      <Input placeholder="לדוגמה: 1" />
+                    </Form.Item>
+                    <Form.Item name="cell" label="תא">
+                      <Input placeholder="לדוגמה: 3B" />
+                    </Form.Item>
+                  </div>
+                </Space>
               ),
             },
           ]}

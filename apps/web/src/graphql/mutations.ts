@@ -426,6 +426,7 @@ export const CREATE_EQUIPMENT = gql`
       quantityTotal
       quantityAvailable
       quantityAssigned
+      currentLocation
       price
       purchaseDate
       warrantyExpiryDate
@@ -438,6 +439,18 @@ export const CREATE_EQUIPMENT = gql`
         row
         shelf
         cell
+      }
+      warehouseId
+      storagePlaceId
+      warehouse {
+        id
+        name
+      }
+      storagePlace {
+        id
+        name
+        type
+        code
       }
       isQuantityBased
       isSharedEngineeringEquipment
@@ -472,6 +485,18 @@ export const UPDATE_EQUIPMENT = gql`
         row
         shelf
         cell
+      }
+      warehouseId
+      storagePlaceId
+      warehouse {
+        id
+        name
+      }
+      storagePlace {
+        id
+        name
+        type
+        code
       }
       isQuantityBased
       isSharedEngineeringEquipment

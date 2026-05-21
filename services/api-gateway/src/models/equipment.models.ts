@@ -26,7 +26,13 @@ export interface IEquipment extends Document {
   manualLink?: string;
   imageUrl?: string;
   
-  // Storage location
+  // Structured storage location. `warehouseId` (plus optional
+  // `storagePlaceId`) is the new canonical reference; the legacy
+  // `storage { row, shelf, cell }` strings are kept for backward
+  // compatibility with imported / pre-migration documents so the
+  // details/edit modals can still display them until reassigned.
+  warehouseId?: mongoose.Types.ObjectId;
+  storagePlaceId?: mongoose.Types.ObjectId;
   storage?: {
     row?: string;
     shelf?: string;
@@ -192,7 +198,11 @@ const equipmentSchema = new Schema<IEquipment>({
   manualLink: String,
   imageUrl: String,
   
-  // Storage location
+  // Structured storage location (see IEquipment for the rationale —
+  // warehouseId/storagePlaceId is the new canonical pair, the embedded
+  // `storage` strings are kept for legacy reads).
+  warehouseId: { type: Schema.Types.ObjectId, ref: 'Warehouse', default: null, index: true },
+  storagePlaceId: { type: Schema.Types.ObjectId, ref: 'Warehouse.storagePlaces', default: null },
   storage: {
     row: String,
     shelf: String,

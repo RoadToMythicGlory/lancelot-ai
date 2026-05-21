@@ -619,7 +619,9 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
               <Badge count={equipment?.quantityAssigned} style={{ backgroundColor: '#1890ff' }} />
             </Descriptions.Item>
             <Descriptions.Item label="מיקום נוכחי">
-              {equipment?.currentLocation || 'מחסן ראשי'}
+              {equipment?.warehouse?.name
+                ? `${equipment.warehouse.name}${equipment.storagePlace?.name ? ` – ${equipment.storagePlace.name}` : ''}${equipment.storagePlace?.code ? ` (${equipment.storagePlace.code})` : ''}`
+                : equipment?.currentLocation || 'ללא מיקום מוגדר'}
             </Descriptions.Item>
             <Descriptions.Item label="ציוד הנדסה שיתופי">
               {equipment?.isSharedEngineeringEquipment ? (
@@ -682,19 +684,35 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
               <Descriptions.Item label="">{''}</Descriptions.Item>
             )}
             
-            {/* Storage Location */}
-            {equipment?.storage && (
-              <>
-                <Descriptions.Item label="מיקום במחסן" span={2}>
-                  <EnvironmentOutlined /> 
-                  {[
-                    equipment.storage.row && `שורה ${equipment.storage.row}`,
-                    equipment.storage.shelf && `מדף ${equipment.storage.shelf}`,
-                    equipment.storage.cell && `תא ${equipment.storage.cell}`
-                  ].filter(Boolean).join(', ') || 'לא מוגדר'}
-                </Descriptions.Item>
-              </>
-            )}
+            {/* Storage Location — prefer the configured warehouse/place
+                pair, fall back to the legacy row/shelf/cell strings for
+                items that haven't been reassigned yet. */}
+            {equipment?.warehouse?.name ? (
+              <Descriptions.Item label="מיקום במחסן" span={2}>
+                <EnvironmentOutlined />{' '}
+                <strong>{equipment.warehouse.name}</strong>
+                {equipment.storagePlace?.name && (
+                  <>
+                    {' '}
+                    – {equipment.storagePlace.name}
+                    {equipment.storagePlace.code && (
+                      <span style={{ color: '#888' }}> ({equipment.storagePlace.code})</span>
+                    )}
+                  </>
+                )}
+              </Descriptions.Item>
+            ) : equipment?.storage ? (
+              <Descriptions.Item label="מיקום במחסן" span={2}>
+                <EnvironmentOutlined />{' '}
+                {[
+                  equipment.storage.row && `שורה ${equipment.storage.row}`,
+                  equipment.storage.shelf && `מדף ${equipment.storage.shelf}`,
+                  equipment.storage.cell && `תא ${equipment.storage.cell}`,
+                ]
+                  .filter(Boolean)
+                  .join(', ') || 'לא מוגדר'}
+              </Descriptions.Item>
+            ) : null}
           </Descriptions>
           
           {/* Barcode Preview */}

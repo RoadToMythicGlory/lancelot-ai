@@ -73,7 +73,7 @@ export default function AplAssignModal({
       confirmLoading={loading}
       okText="שמור"
       cancelText="ביטול"
-      destroyOnClose
+      destroyOnHidden
     >
       {loading && !apls.length ? (
         <Spin />

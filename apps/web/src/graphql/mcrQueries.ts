@@ -443,6 +443,8 @@ export const GET_MCR_SHARED_ENGINEERING_EQUIPMENT = gql`
         broadcastEventTitle
         broadcastEventStart
         broadcastEventEnd
+        broadcastEventVenue
+        broadcastEventLocation
         mcrEventId
         mcrEventTitle
         mcrEventStart
@@ -472,6 +474,12 @@ export const GET_MCR_SHARED_ENGINEERING_EQUIPMENT = gql`
         category
         quantity
         status
+        warehouseId
+        warehouseName
+        storagePlaceId
+        storagePlaceName
+        storagePlaceCode
+        currentLocation
       }
     }
   }

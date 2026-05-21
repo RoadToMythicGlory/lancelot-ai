@@ -307,7 +307,7 @@ export default function DepartmentUsersPage() {
           onOk={handleSave}
           okText={LABELS.SAVE}
           cancelText={LABELS.CANCEL}
-          destroyOnClose
+          destroyOnHidden
         >
           <Form form={form} layout="vertical">
             <Form.Item

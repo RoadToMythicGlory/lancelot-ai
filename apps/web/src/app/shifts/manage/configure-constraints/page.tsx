@@ -399,7 +399,7 @@ export default function ConfigureConstraintsPage() {
           onOk={handleSaveCategory}
           okText={LABELS.SAVE}
           cancelText={LABELS.CANCEL}
-          destroyOnClose
+          destroyOnHidden
           width={640}
         >
           <Form form={catForm} layout="vertical">
@@ -459,7 +459,7 @@ export default function ConfigureConstraintsPage() {
           onOk={handleSaveRule}
           okText={LABELS.SAVE}
           cancelText={LABELS.CANCEL}
-          destroyOnClose
+          destroyOnHidden
         >
           <Form form={ruleForm} layout="vertical">
             <Form.Item label="שם" name="name" rules={[{ required: true, message: 'אנא הזן שם' }]}>

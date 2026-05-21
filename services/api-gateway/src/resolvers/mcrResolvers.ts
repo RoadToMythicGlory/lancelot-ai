@@ -42,6 +42,7 @@ import MCRExchangeGroup, { IMCRExchangeGroup } from '../models/mcrExchangeGroup'
 import { BroadcastEvent } from '../models/broadcast.models';
 import { Equipment, EquipmentAssignment } from '../models/equipment.models';
 import { InternalEquipmentAssignment } from '../models/internalEquipmentAssignment.models';
+import { Warehouse } from '../models/warehouse.models';
 import { pubsub } from '../utils/pubsub';
 import { requireAuth, requirePermission, withAuth } from '../middleware/auth';
 import { Permission } from '../rbac';
@@ -431,20 +432,37 @@ const resolvers = {
     //      event via `broadcastEventId` so MCR sees the linked shadow).
     //   2. Internal staff assignments (no event target).
     mcrSharedEngineeringEquipment: withAuth(async (_: any, args: any, context: any) => {
-      requirePermission(context, Permission.MCR_VIEW);
+      // The same endpoint backs both the MCR "ציוד הנדסה שיתופי" tab and the
+      // warehouse-side mirror tab, so either permission grants access.
+      const user = requireAuth(context);
+      if (!user.has(Permission.MCR_VIEW) && !user.has(Permission.WAREHOUSE_VIEW)) {
+        throw new AuthenticationError(
+          `Missing permission: ${Permission.MCR_VIEW} or ${Permission.WAREHOUSE_VIEW}`,
+        );
+      }
 
       const requestedStatus = typeof args.status === 'string' ? args.status : 'active';
       const includeAll = requestedStatus === 'all';
 
       // Step 1: find all equipment that is flagged. Selecting just the
-      // fields we need keeps this responsive even with 4k+ items.
+      // fields we need keeps this responsive even with 4k+ items. The
+      // warehouse/storage-place ids are pulled too so the warehouse page
+      // can show the elaborated "במחסן ראשי – מדף 4" location label.
       const flaggedEquipment = await Equipment.find({ isSharedEngineeringEquipment: true })
-        .select({ _id: 1, name: 1, barcode: 1, category: 1 })
+        .select({
+          _id: 1,
+          name: 1,
+          barcode: 1,
+          category: 1,
+          warehouseId: 1,
+          storagePlaceId: 1,
+          currentLocation: 1,
+        })
         .lean()
         .exec();
 
       if (flaggedEquipment.length === 0) {
-        return { eventAssignments: [], staffAssignments: [] };
+        return { eventAssignments: [], staffAssignments: [], availableEquipment: [] };
       }
 
       const equipmentIds = flaggedEquipment.map((e) => e._id);
@@ -452,6 +470,47 @@ const resolvers = {
       for (const e of flaggedEquipment) {
         equipmentById.set(e._id.toString(), e);
       }
+
+      // Hydrate warehouse + storage place names so we can include them on
+      // both the per-event assignments (where they describe the item's
+      // home base) and the available-in-warehouse rows.
+      const warehouseIdsSet = new Set<string>();
+      for (const e of flaggedEquipment) {
+        if (e.warehouseId) warehouseIdsSet.add(e.warehouseId.toString());
+      }
+      const warehouseDocs = warehouseIdsSet.size > 0
+        ? await Warehouse.find({ _id: { $in: Array.from(warehouseIdsSet) } })
+            .select({ _id: 1, name: 1, storagePlaces: 1 })
+            .lean()
+            .exec()
+        : [];
+      const warehouseById = new Map<string, any>();
+      const storagePlaceById = new Map<string, { warehouseId: string; name: string; code?: string | null }>();
+      for (const w of warehouseDocs) {
+        warehouseById.set(w._id.toString(), w);
+        for (const sp of (w.storagePlaces || [])) {
+          storagePlaceById.set(sp._id.toString(), {
+            warehouseId: w._id.toString(),
+            name: sp.name,
+            code: (sp as any).code ?? null,
+          });
+        }
+      }
+
+      const resolveEquipmentLocation = (eq: any) => {
+        const warehouseId = eq?.warehouseId ? eq.warehouseId.toString() : null;
+        const storagePlaceId = eq?.storagePlaceId ? eq.storagePlaceId.toString() : null;
+        const warehouse = warehouseId ? warehouseById.get(warehouseId) : null;
+        const storagePlace = storagePlaceId ? storagePlaceById.get(storagePlaceId) : null;
+        return {
+          warehouseId: warehouse?._id?.toString?.() || warehouseId,
+          warehouseName: warehouse?.name || null,
+          storagePlaceId: storagePlace ? storagePlaceId : null,
+          storagePlaceName: storagePlace?.name || null,
+          storagePlaceCode: storagePlace?.code || null,
+          currentLocation: eq?.currentLocation || null,
+        };
+      };
 
       // Step 2: pull both assignment types in parallel.
       const eventAssignmentFilter: any = { equipmentId: { $in: equipmentIds } };
@@ -487,7 +546,15 @@ const resolvers = {
       const [broadcastEvents, shadowEvents] = await Promise.all([
         broadcastIds.length > 0
           ? BroadcastEvent.find({ _id: { $in: broadcastIds } })
-              .select({ _id: 1, title: 1, hebrewTitle: 1, startTime: 1, endTime: 1 })
+              .select({
+                _id: 1,
+                title: 1,
+                hebrewTitle: 1,
+                startTime: 1,
+                endTime: 1,
+                venue: 1,
+                location: 1,
+              })
               .lean()
               .exec()
           : Promise.resolve([] as any[]),
@@ -536,6 +603,8 @@ const resolvers = {
           broadcastEventEnd: broadcast?.endTime
             ? new Date(broadcast.endTime)
             : null,
+          broadcastEventVenue: broadcast?.venue || null,
+          broadcastEventLocation: broadcast?.location || null,
           mcrEventId: shadow?._id?.toString?.() || null,
           mcrEventTitle: shadow?.title || null,
           mcrEventStart: shadow?.start ? new Date(shadow.start) : null,
@@ -582,14 +651,23 @@ const resolvers = {
           const id = e._id.toString();
           return !activeEventEquipmentIds.has(id) && !activeStaffEquipmentIds.has(id);
         })
-        .map((e: any) => ({
-          equipmentId: e._id.toString(),
-          equipmentName: e.name || 'ציוד',
-          barcode: e.barcode || null,
-          category: e.category || null,
-          quantity: 1,
-          status: 'warehouse',
-        }));
+        .map((e: any) => {
+          const loc = resolveEquipmentLocation(e);
+          return {
+            equipmentId: e._id.toString(),
+            equipmentName: e.name || 'ציוד',
+            barcode: e.barcode || null,
+            category: e.category || null,
+            quantity: 1,
+            status: 'warehouse',
+            warehouseId: loc.warehouseId,
+            warehouseName: loc.warehouseName,
+            storagePlaceId: loc.storagePlaceId,
+            storagePlaceName: loc.storagePlaceName,
+            storagePlaceCode: loc.storagePlaceCode,
+            currentLocation: loc.currentLocation,
+          };
+        });
 
       return {
         eventAssignments: mappedEventAssignments,

@@ -348,7 +348,7 @@ export default function ConfigureShiftsPage() {
           onOk={handleSave}
           okText={LABELS.SAVE}
           cancelText={LABELS.CANCEL}
-          destroyOnClose
+          destroyOnHidden
         >
           <Form form={form} layout="vertical">
             <Form.Item

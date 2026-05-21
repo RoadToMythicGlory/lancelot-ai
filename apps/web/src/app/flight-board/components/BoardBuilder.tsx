@@ -500,7 +500,7 @@ export const BoardBuilder: React.FC<Props> = ({ open, initial, saving, onClose, 
       title={initial ? 'עריכת לוח' : 'יצירת לוח חדש'}
       width={Math.min(820, typeof window !== 'undefined' ? window.innerWidth - 24 : 820)}
       placement="left"
-      destroyOnClose
+      destroyOnHidden
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <Button onClick={onClose} disabled={saving}>

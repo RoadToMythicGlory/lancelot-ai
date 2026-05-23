@@ -64,8 +64,9 @@ const GET_BULLETIN_POSTS = gql`
         id
         displayName
       }
-      priority
-      targetDepartments
+      isEmergency
+      isPinned
+      departmentName
     }
   }
 `;
@@ -835,7 +836,7 @@ const LancelotDashboard: React.FC = () => {
                           </Space>
                         </Col>
                         <Col>
-                          {post.priority === 'urgent' && (
+                          {post.isEmergency && (
                             <Badge status="error" text="דחוף" />
                           )}
                         </Col>

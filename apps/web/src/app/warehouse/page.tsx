@@ -1203,7 +1203,7 @@ const WarehousePage: React.FC = () => {
   return (
     <ProtectedRoute requires={Permission.WAREHOUSE_VIEW}>
     <div className="min-h-screen bg-gray-50 px-4 py-6">
-      <div className="max-w-7xl mx-auto">
+      <div className="w-full mx-auto">
         {/* Breadcrumb */}
         <Breadcrumb 
           className="mb-4"
@@ -1317,7 +1317,7 @@ const WarehousePage: React.FC = () => {
           return (
             <>
               <div
-                className="flex flex-wrap gap-1.5 mb-6 p-1.5 bg-white rounded-xl border border-gray-200 shadow-sm"
+                className="flex flex-nowrap items-center gap-1 mb-6 p-1.5 bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto"
                 role="tablist"
                 aria-label="ניווט מחסן"
               >
@@ -1331,7 +1331,7 @@ const WarehousePage: React.FC = () => {
                       aria-selected={isActive}
                       onClick={() => setActiveTab(item.key)}
                       className={[
-                        'inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium',
+                        'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium shrink-0',
                         'transition-all duration-150 whitespace-nowrap select-none',
                         'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-1',
                         isActive

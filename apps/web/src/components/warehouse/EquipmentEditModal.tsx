@@ -20,6 +20,7 @@ import { GET_WAREHOUSE_EQUIPMENT } from '../../graphql/queries';
 import type { UploadFile } from 'antd/es/upload';
 import dayjs from 'dayjs';
 import WarehouseLocationPicker from './WarehouseLocationPicker';
+import { useEquipmentCategories } from '../../hooks/useEquipmentCategories';
 
 interface EquipmentLike {
   id: string;
@@ -54,22 +55,6 @@ interface EquipmentEditModalProps {
   onSuccess?: () => void;
 }
 
-// Equipment categories shown in the picker. Keep in sync with
-// `EquipmentRegistrationModal` and the backend `EQUIPMENT_CATEGORIES` map.
-const EQUIPMENT_CATEGORIES: Record<string, string> = {
-  cameras: 'מצלמות',
-  batteries: 'סוללות',
-  liveu_kits: 'ערכות LIVEU',
-  unity_kits: 'ערכות UNITY',
-  monitors: 'מוניטורים',
-  headphones: 'אוזניות',
-  stabilizers: 'מייצבים',
-  cards: 'כרטיסים',
-  adapters: 'מתאמים',
-  matrix_components: 'רכיבי מטריצה',
-  other: 'אחר',
-};
-
 const EquipmentEditModal: React.FC<EquipmentEditModalProps> = ({
   visible,
   equipment,
@@ -80,9 +65,16 @@ const EquipmentEditModal: React.FC<EquipmentEditModalProps> = ({
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
+  // Categories are sourced from the canonical `equipmentCategories` catalog.
+  // We include inactive ones here so existing equipment whose category was
+  // soft-disabled by an admin still shows its real label (instead of the
+  // raw slug) while being edited.
+  const { categories, loading: loadingCategories } = useEquipmentCategories({
+    includeInactive: true,
+  });
 
   const [updateEquipment] = useMutation(UPDATE_EQUIPMENT, {
-    refetchQueries: [{ query: GET_WAREHOUSE_EQUIPMENT }],
+    refetchQueries: [{ query: GET_WAREHOUSE_EQUIPMENT }, 'GetWarehouseEquipment', 'GetWarehouseEquipmentStats'],
     awaitRefetchQueries: true,
     onCompleted: () => {
       message.success('פרטי הציוד נשמרו בהצלחה');
@@ -241,13 +233,16 @@ const EquipmentEditModal: React.FC<EquipmentEditModalProps> = ({
                     label="קטגוריה"
                     rules={[{ required: true, message: 'נא לבחור קטגוריה' }]}
                   >
-                    <Select placeholder="בחר קטגוריה">
-                      {Object.entries(EQUIPMENT_CATEGORIES).map(([key, value]) => (
-                        <Select.Option key={key} value={key}>
-                          {value}
-                        </Select.Option>
-                      ))}
-                    </Select>
+                    <Select
+                      placeholder="בחר קטגוריה"
+                      loading={loadingCategories}
+                      showSearch
+                      optionFilterProp="label"
+                      options={categories.map((c) => ({
+                        value: c.slug,
+                        label: c.isActive ? c.labelHe : `${c.labelHe} (לא פעיל)`,
+                      }))}
+                    />
                   </Form.Item>
 
                   <Form.Item

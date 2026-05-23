@@ -388,6 +388,7 @@ export const GET_WAREHOUSE_EQUIPMENT_FOR_PICKER = gql`
       brand
       barcode
       quantityTotal
+      quantityAvailable
       isQuantityBased
       isDisabled
     }
@@ -409,9 +410,27 @@ export const GET_WAREHOUSE_EQUIPMENT_STATS = gql`
 // Distinct, sorted list of categories across the entire active equipment
 // catalog. Used to populate the warehouse list category filter; see the
 // matching server resolver for the rationale.
+// @deprecated — prefer `GET_EQUIPMENT_CATEGORIES_CATALOG` which is the
+// single source of truth and also returns Hebrew labels.
 export const GET_WAREHOUSE_EQUIPMENT_CATEGORIES = gql`
   query GetWarehouseEquipmentCategories {
     warehouseEquipmentCategories
+  }
+`;
+
+// Canonical catalog of equipment categories — the single source of truth.
+// Returns slug + Hebrew label + sortOrder + isActive. Consumed by the
+// `useEquipmentCategories` hook; every category picker, filter, tag, and
+// label across the warehouse / broadcasts UI resolves through it.
+export const GET_EQUIPMENT_CATEGORIES_CATALOG = gql`
+  query GetEquipmentCategoriesCatalog($includeInactive: Boolean = false) {
+    equipmentCategories(includeInactive: $includeInactive) {
+      id
+      slug
+      labelHe
+      sortOrder
+      isActive
+    }
   }
 `;
 
@@ -781,8 +800,13 @@ export const GET_EXTERNAL_BROADCAST_PRESETS = gql`
         isCustom
       }
       equipment {
+        equipmentId
+        equipmentName
         category
         categoryLabel
+        quantity
+        purpose
+        audioConfig
         count
         unitSettings {
           unitIndex
@@ -813,8 +837,13 @@ export const GET_EXTERNAL_BROADCAST_PRESET = gql`
         isCustom
       }
       equipment {
+        equipmentId
+        equipmentName
         category
         categoryLabel
+        quantity
+        purpose
+        audioConfig
         count
         unitSettings {
           unitIndex

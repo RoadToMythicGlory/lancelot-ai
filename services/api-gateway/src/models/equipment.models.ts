@@ -84,18 +84,16 @@ export interface IEquipment extends Document {
 
 // Category translations for UI.
 //
-// Keys are the canonical machine slugs stored on `IEquipment.category`.
-// The first 11 entries are the original Lancelot categories — they remain
-// intact so existing UI dropdowns / Hebrew labels keep working.
+// @deprecated — this hardcoded map is no longer the source of truth.
+// Equipment categories now live in the `equipment_categories` Mongo
+// collection (see `equipmentCategory.models.ts`) and are exposed via the
+// `equipmentCategories` GraphQL query. This constant is kept solely as
+// the initial-seed source for that collection (see
+// `scripts/seed-equipment-categories.ts`) and for legacy callers like
+// the barcode-prefix helper below that still want a quick local lookup.
 //
-// The remaining entries were added when we mirrored the legacy
-// shidureyhuts.co.il warehouse (~4,000 items) into Lancelot. The legacy
-// system used freeform uppercase labels like `CAMERA` / `SOUND` / `GRIP`;
-// we slugify them and translate the labels for the Hebrew UI here.
-//
-// Adding a new category? Pick a stable lowercase_with_underscores key and
-// append it below — the schema's `enum` validator is derived from the
-// keys of this object, so the change is picked up automatically.
+// To add or rename a category in production, use the Warehouse > קטגוריות
+// ציוד admin UI — never edit this map.
 export const EQUIPMENT_CATEGORIES = {
   // ---- Original Lancelot categories ----
   cameras: 'מצלמות',
@@ -182,10 +180,35 @@ const equipmentSchema = new Schema<IEquipment>({
     type: String, 
     required: true 
   },
-  category: { 
-    type: String, 
-    enum: Object.keys(EQUIPMENT_CATEGORIES),
-    required: true 
+  category: {
+    type: String,
+    required: true,
+    // Validated against the `equipment_categories` collection at write time —
+    // this is now the single source of truth for valid category slugs
+    // (replacing the legacy static enum derived from EQUIPMENT_CATEGORIES).
+    //
+    // We resolve the model lazily via `mongoose.model('EquipmentCategory')`
+    // to avoid a circular import between equipment.models.ts and
+    // equipmentCategory.models.ts. Both active AND inactive categories are
+    // accepted so a category that's been soft-disabled doesn't invalidate
+    // updates to equipment that already references it.
+    validate: {
+      validator: async function (value: string) {
+        if (!value || typeof value !== 'string') return false;
+        try {
+          const EquipmentCategoryModel = mongoose.model('EquipmentCategory');
+          const exists = await EquipmentCategoryModel.exists({ slug: value });
+          return !!exists;
+        } catch {
+          // Model not registered yet (e.g. during boot before the seed has
+          // run, or in a non-app script that didn't import it). Fall back
+          // to the legacy hardcoded map so writes don't fail before the
+          // collection is materialized.
+          return Object.prototype.hasOwnProperty.call(EQUIPMENT_CATEGORIES, value);
+        }
+      },
+      message: (props: any) => `Unknown equipment category: ${props.value}`,
+    },
   },
   
   // Additional details

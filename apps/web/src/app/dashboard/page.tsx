@@ -131,6 +131,31 @@ const LancelotDashboard: React.FC = () => {
   const canViewDashboard = hasPermission(Permission.DASHBOARD_VIEW);
   const canViewBroadcasts = hasPermission(Permission.BROADCAST_VIEW);
   const canViewOwnShifts = hasPermission(Permission.SHIFTS_VIEW_OWN);
+  const canViewBulletin = canViewDashboard;
+
+  // Quick-action gates — mirror the sidebar so the dashboard never offers a
+  // shortcut to a page the user cannot actually open.
+  const canSeeBroadcastPlanningAction = canViewBroadcasts;
+  const canSeeShiftsAction = canViewOwnShifts;
+  const canSeeUsersAction = hasPermission(Permission.USERS_MANAGE_DEPT) || hasPermission(Permission.USERS_MANAGE_ALL);
+  const canSeeWarehouseAction = hasPermission(Permission.WAREHOUSE_VIEW);
+  const anyQuickActionVisible =
+    canSeeBroadcastPlanningAction ||
+    canSeeShiftsAction ||
+    canSeeUsersAction ||
+    canSeeWarehouseAction;
+
+  // Stat-card gates — each tile leaks org-level info that regular employees
+  // shouldn't see (active users, total departments, fleet of active shifts, …).
+  const canSeeUsersStat = hasPermission(Permission.USERS_VIEW);
+  const canSeeDepartmentsStat = hasPermission(Permission.USERS_VIEW);
+  const canSeeTodaysBroadcastsStat = canViewBroadcasts;
+  const canSeeActiveShiftsStat = hasPermission(Permission.SHIFTS_VIEW_ALL);
+  const anyStatVisible =
+    canSeeUsersStat ||
+    canSeeDepartmentsStat ||
+    canSeeTodaysBroadcastsStat ||
+    canSeeActiveShiftsStat;
 
   const assignmentsDateRange = useMemo(() => {
     const start = new Date();
@@ -516,101 +541,122 @@ const LancelotDashboard: React.FC = () => {
         </div>
 
         {/* Stats Cards */}
-        <Row gutter={[16, 16]} className="mb-6">
-          <Col xs={12} sm={12} md={6}>
-            <Card hoverable loading={statsLoading}>
-              <Statistic
-                title="משתמשים פעילים"
-                value={stats.activeUsers}
-                suffix={`/ ${stats.totalUsers}`}
-                prefix={<UserOutlined />}
-                valueStyle={{ color: '#3f8600' }}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} sm={12} md={6}>
-            <Card hoverable loading={statsLoading}>
-              <Statistic
-                title="מחלקות"
-                value={stats.totalDepartments}
-                prefix={<TeamOutlined />}
-                valueStyle={{ color: '#1890ff' }}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} sm={12} md={6}>
-            <Card hoverable loading={statsLoading}>
-              <Statistic
-                title="שידורים היום"
-                value={stats.todaysBroadcasts}
-                prefix={<VideoCameraOutlined />}
-                valueStyle={{ color: '#722ed1' }}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} sm={12} md={6}>
-            <Card hoverable loading={statsLoading}>
-              <Statistic
-                title="משמרות פעילות"
-                value={stats.activeShifts}
-                prefix={<ScheduleOutlined />}
-                valueStyle={{ color: '#fa8c16' }}
-              />
-            </Card>
-          </Col>
-        </Row>
+        {anyStatVisible && (
+          <Row gutter={[16, 16]} className="mb-6">
+            {canSeeUsersStat && (
+              <Col xs={12} sm={12} md={6}>
+                <Card hoverable loading={statsLoading}>
+                  <Statistic
+                    title="משתמשים פעילים"
+                    value={stats.activeUsers}
+                    suffix={`/ ${stats.totalUsers}`}
+                    prefix={<UserOutlined />}
+                    valueStyle={{ color: '#3f8600' }}
+                  />
+                </Card>
+              </Col>
+            )}
+            {canSeeDepartmentsStat && (
+              <Col xs={12} sm={12} md={6}>
+                <Card hoverable loading={statsLoading}>
+                  <Statistic
+                    title="מחלקות"
+                    value={stats.totalDepartments}
+                    prefix={<TeamOutlined />}
+                    valueStyle={{ color: '#1890ff' }}
+                  />
+                </Card>
+              </Col>
+            )}
+            {canSeeTodaysBroadcastsStat && (
+              <Col xs={12} sm={12} md={6}>
+                <Card hoverable loading={statsLoading}>
+                  <Statistic
+                    title="שידורים היום"
+                    value={stats.todaysBroadcasts}
+                    prefix={<VideoCameraOutlined />}
+                    valueStyle={{ color: '#722ed1' }}
+                  />
+                </Card>
+              </Col>
+            )}
+            {canSeeActiveShiftsStat && (
+              <Col xs={12} sm={12} md={6}>
+                <Card hoverable loading={statsLoading}>
+                  <Statistic
+                    title="משמרות פעילות"
+                    value={stats.activeShifts}
+                    prefix={<ScheduleOutlined />}
+                    valueStyle={{ color: '#fa8c16' }}
+                  />
+                </Card>
+              </Col>
+            )}
+          </Row>
+        )}
 
         {/* Quick Actions */}
-        <Row gutter={[16, 16]} className="mb-6">
-          <Col span={24}>
-            <Card title="פעולות מהירות">
-              <Row gutter={[16, 16]}>
-                <Col xs={12} sm={8} md={6}>
-                  <Button 
-                    type="primary" 
-                    block 
-                    icon={<VideoCameraOutlined />}
-                    onClick={() => router.push('/broadcast-planning')}
-                  >
-                    תכנון שידורים
-                  </Button>
-                </Col>
-                <Col xs={12} sm={8} md={6}>
-                  <Button 
-                    block 
-                    icon={<CalendarOutlined />}
-                    onClick={() => router.push('/shifts')}
-                  >
-                    ניהול משמרות
-                  </Button>
-                </Col>
-                <Col xs={12} sm={8} md={6}>
-                  <Button 
-                    block 
-                    icon={<TeamOutlined />}
-                    onClick={() => router.push('/users')}
-                  >
-                    ניהול משתמשים
-                  </Button>
-                </Col>
-                <Col xs={12} sm={8} md={6}>
-                  <Button 
-                    block 
-                    icon={<UserOutlined />}
-                    onClick={() => router.push('/warehouse')}
-                  >
-                    ציוד ומחסן
-                  </Button>
-                </Col>
-              </Row>
-            </Card>
-          </Col>
-        </Row>
+        {anyQuickActionVisible && (
+          <Row gutter={[16, 16]} className="mb-6">
+            <Col span={24}>
+              <Card title="פעולות מהירות">
+                <Row gutter={[16, 16]}>
+                  {canSeeBroadcastPlanningAction && (
+                    <Col xs={12} sm={8} md={6}>
+                      <Button
+                        type="primary"
+                        block
+                        icon={<VideoCameraOutlined />}
+                        onClick={() => router.push('/broadcast-planning')}
+                      >
+                        תכנון שידורים
+                      </Button>
+                    </Col>
+                  )}
+                  {canSeeShiftsAction && (
+                    <Col xs={12} sm={8} md={6}>
+                      <Button
+                        block
+                        icon={<CalendarOutlined />}
+                        onClick={() => router.push('/shifts')}
+                      >
+                        ניהול משמרות
+                      </Button>
+                    </Col>
+                  )}
+                  {canSeeUsersAction && (
+                    <Col xs={12} sm={8} md={6}>
+                      <Button
+                        block
+                        icon={<TeamOutlined />}
+                        onClick={() => router.push('/users')}
+                      >
+                        ניהול משתמשים
+                      </Button>
+                    </Col>
+                  )}
+                  {canSeeWarehouseAction && (
+                    <Col xs={12} sm={8} md={6}>
+                      <Button
+                        block
+                        icon={<UserOutlined />}
+                        onClick={() => router.push('/warehouse')}
+                      >
+                        ציוד ומחסן
+                      </Button>
+                    </Col>
+                  )}
+                </Row>
+              </Card>
+            </Col>
+          </Row>
+        )}
 
         {/* Main Content */}
         <Row gutter={[16, 16]}>
-          {/* Today's Broadcasts */}
-          <Col xs={24} lg={12}>
+          {/* Today's Broadcasts — only for viewers with broadcast access */}
+          {canViewBroadcasts && (
+          <Col xs={24} lg={canViewOwnShifts ? 12 : 24}>
             <Card 
               title={
                 <Space>
@@ -643,9 +689,11 @@ const LancelotDashboard: React.FC = () => {
               )}
             </Card>
           </Col>
+          )}
 
-          {/* Weekly Shifts */}
-          <Col xs={24} lg={12}>
+          {/* Weekly Shifts — only for users who can read their own shifts */}
+          {canViewOwnShifts && (
+          <Col xs={24} lg={canViewBroadcasts ? 12 : 24}>
             <Card 
               title={
                 <Space>
@@ -756,8 +804,10 @@ const LancelotDashboard: React.FC = () => {
               )}
             </Card>
           </Col>
+          )}
 
           {/* Bulletin Board */}
+          {canViewBulletin && (
           <Col xs={24}>
             <Card 
               title={
@@ -802,6 +852,7 @@ const LancelotDashboard: React.FC = () => {
               )}
             </Card>
           </Col>
+          )}
         </Row>
 
         {/* All Broadcasts Modal */}

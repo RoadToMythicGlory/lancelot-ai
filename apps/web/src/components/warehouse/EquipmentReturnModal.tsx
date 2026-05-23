@@ -17,6 +17,7 @@ import { useQuery, useMutation, useLazyQuery } from '@apollo/client';
 import {
   GET_EVENTS_WITH_ASSIGNED_EQUIPMENT,
   GET_WAREHOUSE_EQUIPMENT,
+  GET_WAREHOUSE_EQUIPMENT_FOR_PICKER,
   GET_EQUIPMENT_ASSIGNMENTS_BY_EVENT,
   GET_EQUIPMENT_SET_BY_BARCODE
 } from '../../graphql/queries';
@@ -78,6 +79,7 @@ const EquipmentReturnModal: React.FC<Props> = ({ visible, onClose, onSuccess }) 
       'GetBroadcastEvents',
       'GetBroadcastEvent',
       'GetWarehouseEquipment',
+      'GetWarehouseEquipmentStats',
       'GetEquipmentAssignmentsByEvent',
     ],
     awaitRefetchQueries: true,
@@ -88,6 +90,7 @@ const EquipmentReturnModal: React.FC<Props> = ({ visible, onClose, onSuccess }) 
       'GetEventsWithAssignedEquipment',
       'GetBroadcastEvents',
       'GetWarehouseEquipment',
+      'GetWarehouseEquipmentStats',
     ],
     awaitRefetchQueries: true,
   });
@@ -110,6 +113,17 @@ const EquipmentReturnModal: React.FC<Props> = ({ visible, onClose, onSuccess }) 
     nextFetchPolicy: 'cache-first',
   });
 
+  // `warehouseEquipment` is capped at 500 alphabetical rows by design
+  // (see queries.ts comment). When a returned event references gear past
+  // that page, the lookup map below would miss it and the row would
+  // render as a raw ObjectId. The picker projection is uncapped (5000
+  // rows) and carries every field this modal renders.
+  const { data: pickerEquipmentData } = useQuery(GET_WAREHOUSE_EQUIPMENT_FOR_PICKER, {
+    skip: !visible,
+    fetchPolicy: 'cache-and-network',
+    nextFetchPolicy: 'cache-first',
+  });
+
   const { data: selectedEventAssignmentsData } = useQuery(GET_EQUIPMENT_ASSIGNMENTS_BY_EVENT, {
     variables: { broadcastEventId: selectedEvent?.id || '' },
     skip: !visible || !selectedEvent?.id,
@@ -118,12 +132,30 @@ const EquipmentReturnModal: React.FC<Props> = ({ visible, onClose, onSuccess }) 
 
   const equipmentMap = useMemo(() => {
     const map = new Map<string, EquipmentItem>();
+    // Seed with the picker projection first — it has full catalog
+    // coverage but lacks fields like `status`/`condition`.
+    pickerEquipmentData?.warehouseEquipmentForPicker?.forEach((item: any) => {
+      if (!item?.id) return;
+      const entry: EquipmentItem = {
+        id: item.id,
+        name: item.name,
+        barcode: item.barcode || '',
+        category: item.category || '',
+        brand: item.brand || undefined,
+      };
+      map.set(entry.id, entry);
+      if (entry.barcode) map.set(entry.barcode.toLowerCase(), entry);
+    });
+    // Then overlay the full `warehouseEquipment` rows so any in-modal
+    // consumer that needs `status`/extra fields still gets them for the
+    // first ~500 alphabetically-sorted docs.
     equipmentData?.warehouseEquipment?.forEach((item: EquipmentItem) => {
+      if (!item?.id) return;
       map.set(item.id, item);
-      map.set(item.barcode.toLowerCase(), item);
+      if (item.barcode) map.set(item.barcode.toLowerCase(), item);
     });
     return map;
-  }, [equipmentData]);
+  }, [equipmentData, pickerEquipmentData]);
 
   // Only collect equipment that was actually ASSIGNED (scanned out of the
   // warehouse). The `externalBroadcasts.equipmentList` paths hold REQUESTED

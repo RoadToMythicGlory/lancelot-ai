@@ -12,7 +12,7 @@ import {
 } from '@ant-design/icons';
 import WarehousePdfImportModal from '../warehouse/WarehousePdfImportModal';
 import { useQuery, useMutation, useLazyQuery } from '@apollo/client';
-import { GET_WAREHOUSE_EQUIPMENT, GET_BROADCAST_EVENT, GET_EQUIPMENT_ASSIGNMENTS_BY_EVENT, GET_EQUIPMENT_SET_BY_BARCODE } from '../../graphql/queries';
+import { GET_WAREHOUSE_EQUIPMENT, GET_WAREHOUSE_EQUIPMENT_FOR_PICKER, GET_BROADCAST_EVENT, GET_EQUIPMENT_ASSIGNMENTS_BY_EVENT, GET_EQUIPMENT_SET_BY_BARCODE } from '../../graphql/queries';
 import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA, CREATE_EQUIPMENT_ASSIGNMENT, UPDATE_EQUIPMENT_ASSIGNMENT, UPDATE_WAREHOUSE_EQUIPMENT_QUANTITY, ASSIGN_EQUIPMENT_SET_TO_EVENT } from '../../graphql/mutations';
 
 interface BroadcastEvent {
@@ -31,13 +31,15 @@ interface WarehouseModalProps {
   canEdit?: boolean;
 }
 
+// Shape returned by `warehouseEquipmentForPicker`. We intentionally do not
+// include `status` here — it is not part of the picker projection and was
+// previously declared but never read inside this modal.
 interface Equipment {
   id: string;
   name: string;
   category: string;
   brand: string;
   barcode: string;
-  status: 'available' | 'assigned' | 'maintenance';
   quantityAvailable: number;
   quantityTotal: number;
 }
@@ -81,7 +83,7 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
 
   // Equipment assignment mutation to sync with PostgreSQL
   const [createEquipmentAssignment] = useMutation(CREATE_EQUIPMENT_ASSIGNMENT, {
-    refetchQueries: ['GetWarehouseEquipment', 'GetEquipmentAssignmentsByEvent'],
+    refetchQueries: ['GetWarehouseEquipment', 'GetWarehouseEquipmentStats', 'GetEquipmentAssignmentsByEvent'],
     awaitRefetchQueries: true,
     onError: (error) => {
       console.error('❌ Error creating equipment assignment:', error);
@@ -90,7 +92,7 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
 
   // Update equipment assignment mutation
   const [updateEquipmentAssignment] = useMutation(UPDATE_EQUIPMENT_ASSIGNMENT, {
-    refetchQueries: ['GetWarehouseEquipment', 'GetEquipmentAssignmentsByEvent'],
+    refetchQueries: ['GetWarehouseEquipment', 'GetWarehouseEquipmentStats', 'GetEquipmentAssignmentsByEvent'],
     awaitRefetchQueries: true,
     onError: (error) => {
       console.error('❌ Error updating equipment assignment:', error);
@@ -99,7 +101,7 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
 
   // Update warehouse equipment quantity mutation
   const [updateEquipmentQuantity] = useMutation(UPDATE_WAREHOUSE_EQUIPMENT_QUANTITY, {
-    refetchQueries: ['GetWarehouseEquipment'],
+    refetchQueries: ['GetWarehouseEquipment', 'GetWarehouseEquipmentStats'],
     awaitRefetchQueries: true,
     onError: (error) => {
       console.error('❌ Error updating equipment quantity:', error);
@@ -114,7 +116,7 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
 
   // Mutation to assign an entire set to an event
   const [assignSetToEvent] = useMutation(ASSIGN_EQUIPMENT_SET_TO_EVENT, {
-    refetchQueries: ['GetWarehouseEquipment', 'GetEquipmentAssignmentsByEvent', 'GetBroadcastEvent'],
+    refetchQueries: ['GetWarehouseEquipment', 'GetWarehouseEquipmentStats', 'GetEquipmentAssignmentsByEvent', 'GetBroadcastEvent'],
     awaitRefetchQueries: true,
     onError: (error) => {
       console.error('Error assigning equipment set:', error);
@@ -127,9 +129,22 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
     skip: !event?.id || !visible
   });
 
-  // Query for warehouse equipment
-  const { data: equipmentData, loading: equipmentLoading, error: equipmentError } = useQuery(GET_WAREHOUSE_EQUIPMENT, { skip: !visible });
-  const equipment: Equipment[] = equipmentData?.warehouseEquipment || [];
+  // Query for warehouse equipment.
+  //
+  // We deliberately use the slim picker projection here (capped at 5000
+  // rows including barcode) rather than `warehouseEquipment` (capped at
+  // 200 alphabetical rows by default). The modal needs full-catalog
+  // coverage for two reasons:
+  //   1. resolving the canonical barcode for `requestedItems` by
+  //      `equipmentId` (otherwise the "ציוד מבוקש" rows render without a
+  //      barcode for any equipment past the first ~200 names).
+  //   2. matching scanned barcodes against the local cache before
+  //      falling back to the lazy lookup query below.
+  const { data: equipmentData, loading: equipmentLoading, error: equipmentError } = useQuery(
+    GET_WAREHOUSE_EQUIPMENT_FOR_PICKER,
+    { skip: !visible },
+  );
+  const equipment: Equipment[] = equipmentData?.warehouseEquipmentForPicker || [];
 
   // Query for broadcast event details
   const { data: eventData } = useQuery(GET_BROADCAST_EVENT, {
@@ -137,34 +152,40 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
     skip: !event?.id || !visible
   });
 
-  // Extract requested equipment from External Broadcasts department data
+  // Migration banner state — true when the linked event was last saved
+  // under the legacy category-based schema (`equipmentRequests`) and has
+  // no item-based `equipmentList`. We previously synthesised pseudo-line
+  // items from the categories, but those carry no real `equipmentId`, so
+  // they cannot be reconciled against scanned barcodes — that hidden
+  // dual-path was the source of subtle "requested 5 cameras, scanned 3,
+  // saved as 0" bugs. Instead we show a clear banner pointing the user
+  // back to the External Broadcasts page to upgrade.
+  const [showLegacyEquipmentBanner, setShowLegacyEquipmentBanner] = useState(false);
+
+  // Extract requested equipment from External Broadcasts department data.
+  // Only the new item-based `equipmentList` shape feeds the requested list
+  // — legacy `equipmentRequests` are treated as a migration prompt.
   useEffect(() => {
     if (visible && eventData?.broadcastEvent) {
       const metadata = eventData.broadcastEvent.metadata || {};
-      
+
       const externalBroadcastsDept = metadata.departments?.externalBroadcasts || {};
       const cd = externalBroadcastsDept.customData || {};
 
-      // Support both old format (equipmentList) and new format (equipmentRequests)
-      const equipmentList: RequestedEquipment[] = cd.equipmentList || externalBroadcastsDept.equipmentList || [];
-      const equipmentRequests: any[] = cd.equipmentRequests || externalBroadcastsDept.equipmentRequests || [];
+      const equipmentList: RequestedEquipment[] =
+        cd.equipmentList || externalBroadcastsDept.equipmentList || [];
+      const legacyEquipmentRequests: any[] =
+        cd.equipmentRequests || externalBroadcastsDept.equipmentRequests || [];
 
-      let finalRequested = equipmentList;
-      if (finalRequested.length === 0 && equipmentRequests.length > 0) {
-        finalRequested = equipmentRequests.map((req: any) => ({
-          equipmentId: req.equipmentId || req.id || '',
-          quantity: req.count || 0,
-          name: req.categoryLabel || req.category || '',
-          category: req.category || '',
-        }));
-      }
-      
       const warehouseDept = metadata.departments?.warehouse || {};
-      const existingAssigned = warehouseDept.customData?.assignedItems || 
-                              warehouseDept.assignedItems || [];
-      
-      setRequestedItems(finalRequested);
+      const existingAssigned =
+        warehouseDept.customData?.assignedItems || warehouseDept.assignedItems || [];
+
+      setRequestedItems(equipmentList);
       setAssignedItems(existingAssigned);
+      setShowLegacyEquipmentBanner(
+        equipmentList.length === 0 && legacyEquipmentRequests.length > 0,
+      );
     }
   }, [eventData, visible]);
 
@@ -616,15 +637,31 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
             }
             className="h-full"
           >
-            {requestedItems.length === 0 ? (
+            {showLegacyEquipmentBanner && (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message="דרישות לפי קטגוריה — יש לעדכן בעמוד שידורי חוץ"
+                description="לאירוע זה נשמרו דרישות ציוד בסכמה הישנה (לפי קטגוריות). פתחו את עמוד שידורי חוץ, הוסיפו ציוד ספציפי ושמרו כדי שניתן יהיה לסרוק מולן."
+              />
+            )}
+            {requestedItems.length === 0 && !showLegacyEquipmentBanner ? (
               <Empty description="אין ציוד מבוקש עבור אירוע זה" />
-            ) : (
+            ) : requestedItems.length === 0 ? null : (
               <List
                 dataSource={requestedItems}
                 renderItem={(item) => {
                   const remaining = getRemainingQuantity(item.equipmentId);
                   const assigned = getAssignedByEquipment(item.equipmentId);
-                  
+                  // Stored `requestedItems` carry only equipmentId/name/category,
+                  // so the canonical barcode is resolved from the live equipment
+                  // catalog by id. Falls back to any barcode the saved record
+                  // happens to carry (forward-compat with future save paths
+                  // that denormalize it) before showing a quiet placeholder.
+                  const liveEquipment = equipment.find((eq) => eq.id === item.equipmentId);
+                  const barcode = liveEquipment?.barcode || (item as any).barcode || '';
+
                   return (
                     <List.Item>
                       <div className="w-full">
@@ -640,6 +677,12 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
                             overflowCount={99}
                           />
                         </div>
+                        {barcode ? (
+                          <div className="text-xs text-gray-500 mb-1">
+                            <BarcodeOutlined className="ml-1" />
+                            <code>{barcode}</code>
+                          </div>
+                        ) : null}
                         <div className="text-sm text-gray-500">
                           נדרש: {item.quantity} | נסרק: {assigned.length} | נותר: {remaining}
                         </div>

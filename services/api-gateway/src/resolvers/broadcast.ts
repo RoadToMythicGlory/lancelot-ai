@@ -46,6 +46,58 @@ function getContextUserDisplayName(context: any): string {
   );
 }
 
+/**
+ * Coerce preset equipment input into the new item-based shape and reject
+ * legacy fields. The schema input already enforces `equipmentId`,
+ * `equipmentName`, `category`, `categoryLabel` and `quantity`, but we still
+ * defend against callers that smuggle `count` / `unitSettings` through
+ * GraphQL aliases or scalar JSON wrappers — those legacy fields are
+ * intentionally read-only after the migration.
+ */
+function sanitizePresetEquipmentForWrite(equipment: unknown): any[] {
+  if (equipment === undefined || equipment === null) return [];
+  if (!Array.isArray(equipment)) {
+    throw new Error('equipment must be an array');
+  }
+  return equipment.map((raw: any, idx: number) => {
+    if (!raw || typeof raw !== 'object') {
+      throw new Error(`equipment[${idx}] must be an object`);
+    }
+    if ('count' in raw || 'unitSettings' in raw) {
+      throw new Error(
+        `equipment[${idx}] uses the legacy category-based shape (count/unitSettings); ` +
+          'presets must be saved as item-based rows ({ equipmentId, quantity, ... }).'
+      );
+    }
+    const equipmentId = typeof raw.equipmentId === 'string' ? raw.equipmentId.trim() : '';
+    const equipmentName = typeof raw.equipmentName === 'string' ? raw.equipmentName.trim() : '';
+    const category = typeof raw.category === 'string' ? raw.category.trim() : '';
+    const categoryLabel = typeof raw.categoryLabel === 'string' ? raw.categoryLabel.trim() : '';
+    const quantity = Number(raw.quantity);
+
+    if (!equipmentId) throw new Error(`equipment[${idx}].equipmentId is required`);
+    if (!equipmentName) throw new Error(`equipment[${idx}].equipmentName is required`);
+    if (!category) throw new Error(`equipment[${idx}].category is required`);
+    if (!categoryLabel) throw new Error(`equipment[${idx}].categoryLabel is required`);
+    if (!Number.isFinite(quantity) || quantity < 1) {
+      throw new Error(`equipment[${idx}].quantity must be >= 1`);
+    }
+
+    return {
+      equipmentId,
+      equipmentName,
+      category,
+      categoryLabel,
+      quantity: Math.floor(quantity),
+      purpose: typeof raw.purpose === 'string' && raw.purpose.trim() ? raw.purpose.trim() : undefined,
+      audioConfig:
+        typeof raw.audioConfig === 'string' && raw.audioConfig.trim()
+          ? raw.audioConfig.trim()
+          : undefined,
+    };
+  });
+}
+
 function buildWarehouseEquipmentQuery(filter?: any): any {
   const query: any = {};
 
@@ -440,6 +492,7 @@ export const broadcastResolvers = {
             category: 1,
             barcode: 1,
             quantityTotal: 1,
+            quantityAvailable: 1,
             isQuantityBased: 1,
             isDisabled: 1,
             company: 1,
@@ -460,6 +513,7 @@ export const broadcastResolvers = {
             category: it.category ?? null,
             barcode: it.barcode || null,
             quantityTotal: it.quantityTotal ?? null,
+            quantityAvailable: it.quantityAvailable ?? null,
             isQuantityBased: !!it.isQuantityBased,
             isDisabled: !!it.isDisabled,
             brand: it.company || null,
@@ -474,14 +528,21 @@ export const broadcastResolvers = {
       try {
         requirePermission(context, Permission.WAREHOUSE_VIEW);
         await ensureMongoConnection();
-        // Distinct categories across all active (non-disabled) equipment.
-        // Lets the warehouse list UI populate its category filter without
-        // having to fetch the full catalog client-side once we paginate
-        // the main list server-side.
-        const raw = await Equipment.distinct('category', { isDisabled: { $ne: true } });
-        return (raw as unknown[])
-          .filter((c): c is string => typeof c === 'string' && c.trim().length > 0)
-          .sort((a, b) => a.localeCompare(b, 'he'));
+        // Backwards-compatible shim. Categories are now the
+        // `equipment_categories` collection — return every active slug
+        // sorted by the admin-managed (sortOrder, labelHe) so the legacy
+        // callers get a stable order without any code changes. New code
+        // should use the `equipmentCategories` query directly which also
+        // returns Hebrew labels.
+        const { EquipmentCategory } = await import('../models/equipmentCategory.models');
+        const docs = await EquipmentCategory.find({ isActive: true })
+          .sort({ sortOrder: 1, labelHe: 1 })
+          .select('slug')
+          .lean()
+          .exec();
+        return docs
+          .map((d: any) => d.slug)
+          .filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0);
       } catch (error) {
         console.error('Error fetching warehouse equipment categories:', error);
         return [];
@@ -2902,12 +2963,13 @@ export const broadcastResolvers = {
       requirePermission(context, Permission.BROADCAST_MANAGE);
       try {
         await ensureMongoConnection();
-        const preset = new ExternalBroadcastPreset(input);
+        const sanitized = { ...input, equipment: sanitizePresetEquipmentForWrite(input.equipment) };
+        const preset = new ExternalBroadcastPreset(sanitized);
         const saved = await preset.save();
         return { id: saved._id.toString(), ...saved.toObject() };
       } catch (error) {
         console.error('Error creating external broadcast preset:', error);
-        throw new Error('Failed to create external broadcast preset');
+        throw new Error(error instanceof Error ? error.message : 'Failed to create external broadcast preset');
       }
     },
 
@@ -2915,7 +2977,11 @@ export const broadcastResolvers = {
       requirePermission(context, Permission.BROADCAST_MANAGE);
       try {
         await ensureMongoConnection();
-        const updated = await ExternalBroadcastPreset.findByIdAndUpdate(id, input, {
+        const sanitized = { ...input };
+        if (input.equipment !== undefined) {
+          sanitized.equipment = sanitizePresetEquipmentForWrite(input.equipment);
+        }
+        const updated = await ExternalBroadcastPreset.findByIdAndUpdate(id, sanitized, {
           new: true,
           runValidators: true,
         }).exec();
@@ -2925,7 +2991,7 @@ export const broadcastResolvers = {
         return { id: updated._id.toString(), ...updated.toObject() };
       } catch (error) {
         console.error('Error updating external broadcast preset:', error);
-        throw new Error('Failed to update external broadcast preset');
+        throw new Error(error instanceof Error ? error.message : 'Failed to update external broadcast preset');
       }
     },
 

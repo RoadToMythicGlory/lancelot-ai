@@ -11,20 +11,7 @@ import { GET_EQUIPMENT_SETS, GET_WAREHOUSE_EQUIPMENT_FOR_PICKER } from '../../gr
 import { CREATE_EQUIPMENT_SET, UPDATE_EQUIPMENT_SET, DELETE_EQUIPMENT_SET } from '../../graphql/mutations';
 import WarehouseExportButtons from './WarehouseExportButtons';
 import type { ExportColumn, ExportReport } from '@/utils/warehouseReportExport';
-
-const EQUIPMENT_CATEGORIES: Record<string, string> = {
-  cameras: 'מצלמות',
-  batteries: 'סוללות',
-  liveu_kits: 'ערכות LIVEU',
-  unity_kits: 'ערכות UNITY',
-  monitors: 'מוניטורים',
-  headphones: 'אוזניות',
-  stabilizers: 'מייצבים',
-  cards: 'כרטיסים',
-  adapters: 'מתאמים',
-  matrix_components: 'רכיבי מטריצה',
-  other: 'אחר',
-};
+import { useEquipmentCategories } from '../../hooks/useEquipmentCategories';
 
 interface SetItem {
   equipmentId: string;
@@ -43,6 +30,12 @@ const EquipmentSetsManager: React.FC<EquipmentSetsManagerProps> = ({ canManage =
   const [form] = Form.useForm();
   const [setItems, setSetItems] = useState<SetItem[]>([]);
   const [searchText, setSearchText] = useState('');
+
+  // Canonical category catalog — used to turn the raw `category` slug on
+  // each equipment item into its Hebrew label for picker options + exports.
+  // Inactive categories are included so historically-tagged items still
+  // display correctly inside saved sets.
+  const { labelOf: categoryLabelOf } = useEquipmentCategories({ includeInactive: true });
 
   const { data: setsData, loading: setsLoading, refetch } = useQuery(GET_EQUIPMENT_SETS);
   // Use the dedicated picker query (up to 5000 rows). The default
@@ -247,7 +240,7 @@ const EquipmentSetsManager: React.FC<EquipmentSetsManagerProps> = ({ canManage =
 
   const equipmentOptions = allEquipment.map((eq: any) => ({
     value: eq.id,
-    label: `${eq.name} (${EQUIPMENT_CATEGORIES[eq.category] || eq.category}) — ${eq.barcode}`,
+    label: `${eq.name} (${categoryLabelOf(eq.category)}) — ${eq.barcode}`,
   }));
 
   /** Build a report with two views of the same data: a "Sets" summary
@@ -292,10 +285,7 @@ const EquipmentSetsManager: React.FC<EquipmentSetsManagerProps> = ({ canManage =
           setBarcode: s.barcode,
           equipmentName: it.equipment?.name || it.equipmentId,
           equipmentBarcode: it.equipment?.barcode || '',
-          category:
-            EQUIPMENT_CATEGORIES[it.equipment?.category] ||
-            it.equipment?.category ||
-            '',
+          category: categoryLabelOf(it.equipment?.category),
           quantity: it.quantity || 0,
           required: !!it.required,
         });

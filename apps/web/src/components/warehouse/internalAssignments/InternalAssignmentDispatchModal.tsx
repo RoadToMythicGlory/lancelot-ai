@@ -52,6 +52,7 @@ const InternalAssignmentDispatchModal: React.FC<Props> = ({ visible, onClose, on
     refetchQueries: [
       { query: GET_INTERNAL_EQUIPMENT_ASSIGNMENTS, variables: { status: 'active' } },
       'GetWarehouseEquipment',
+      'GetWarehouseEquipmentStats',
       'GetEquipmentHistory',
     ],
     awaitRefetchQueries: true,

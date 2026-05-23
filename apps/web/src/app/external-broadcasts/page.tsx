@@ -18,13 +18,15 @@ import isoWeek from 'dayjs/plugin/isoWeek';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { useQuery, useMutation } from '@apollo/client';
-import { GET_BROADCAST_EVENTS, GET_EMPLOYEES_BY_DEPARTMENT, GET_DEPARTMENTS, GET_EXTERNAL_BROADCAST_PRESETS, GET_VENUES } from '@/graphql/queries';
+import { GET_BROADCAST_EVENTS, GET_EMPLOYEES_BY_DEPARTMENT, GET_DEPARTMENTS, GET_EXTERNAL_BROADCAST_PRESETS, GET_VENUES, GET_WAREHOUSE_EQUIPMENT_FOR_PICKER } from '@/graphql/queries';
 import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA, CREATE_EXTERNAL_BROADCAST_PRESET, UPDATE_EXTERNAL_BROADCAST_PRESET, DELETE_EXTERNAL_BROADCAST_PRESET } from '@/graphql/mutations';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { Permission } from '@/rbac';
 import { useAuth } from '@/contexts/AuthContext';
 import DynamicDepartmentJobsPanel, { AssignmentJob } from '@/components/assignments/DynamicDepartmentJobsPanel';
 import VenuesManager from '@/components/externalBroadcasts/VenuesManager';
+import { useEquipmentCategories } from '@/hooks/useEquipmentCategories';
+import { resolveEquipmentLines, SubstitutionInput } from '@/utils/equipmentSubstitution';
 
 dayjs.extend(isoWeek);
 dayjs.extend(utc);
@@ -36,19 +38,9 @@ const { Option } = Select;
 
 // ─── Constants ────────────────────────────────────────────
 
-const EQUIPMENT_CATEGORIES: Record<string, string> = {
-  cameras: 'מצלמות',
-  batteries: 'סוללות',
-  liveu_kits: 'ערכות LIVEU',
-  unity_kits: 'ערכות UNITY',
-  monitors: 'מוניטורים',
-  headphones: 'אוזניות',
-  stabilizers: 'מייצבים',
-  cards: 'כרטיסים',
-  adapters: 'מתאמים',
-  matrix_components: 'רכיבי מטריצה',
-  other: 'אחר',
-};
+// NOTE: equipment category slugs and Hebrew labels are no longer hardcoded
+// in this file — they come from the canonical `equipmentCategories` GraphQL
+// catalog through the `useEquipmentCategories` hook (see below).
 
 const FIXED_ROLES: Array<{ key: string; label: string; icon: React.ReactNode; deptCode: string }> = [
   { key: 'cameraman', label: 'צלם', icon: <VideoCameraOutlined />, deptCode: 'CAM' },
@@ -95,19 +87,36 @@ interface CrewAssignment {
   isCustom: boolean;
 }
 
-interface UnitSetting {
-  unitIndex: number;
-  purpose: string;
+// One concrete equipment row on an event/preset. Replaces the previous
+// category-based `EquipmentRequest` shape, where each row represented N
+// units of an entire category. Now every line points at a specific
+// `Equipment` document via `equipmentId`.
+interface EquipmentLineItem {
+  equipmentId: string;
+  equipmentName: string;
+  category: string;
+  categoryLabel: string;
+  quantity: number;
+  purpose?: string;
   audioConfig?: string;
-  assignedEquipmentId?: string;
-  assignedEquipmentName?: string;
 }
 
-interface EquipmentRequest {
+// Read-only legacy fallback shape. Old events/presets stored equipment
+// requirements as one row per category (`count` units of a `category`,
+// optionally with a per-unit settings map). We never write this from the
+// UI anymore — but we still display it side-by-side with item-based rows
+// so legacy data keeps rendering until it's migrated by re-saving.
+interface LegacyEquipmentRequest {
   category: string;
   categoryLabel: string;
   count: number;
-  unitSettings: UnitSetting[];
+  unitSettings?: Array<{
+    unitIndex: number;
+    purpose?: string;
+    audioConfig?: string;
+    assignedEquipmentId?: string;
+    assignedEquipmentName?: string;
+  }>;
 }
 
 interface PresetRole {
@@ -117,11 +126,25 @@ interface PresetRole {
   isCustom: boolean;
 }
 
+// Preset equipment can carry either the new item-based fields or the
+// legacy category-based fields (see comment above). UI code uses
+// `isLegacyPresetEquipment` to branch.
 interface PresetEquipment {
+  equipmentId?: string;
+  equipmentName?: string;
   category: string;
   categoryLabel: string;
-  count: number;
-  unitSettings?: UnitSetting[];
+  quantity?: number;
+  purpose?: string;
+  audioConfig?: string;
+  count?: number;
+  unitSettings?: Array<{
+    unitIndex: number;
+    purpose?: string;
+    audioConfig?: string;
+    assignedEquipmentId?: string;
+    assignedEquipmentName?: string;
+  }>;
 }
 
 interface Preset {
@@ -134,6 +157,13 @@ interface Preset {
   createdAt?: string;
   updatedAt?: string;
 }
+
+const isLegacyPresetEquipment = (e: PresetEquipment): boolean => !e.equipmentId;
+const isLegacyPreset = (p: Preset): boolean => p.equipment.some(isLegacyPresetEquipment);
+
+// Categories whose equipment lines benefit from an audio-config override.
+// Mirrors the set previously hard-coded in the per-unit settings UI.
+const AUDIO_CONFIG_CATEGORIES = new Set(['cameras', 'camera']);
 
 type DataStatus = 'complete' | 'partial' | 'empty';
 
@@ -171,6 +201,15 @@ const ExternalBroadcastsPage: React.FC = () => {
   const { hasPermission } = useAuth();
   const canManageBroadcasts = hasPermission(Permission.BROADCAST_MANAGE);
 
+  // Canonical equipment-category catalog. Inactive categories are included
+  // so saved equipment requests/presets that reference a now-disabled slug
+  // still resolve to a Hebrew label (instead of falling back to the raw slug)
+  // while remaining hidden from the "add new" picker.
+  const {
+    activeCategories: equipmentCategoryOptions,
+    labelOf: categoryLabelOf,
+  } = useEquipmentCategories({ includeInactive: true });
+
   // Navigation
   const [currentDate, setCurrentDate] = useState(dayjs());
   const [searchText, setSearchText] = useState('');
@@ -186,9 +225,13 @@ const ExternalBroadcastsPage: React.FC = () => {
   const [newCrewUserId, setNewCrewUserId] = useState<string>('');
   const [newCrewCount, setNewCrewCount] = useState<number>(1);
 
-  // Equipment requests (category-based)
-  const [equipmentRequests, setEquipmentRequests] = useState<EquipmentRequest[]>([]);
-  const [newEquipCategory, setNewEquipCategory] = useState<string>('');
+  // Item-based equipment line items. One row per concrete `Equipment`
+  // document. `legacyEquipmentRequests` holds whatever the old
+  // category-based schema persisted for this event so we can show it
+  // read-only while the operator migrates.
+  const [equipmentItems, setEquipmentItems] = useState<EquipmentLineItem[]>([]);
+  const [legacyEquipmentRequests, setLegacyEquipmentRequests] = useState<LegacyEquipmentRequest[]>([]);
+  const [newEquipmentId, setNewEquipmentId] = useState<string>('');
 
   // Admin-configurable dynamic jobs (departments configured in Settings → טפסים).
   const [dynamicJobs, setDynamicJobs] = useState<AssignmentJob[]>([]);
@@ -225,6 +268,84 @@ const ExternalBroadcastsPage: React.FC = () => {
     fetchPolicy: 'cache-and-network',
   });
   const presets: Preset[] = presetsData?.externalBroadcastPresets || [];
+
+  // Full equipment catalog for the line-item picker. Cached across the
+  // session because the picker is opened many times per event. We expose
+  // `refetch` so `applyPreset` can request fresh availability before
+  // running the substitution algorithm (the cache can otherwise tell us
+  // an item is free when the warehouse just scanned it elsewhere).
+  const { data: pickerData, loading: pickerLoading, refetch: refetchPicker } = useQuery(GET_WAREHOUSE_EQUIPMENT_FOR_PICKER, {
+    fetchPolicy: 'cache-first',
+  });
+  const pickerEquipment: Array<{
+    id: string;
+    name: string;
+    category?: string | null;
+    brand?: string | null;
+    barcode?: string | null;
+    quantityTotal?: number | null;
+    quantityAvailable?: number | null;
+    isQuantityBased: boolean;
+    isDisabled: boolean;
+  }> = useMemo(() => pickerData?.warehouseEquipmentForPicker || [], [pickerData]);
+
+  const pickerEquipmentById = useMemo(() => {
+    const m = new Map<string, typeof pickerEquipment[number]>();
+    pickerEquipment.forEach(eq => m.set(eq.id, eq));
+    return m;
+  }, [pickerEquipment]);
+
+  // Grouped picker options — one antd Select group per category, sorted
+  // by the catalog's `sortOrder`. Inactive categories are still resolved
+  // for label purposes (so legacy slugs still map to Hebrew labels) but
+  // moved to the bottom of the list as a soft hint that they shouldn't be
+  // used for new picks.
+  const groupedPickerOptions = useMemo(() => {
+    const groups = new Map<
+      string,
+      { categorySlug: string; categoryLabel: string; sortOrder: number; items: typeof pickerEquipment }
+    >();
+
+    pickerEquipment.forEach(eq => {
+      if (eq.isDisabled) return;
+      const slug = eq.category || 'uncategorized';
+      const existing = groups.get(slug);
+      if (existing) {
+        existing.items.push(eq);
+      } else {
+        const cat = equipmentCategoryOptions.find(c => c.slug === slug);
+        groups.set(slug, {
+          categorySlug: slug,
+          categoryLabel: cat?.labelHe || categoryLabelOf(slug) || slug,
+          sortOrder: cat?.sortOrder ?? 999,
+          items: [eq],
+        });
+      }
+    });
+
+    return Array.from(groups.values())
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.categoryLabel.localeCompare(b.categoryLabel))
+      .map(g => ({
+        label: g.categoryLabel,
+        title: g.categoryLabel,
+        options: g.items
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(eq => {
+            const meta = [eq.brand, eq.barcode].filter(Boolean).join(' · ');
+            const availLabel =
+              typeof eq.quantityAvailable === 'number'
+                ? `${eq.quantityAvailable} זמין`
+                : typeof eq.quantityTotal === 'number'
+                ? `${eq.quantityTotal} סה"כ`
+                : '';
+            return {
+              value: eq.id,
+              label: `${eq.name}${meta ? ' · ' + meta : ''}${availLabel ? ' · ' + availLabel : ''}`,
+              searchKey: `${eq.name} ${eq.brand || ''} ${eq.barcode || ''}`.toLowerCase(),
+            };
+          }),
+      }));
+  }, [pickerEquipment, equipmentCategoryOptions, categoryLabelOf]);
 
   const { data: venuesData } = useQuery(GET_VENUES, {
     variables: { includeInactive: false },
@@ -364,21 +485,44 @@ const ExternalBroadcastsPage: React.FC = () => {
       isCustom: !FIXED_ROLES.find(r => r.key === (m.role || m.roleKey)),
     })));
 
-    // Load equipment requests
-    const reqs: any[] = cd.equipmentRequests || dept.equipmentRequests || [];
-    if (reqs.length > 0) {
-      setEquipmentRequests(reqs.map((r: any) => ({
-        category: r.category || '',
-        categoryLabel: r.categoryLabel || EQUIPMENT_CATEGORIES[r.category] || r.category || '',
-        count: r.count || 0,
-        unitSettings: (r.unitSettings || []).map((u: any) => ({
-          unitIndex: u.unitIndex ?? 0,
-          purpose: u.purpose || '',
-          audioConfig: u.audioConfig || '',
+    // Load equipment. Prefer the new item-based `equipmentList` shape; if
+    // the event was last saved under the old schema only `equipmentRequests`
+    // will be present, so we surface those read-only and leave the editor
+    // empty.
+    const itemsRaw: any[] = cd.equipmentList || dept.equipmentList || [];
+    const legacyRaw: any[] = cd.equipmentRequests || dept.equipmentRequests || [];
+
+    if (itemsRaw.length > 0) {
+      setEquipmentItems(
+        itemsRaw.map((it: any) => ({
+          equipmentId: it.equipmentId || '',
+          equipmentName: it.equipmentName || it.name || '',
+          category: it.category || '',
+          categoryLabel: it.categoryLabel || categoryLabelOf(it.category) || it.category || '',
+          quantity: typeof it.quantity === 'number' ? it.quantity : 1,
+          purpose: it.purpose || '',
+          audioConfig: it.audioConfig || '',
         })),
-      })));
+      );
+      setLegacyEquipmentRequests([]);
     } else {
-      setEquipmentRequests([]);
+      setEquipmentItems([]);
+      setLegacyEquipmentRequests(
+        legacyRaw.map((r: any) => ({
+          category: r.category || '',
+          categoryLabel: r.categoryLabel || categoryLabelOf(r.category) || r.category || '',
+          count: typeof r.count === 'number' ? r.count : 0,
+          unitSettings: Array.isArray(r.unitSettings)
+            ? r.unitSettings.map((u: any) => ({
+                unitIndex: u.unitIndex ?? 0,
+                purpose: u.purpose || undefined,
+                audioConfig: u.audioConfig || undefined,
+                assignedEquipmentId: u.assignedEquipmentId || undefined,
+                assignedEquipmentName: u.assignedEquipmentName || undefined,
+              }))
+            : undefined,
+        })),
+      );
     }
 
     // Load dynamic jobs (admin-configured department list)
@@ -452,53 +596,55 @@ const ExternalBroadcastsPage: React.FC = () => {
     setCrewAssignments(prev => prev.filter((_, i) => i !== index));
   };
 
-  // ─── Equipment request handlers ────────────────────────
+  // ─── Equipment line-item handlers ──────────────────────
 
-  const addEquipmentRequest = () => {
-    if (!newEquipCategory) {
-      messageApi.warning('יש לבחור קטגוריה');
+  const addEquipmentLineItem = () => {
+    if (!newEquipmentId) {
+      messageApi.warning('יש לבחור פריט ציוד');
       return;
     }
-    if (equipmentRequests.find(r => r.category === newEquipCategory)) {
-      messageApi.warning('קטגוריה זו כבר קיימת');
+    if (equipmentItems.find(it => it.equipmentId === newEquipmentId)) {
+      messageApi.warning('פריט ציוד זה כבר קיים');
       return;
     }
-    setEquipmentRequests(prev => [...prev, {
-      category: newEquipCategory,
-      categoryLabel: EQUIPMENT_CATEGORIES[newEquipCategory] || newEquipCategory,
-      count: 1,
-      unitSettings: [{ unitIndex: 0, purpose: '', audioConfig: '' }],
-    }]);
-    setNewEquipCategory('');
+    const eq = pickerEquipmentById.get(newEquipmentId);
+    if (!eq) {
+      messageApi.error('הציוד שנבחר לא נמצא');
+      return;
+    }
+    setEquipmentItems(prev => [
+      ...prev,
+      {
+        equipmentId: eq.id,
+        equipmentName: eq.name,
+        category: eq.category || '',
+        categoryLabel: categoryLabelOf(eq.category || '') || eq.category || '',
+        quantity: 1,
+        purpose: '',
+        audioConfig: '',
+      },
+    ]);
+    setNewEquipmentId('');
   };
 
-  const updateEquipmentCount = (category: string, count: number) => {
-    setEquipmentRequests(prev => prev.map(req => {
-      if (req.category !== category) return req;
-      const newSettings = [...req.unitSettings];
-      if (count > newSettings.length) {
-        for (let i = newSettings.length; i < count; i++) {
-          newSettings.push({ unitIndex: i, purpose: '', audioConfig: '' });
-        }
-      } else {
-        newSettings.length = count;
-      }
-      return { ...req, count, unitSettings: newSettings };
-    }));
+  const updateEquipmentItemQuantity = (equipmentId: string, quantity: number) => {
+    setEquipmentItems(prev => prev.map(it =>
+      it.equipmentId === equipmentId ? { ...it, quantity: Math.max(1, Math.floor(quantity || 1)) } : it
+    ));
   };
 
-  const updateUnitSetting = (category: string, unitIndex: number, field: 'purpose' | 'audioConfig', value: string) => {
-    setEquipmentRequests(prev => prev.map(req => {
-      if (req.category !== category) return req;
-      const newSettings = req.unitSettings.map(u =>
-        u.unitIndex === unitIndex ? { ...u, [field]: value } : u
-      );
-      return { ...req, unitSettings: newSettings };
-    }));
+  const updateEquipmentItemField = (
+    equipmentId: string,
+    field: 'purpose' | 'audioConfig',
+    value: string,
+  ) => {
+    setEquipmentItems(prev => prev.map(it =>
+      it.equipmentId === equipmentId ? { ...it, [field]: value } : it
+    ));
   };
 
-  const removeEquipmentRequest = (category: string) => {
-    setEquipmentRequests(prev => prev.filter(r => r.category !== category));
+  const removeEquipmentLineItem = (equipmentId: string) => {
+    setEquipmentItems(prev => prev.filter(it => it.equipmentId !== equipmentId));
   };
 
   // ─── Save handler ───────────────────────────────────────
@@ -521,15 +667,19 @@ const ExternalBroadcastsPage: React.FC = () => {
         isCustom: c.isCustom,
       }));
 
-      const eqRequests = equipmentRequests.map(r => ({
-        category: r.category,
-        categoryLabel: r.categoryLabel,
-        count: r.count,
-        unitSettings: r.unitSettings.map(u => ({
-          unitIndex: u.unitIndex,
-          purpose: u.purpose,
-          audioConfig: u.audioConfig || undefined,
-        })),
+      // Item-based equipment list. Same shape that ExternalBroadcastsModal
+      // already produces, so warehouse fulfillment / reports can rely on a
+      // single contract. Legacy `equipmentRequests` are intentionally NOT
+      // persisted here — saving migrates the event off the old schema.
+      const equipmentList = equipmentItems.map(it => ({
+        equipmentId: it.equipmentId,
+        equipmentName: it.equipmentName,
+        name: it.equipmentName, // mirrored for legacy fulfillment readers
+        category: it.category,
+        categoryLabel: it.categoryLabel,
+        quantity: it.quantity,
+        purpose: it.purpose || undefined,
+        audioConfig: it.audioConfig || undefined,
       }));
 
       await updateDepartmentData({
@@ -539,7 +689,7 @@ const ExternalBroadcastsPage: React.FC = () => {
           data: {
             customData: {
               productionCrew,
-              equipmentRequests: eqRequests,
+              equipmentList,
               dynamicJobs: dynamicJobs.map((j) => ({
                 departmentCode: j.departmentCode,
                 roleKey: j.roleKey,
@@ -592,7 +742,15 @@ const ExternalBroadcastsPage: React.FC = () => {
 
   // ─── Apply preset ───────────────────────────────────────
 
-  const applyPreset = (preset: Preset) => {
+  const applyPreset = async (preset: Preset) => {
+    // Legacy presets cannot be applied — their category-based shape no
+    // longer matches the item-based editor. The UI also disables the
+    // button, but we guard here in case the call sneaks through.
+    if (isLegacyPreset(preset)) {
+      messageApi.warning(`הפריסט "${preset.name}" שמור לפי הסכמה הישנה ויש לעדכן אותו לפני שימוש`);
+      return;
+    }
+
     // Apply crew roles as empty slots (no specific people)
     const newCrew: CrewAssignment[] = [];
     preset.roles.forEach(r => {
@@ -608,18 +766,65 @@ const ExternalBroadcastsPage: React.FC = () => {
     });
     setCrewAssignments(newCrew);
 
-    // Apply equipment requests with settings
-    const newEquip: EquipmentRequest[] = preset.equipment.map(pe => ({
-      category: pe.category,
-      categoryLabel: pe.categoryLabel,
-      count: pe.count,
-      unitSettings: pe.unitSettings?.length
-        ? pe.unitSettings.map(u => ({ unitIndex: u.unitIndex, purpose: u.purpose || '', audioConfig: u.audioConfig || '' }))
-        : Array.from({ length: pe.count }, (_, i) => ({ unitIndex: i, purpose: '', audioConfig: '' })),
-    }));
-    setEquipmentRequests(newEquip);
+    // The cache can be stale — another tab may have just dispatched the
+    // pinned item. Refetch the picker so substitution sees real
+    // `quantityAvailable` numbers. Fall back to the cached snapshot on
+    // failure so the operator isn't blocked.
+    let freshCatalog = pickerEquipment;
+    try {
+      const refetched = await refetchPicker();
+      freshCatalog = refetched?.data?.warehouseEquipmentForPicker || pickerEquipment;
+    } catch (err) {
+      console.warn('Failed to refresh equipment picker before applying preset; using cached availability', err);
+    }
+
+    // Item-based preset → map to substitution inputs first, then run the
+    // fallback algorithm against the fresh catalog. If a pinned item is
+    // already dispatched (or disabled/missing), `resolveEquipmentLines`
+    // swaps in a sibling with the same name (case-insensitive, trimmed)
+    // and reports both the substitution and any shortfall.
+    const rawLines: SubstitutionInput[] = preset.equipment
+      .filter(pe => pe.equipmentId)
+      .map(pe => ({
+        equipmentId: pe.equipmentId!,
+        equipmentName: pe.equipmentName || pickerEquipmentById.get(pe.equipmentId!)?.name || '',
+        category: pe.category,
+        categoryLabel: pe.categoryLabel || categoryLabelOf(pe.category) || pe.category,
+        quantity: pe.quantity || 1,
+        purpose: pe.purpose || '',
+        audioConfig: pe.audioConfig || '',
+      }));
+
+    const { resolved, substitutions, unfulfilled } = resolveEquipmentLines(
+      rawLines,
+      freshCatalog,
+    );
+
+    setEquipmentItems(resolved);
+    setLegacyEquipmentRequests([]);
 
     messageApi.success(`פריסט "${preset.name}" הוחל בהצלחה`);
+
+    // Surface each substitution so the operator understands why the
+    // equipment list differs from the preset they clicked. Barcodes come
+    // from the picker cache (the fresh one we just loaded).
+    substitutions.forEach((sub) => {
+      const requestedBarcode = pickerEquipmentById.get(sub.requestedId)?.barcode;
+      const fulfilledBarcode = freshCatalog.find(eq => eq.id === sub.fulfilledId)?.barcode;
+      const fromTag = requestedBarcode ? ` (ברקוד ${requestedBarcode})` : '';
+      const toTag = fulfilledBarcode ? ` (ברקוד ${fulfilledBarcode})` : '';
+      messageApi.info(
+        `${sub.requestedName}: הפריט המקורי${fromTag} כבר הוקצה — הוחלף לפריט זמין${toTag}`,
+        6,
+      );
+    });
+
+    unfulfilled.forEach((u) => {
+      messageApi.warning(
+        `${u.requestedName}: חסרים ${u.shortBy} יחידות זמינות במלאי`,
+        6,
+      );
+    });
   };
 
   // ─── Preset CRUD ────────────────────────────────────────
@@ -663,15 +868,16 @@ const ExternalBroadcastsPage: React.FC = () => {
         isCustom: v.isCustom,
       }));
 
-      const presetEquipment: PresetEquipment[] = equipmentRequests.map(r => ({
-        category: r.category,
-        categoryLabel: r.categoryLabel,
-        count: r.count,
-        unitSettings: r.unitSettings.map(u => ({
-          unitIndex: u.unitIndex,
-          purpose: u.purpose,
-          audioConfig: u.audioConfig || undefined,
-        })),
+      // Item-based preset payload. Legacy fields are intentionally
+      // dropped — the backend resolver also rejects them on write.
+      const presetEquipment = equipmentItems.map(it => ({
+        equipmentId: it.equipmentId,
+        equipmentName: it.equipmentName,
+        category: it.category,
+        categoryLabel: it.categoryLabel,
+        quantity: it.quantity,
+        purpose: it.purpose || undefined,
+        audioConfig: it.audioConfig || undefined,
       }));
 
       const input = {
@@ -977,15 +1183,37 @@ const ExternalBroadcastsPage: React.FC = () => {
                       <Text type="secondary">לאולם זה לא מקושרות תבניות ציוד</Text>
                     </Col>
                   )}
-                  {(selectedVenue ? venuePresets : presets).map(p => (
-                    <Col key={p.id}>
-                      <Tooltip title={p.description || `${p.roles.length} תפקידים, ${p.equipment.length} קטגוריות ציוד`}>
-                        <Button size="small" icon={<CopyOutlined />} onClick={() => applyPreset(p)}>
-                          {p.name}
-                        </Button>
-                      </Tooltip>
-                    </Col>
-                  ))}
+                  {(selectedVenue ? venuePresets : presets).map(p => {
+                    const legacy = isLegacyPreset(p);
+                    const tooltipBody =
+                      p.description ||
+                      `${p.roles.length} תפקידים, ${p.equipment.length} פריטי ציוד`;
+                    return (
+                      <Col key={p.id}>
+                        <Tooltip
+                          title={
+                            legacy
+                              ? `${tooltipBody}\nפריסט ישן — נא לעדכן לפני שימוש`
+                              : tooltipBody
+                          }
+                        >
+                          <Button
+                            size="small"
+                            icon={<CopyOutlined />}
+                            onClick={() => applyPreset(p)}
+                            disabled={legacy}
+                          >
+                            {p.name}
+                            {legacy && (
+                              <Tag color="default" style={{ marginInlineStart: 6 }}>
+                                ישן
+                              </Tag>
+                            )}
+                          </Button>
+                        </Tooltip>
+                      </Col>
+                    );
+                  })}
                   {canManageBroadcasts && (
                     <Col>
                       <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={() => openPresetModal()}>
@@ -1078,129 +1306,174 @@ const ExternalBroadcastsPage: React.FC = () => {
                   },
                   {
                     key: 'equipment',
-                    label: <span><ToolOutlined /> ציוד נדרש ({equipmentRequests.reduce((s, r) => s + r.count, 0)})</span>,
+                    label: (
+                      <span>
+                        <ToolOutlined /> ציוד נדרש ({equipmentItems.reduce((s, it) => s + it.quantity, 0)})
+                      </span>
+                    ),
                     children: (
                       <div>
-                        {/* Add equipment request */}
+                        {/* Read-only legacy banner — only shown when the
+                            event was last saved under the old
+                            category-based shape and has no item-based
+                            equipment yet. Saving will migrate it. */}
+                        {legacyEquipmentRequests.length > 0 && (
+                          <Alert
+                            type="warning"
+                            showIcon
+                            style={{ marginBottom: 16 }}
+                            message="דרישות ישנות לפי קטגוריה"
+                            description={
+                              <div>
+                                <div style={{ marginBottom: 8 }}>
+                                  נא להוסיף ציוד ספציפי ולשמור — שמירה תחליף את הדרישות הישנות.
+                                </div>
+                                <Space wrap>
+                                  {legacyEquipmentRequests.map((r, idx) => (
+                                    <Tag key={`${r.category}-${idx}`} color="orange">
+                                      {r.categoryLabel} x{r.count}
+                                    </Tag>
+                                  ))}
+                                </Space>
+                              </div>
+                            }
+                          />
+                        )}
+
+                        {/* Equipment picker — virtualized antd Select with
+                            options grouped by category. */}
                         <Row gutter={8} style={{ marginBottom: 16 }}>
                           <Col flex="auto">
                             <Select
-                              placeholder="בחר קטגוריית ציוד"
-                              value={newEquipCategory || undefined}
-                              onChange={setNewEquipCategory}
+                              placeholder="בחר פריט ציוד (חפש לפי שם / מותג / ברקוד)"
+                              value={newEquipmentId || undefined}
+                              onChange={(v) => setNewEquipmentId(v || '')}
                               disabled={!canManageBroadcasts}
+                              loading={pickerLoading}
                               style={{ width: '100%' }}
                               showSearch
-                              filterOption={(input, option) =>
-                                (option?.children as unknown as string)?.includes(input) ?? false
+                              virtual
+                              optionFilterProp="label"
+                              filterOption={(input, option: any) => {
+                                const search = input.toLowerCase();
+                                const key: string = option?.searchKey || '';
+                                return key.includes(search) ||
+                                  String(option?.label || '').toLowerCase().includes(search);
+                              }}
+                              options={
+                                // Hide already-added items so the operator can't
+                                // double-add the same equipment row.
+                                groupedPickerOptions.map(g => ({
+                                  ...g,
+                                  options: g.options.filter(
+                                    (o) => !equipmentItems.find(it => it.equipmentId === o.value),
+                                  ),
+                                }))
                               }
-                            >
-                              {Object.entries(EQUIPMENT_CATEGORIES)
-                                .filter(([cat]) => !equipmentRequests.find(r => r.category === cat))
-                                .map(([cat, label]) => (
-                                  <Option key={cat} value={cat}>{label}</Option>
-                                ))}
-                            </Select>
+                            />
                           </Col>
                           {canManageBroadcasts && (
                             <Col>
-                              <Button icon={<PlusOutlined />} onClick={addEquipmentRequest}>הוסף</Button>
+                              <Button icon={<PlusOutlined />} onClick={addEquipmentLineItem}>
+                                הוסף
+                              </Button>
                             </Col>
                           )}
                         </Row>
 
-                        {equipmentRequests.length === 0 && (
+                        {equipmentItems.length === 0 && legacyEquipmentRequests.length === 0 && (
                           <Empty description="לא הוגדרו דרישות ציוד" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                         )}
 
-                        {/* Equipment request cards with settings map */}
-                        {equipmentRequests.map(req => (
-                          <Card
-                            key={req.category}
-                            size="small"
-                            style={{ marginBottom: 12 }}
-                            title={
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <Space>
-                                  <ToolOutlined />
-                                  <Text strong>{req.categoryLabel}</Text>
-                                </Space>
-                                <Space>
-                                  <Text type="secondary">כמות:</Text>
-                                  <InputNumber
-                                    min={1}
-                                    max={50}
-                                    value={req.count}
-                                    onChange={v => updateEquipmentCount(req.category, v || 1)}
+                        {/* Equipment line item cards. Per-line quantity,
+                            optional purpose, and optional audio config
+                            (only on cameras). */}
+                        {equipmentItems.map(it => {
+                          const eq = pickerEquipmentById.get(it.equipmentId);
+                          const maxQty =
+                            typeof eq?.quantityAvailable === 'number'
+                              ? Math.max(eq.quantityAvailable, 1)
+                              : typeof eq?.quantityTotal === 'number'
+                              ? Math.max(eq.quantityTotal, 1)
+                              : 999;
+                          const showAudio = AUDIO_CONFIG_CATEGORIES.has(it.category);
+                          return (
+                            <Card
+                              key={it.equipmentId}
+                              size="small"
+                              style={{ marginBottom: 12 }}
+                              title={
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <Space wrap>
+                                    <ToolOutlined />
+                                    <Text strong>{it.equipmentName}</Text>
+                                    <Tag color="orange">{it.categoryLabel}</Tag>
+                                    {eq?.brand && <Tag color="blue">{eq.brand}</Tag>}
+                                    {eq?.barcode && (
+                                      <Text type="secondary" style={{ fontSize: 12 }}>
+                                        {eq.barcode}
+                                      </Text>
+                                    )}
+                                  </Space>
+                                  <Space>
+                                    <Text type="secondary">כמות:</Text>
+                                    <InputNumber
+                                      min={1}
+                                      max={maxQty}
+                                      value={it.quantity}
+                                      onChange={(v) => updateEquipmentItemQuantity(it.equipmentId, Number(v) || 1)}
+                                      disabled={!canManageBroadcasts}
+                                      size="small"
+                                    />
+                                    {canManageBroadcasts && (
+                                      <Button
+                                        type="text"
+                                        danger
+                                        size="small"
+                                        icon={<DeleteOutlined />}
+                                        onClick={() => removeEquipmentLineItem(it.equipmentId)}
+                                      />
+                                    )}
+                                  </Space>
+                                </div>
+                              }
+                            >
+                              <Row gutter={8}>
+                                <Col flex="auto">
+                                  <Input
+                                    placeholder="ייעוד / תפקיד (אופציונלי)"
+                                    prefix={<SettingOutlined />}
+                                    value={it.purpose || ''}
+                                    onChange={(e) => updateEquipmentItemField(it.equipmentId, 'purpose', e.target.value)}
                                     disabled={!canManageBroadcasts}
                                     size="small"
                                   />
-                                  {canManageBroadcasts && (
-                                    <Button
-                                      type="text"
-                                      danger
+                                </Col>
+                                {showAudio && (
+                                  <Col flex="auto">
+                                    <Input
+                                      placeholder="הגדרת אודיו"
+                                      prefix={<AudioOutlined />}
+                                      value={it.audioConfig || ''}
+                                      onChange={(e) => updateEquipmentItemField(it.equipmentId, 'audioConfig', e.target.value)}
+                                      disabled={!canManageBroadcasts}
                                       size="small"
-                                      icon={<DeleteOutlined />}
-                                      onClick={() => removeEquipmentRequest(req.category)}
                                     />
-                                  )}
-                                </Space>
-                              </div>
-                            }
-                          >
-                            <Collapse
-                              ghost
-                              items={[{
-                                key: 'settings',
-                                label: (
-                                  <Space>
-                                    <SettingOutlined />
-                                    <Text type="secondary">מפת הגדרות ({req.unitSettings.filter(u => u.purpose).length}/{req.count})</Text>
-                                  </Space>
-                                ),
-                                children: (
-                                  <div>
-                                    {req.unitSettings.map((unit, idx) => (
-                                      <Row key={idx} gutter={8} style={{ marginBottom: 8, alignItems: 'center' }}>
-                                        <Col style={{ width: 40 }}>
-                                          <Tag>{idx + 1}</Tag>
-                                        </Col>
-                                        <Col flex="auto">
-                                          <Input
-                                            placeholder="תפקיד / ייעוד"
-                                            value={unit.purpose}
-                                            onChange={e => updateUnitSetting(req.category, unit.unitIndex, 'purpose', e.target.value)}
-                                            disabled={!canManageBroadcasts}
-                                            size="small"
-                                          />
-                                        </Col>
-                                        {req.category === 'cameras' && (
-                                          <Col flex="auto">
-                                            <Input
-                                              placeholder="הגדרת אודיו"
-                                              prefix={<AudioOutlined />}
-                                              value={unit.audioConfig || ''}
-                                              onChange={e => updateUnitSetting(req.category, unit.unitIndex, 'audioConfig', e.target.value)}
-                                              disabled={!canManageBroadcasts}
-                                              size="small"
-                                            />
-                                          </Col>
-                                        )}
-                                      </Row>
-                                    ))}
-                                  </div>
-                                ),
-                              }]}
-                            />
-                          </Card>
-                        ))}
+                                  </Col>
+                                )}
+                              </Row>
+                            </Card>
+                          );
+                        })}
 
                         {/* Summary */}
-                        {equipmentRequests.length > 0 && (
+                        {equipmentItems.length > 0 && (
                           <Card title="סיכום דרישות ציוד" size="small" style={{ marginTop: 16 }}>
                             <Space wrap>
-                              {equipmentRequests.map(r => (
-                                <Tag key={r.category} color="orange">{r.categoryLabel} x{r.count}</Tag>
+                              {equipmentItems.map(it => (
+                                <Tag key={it.equipmentId} color="orange">
+                                  {it.equipmentName} x{it.quantity}
+                                </Tag>
                               ))}
                             </Space>
                           </Card>
@@ -1334,11 +1607,16 @@ const ExternalBroadcastsPage: React.FC = () => {
           <Card size="small" style={{ marginBottom: 16 }}>
             <Text type="secondary">ציוד:</Text>
             <div style={{ marginTop: 8 }}>
-              {equipmentRequests.length > 0 ? (
+              {equipmentItems.length > 0 ? (
                 <Space wrap>
-                  {equipmentRequests.map(r => (
-                    <Tooltip key={r.category} title={r.unitSettings.filter(u => u.purpose).length > 0 ? `${r.unitSettings.filter(u => u.purpose).length} יחידות עם הגדרות` : undefined}>
-                      <Tag color="orange">{r.categoryLabel} x{r.count}</Tag>
+                  {equipmentItems.map(it => (
+                    <Tooltip
+                      key={it.equipmentId}
+                      title={[it.purpose, it.audioConfig].filter(Boolean).join(' · ') || undefined}
+                    >
+                      <Tag color="orange">
+                        {it.equipmentName} x{it.quantity}
+                      </Tag>
                     </Tooltip>
                   ))}
                 </Space>
@@ -1382,14 +1660,25 @@ const ExternalBroadcastsPage: React.FC = () => {
                   ]}
                 >
                   <List.Item.Meta
-                    title={p.name}
+                    title={
+                      <Space>
+                        <span>{p.name}</span>
+                        {isLegacyPreset(p) && (
+                          <Tag color="default">ישן — נא לעדכן</Tag>
+                        )}
+                      </Space>
+                    }
                     description={
                       <Space size={4} wrap>
                         {p.roles.map(r => (
                           <Tag key={r.roleKey}>{r.roleLabel}: {r.count}</Tag>
                         ))}
                         {p.equipment.map((e, i) => (
-                          <Tag key={i} color="orange">{e.categoryLabel} x{e.count}</Tag>
+                          <Tag key={i} color="orange">
+                            {e.equipmentId
+                              ? `${e.equipmentName || e.categoryLabel} x${e.quantity ?? 1}`
+                              : `${e.categoryLabel} x${e.count ?? 0}`}
+                          </Tag>
                         ))}
                       </Space>
                     }

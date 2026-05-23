@@ -370,6 +370,7 @@ type WarehouseEquipmentPickerItem {
   brand: String
   barcode: String
   quantityTotal: Int
+  quantityAvailable: Int
   isQuantityBased: Boolean!
   isDisabled: Boolean!
 }
@@ -378,6 +379,34 @@ type StorageLocation {
   row: String
   shelf: String
   cell: String
+}
+
+# EquipmentCategory — the single source of truth for equipment categories.
+# Backed by the `equipment_categories` Mongo collection. Admins manage rows
+# from the Warehouse > Categories tab; every equipment picker / filter /
+# tag in the web app resolves slug → labelHe via this catalog.
+type EquipmentCategory {
+  id: ID!
+  slug: String!
+  labelHe: String!
+  sortOrder: Int!
+  isActive: Boolean!
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input EquipmentCategoryInput {
+  slug: String!
+  labelHe: String!
+  sortOrder: Int
+  isActive: Boolean
+}
+
+input UpdateEquipmentCategoryInput {
+  slug: String
+  labelHe: String
+  sortOrder: Int
+  isActive: Boolean
 }
 
 # Configurable warehouses (physical locations). Each warehouse has manual
@@ -1012,10 +1041,26 @@ type PresetRole {
   isCustom: Boolean!
 }
 
+"""
+Item-based equipment requirement on a preset. Each row points at a specific
+`Equipment` document via `equipmentId` and carries the per-line `quantity`,
+`purpose` and `audioConfig` directly. The legacy fields (`count`,
+`unitSettings`) are kept optional for read-only fallback so old presets
+saved under the previous category-based shape keep rendering until
+re-saved.
+"""
 type PresetEquipment {
+  equipmentId: String
+  equipmentName: String
   category: String!
   categoryLabel: String!
-  count: Int!
+  quantity: Int
+
+  purpose: String
+  audioConfig: String
+
+  # Legacy read-only fallback. New presets never populate these.
+  count: Int
   unitSettings: [UnitSetting!]
 }
 
@@ -1120,11 +1165,20 @@ input PresetRoleInput {
   isCustom: Boolean!
 }
 
+"""
+Item-based input for creating/updating preset equipment requirements.
+Writes must include `equipmentId`, `equipmentName`, `category`,
+`categoryLabel` and `quantity` (>= 1). Legacy fields (`count`,
+`unitSettings`) are rejected on write — see preset resolvers.
+"""
 input PresetEquipmentInput {
+  equipmentId: String!
+  equipmentName: String!
   category: String!
   categoryLabel: String!
-  count: Int!
-  unitSettings: [UnitSettingInput!]
+  quantity: Int!
+  purpose: String
+  audioConfig: String
 }
 
 input UnitSettingInput {
@@ -1312,7 +1366,14 @@ type Query {
   # Distinct, sorted list of categories present in the active (non-disabled)
   # equipment catalog. Used to populate the warehouse list category filter
   # without having to download the full catalog client-side.
+  # DEPRECATED: prefer `equipmentCategories` which also returns Hebrew labels
+  # and is the single source of truth across the app.
   warehouseEquipmentCategories: [String!]!
+
+  # Single source of truth catalog for equipment categories. Returns every
+  # active category by default; pass `includeInactive: true` to also fetch
+  # soft-disabled ones (e.g. for the admin management screen).
+  equipmentCategories(includeInactive: Boolean = false): [EquipmentCategory!]!
   
   # Equipment Assignments
   equipmentAssignmentsByEvent(broadcastEventId: ID!): [EquipmentAssignment!]!
@@ -1490,6 +1551,13 @@ type Mutation {
   createWarehouseStoragePlace(warehouseId: ID!, input: CreateWarehouseStoragePlaceInput!): Warehouse!
   updateWarehouseStoragePlace(warehouseId: ID!, placeId: ID!, input: UpdateWarehouseStoragePlaceInput!): Warehouse!
   deleteWarehouseStoragePlace(warehouseId: ID!, placeId: ID!): Warehouse!
+
+  # EquipmentCategory mutations (admin-only, WAREHOUSE_MANAGE).
+  # Slugs are immutable once any equipment references them; `delete` refuses
+  # while equipment still uses the slug — admins must set isActive=false.
+  createEquipmentCategory(input: EquipmentCategoryInput!): EquipmentCategory!
+  updateEquipmentCategory(id: ID!, input: UpdateEquipmentCategoryInput!): EquipmentCategory!
+  deleteEquipmentCategory(id: ID!): Boolean!
   
   # ===== SHIFTS MUTATIONS =====
   # Shifts

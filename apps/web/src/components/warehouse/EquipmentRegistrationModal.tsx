@@ -8,6 +8,7 @@ import type { UploadFile } from 'antd/es/upload';
 import type { TabsProps } from 'antd';
 import dayjs from 'dayjs';
 import WarehouseLocationPicker from './WarehouseLocationPicker';
+import { useEquipmentCategories } from '../../hooks/useEquipmentCategories';
 
 const { TextArea } = Input;
 
@@ -17,22 +18,18 @@ interface EquipmentRegistrationModalProps {
   onSuccess?: () => void;
 }
 
-// Equipment categories mapping
-const EQUIPMENT_CATEGORIES = {
-  cameras: 'מצלמות',
-  batteries: 'סוללות',
-  liveu_kits: 'ערכות LIVEU',
-  unity_kits: 'ערכות UNITY',
-  monitors: 'מוניטורים',
-  headphones: 'אוזניות',
-  stabilizers: 'מייצבים',
-  cards: 'כרטיסים',
-  adapters: 'מתאמים',
-  matrix_components: 'רכיבי מטריצה',
-  other: 'אחר'
-};
-
-const QUANTITY_BASED_DEFAULT_CATEGORIES = new Set(['batteries', 'cards', 'adapters']);
+// Slugs whose new equipment defaults to `isQuantityBased: true`. Kept as
+// an opt-in set on the client so flipping the flag is purely a UX nicety;
+// the source of truth still lives on the server. Mirrors
+// `QUANTITY_BASED_DEFAULT_CATEGORIES` in the backend equipment model.
+const QUANTITY_BASED_DEFAULT_CATEGORY_SLUGS = new Set([
+  'batteries',
+  'cards',
+  'adapters',
+  'cables',
+  'battery_charger',
+  'braids_and_reels',
+]);
 
 const EquipmentRegistrationModal: React.FC<EquipmentRegistrationModalProps> = ({ 
   visible, 
@@ -42,9 +39,10 @@ const EquipmentRegistrationModal: React.FC<EquipmentRegistrationModalProps> = ({
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
+  const { activeCategories, loading: loadingCategories } = useEquipmentCategories();
   
   const [createEquipment] = useMutation(CREATE_EQUIPMENT, {
-    refetchQueries: [{ query: GET_WAREHOUSE_EQUIPMENT }],
+    refetchQueries: [{ query: GET_WAREHOUSE_EQUIPMENT }, 'GetWarehouseEquipment', 'GetWarehouseEquipmentStats'],
     onCompleted: () => {
       message.success('הציוד נרשם בהצלחה!');
       form.resetFields();
@@ -172,16 +170,17 @@ const EquipmentRegistrationModal: React.FC<EquipmentRegistrationModalProps> = ({
                   >
                     <Select
                       placeholder="בחר קטגוריה"
+                      loading={loadingCategories}
+                      showSearch
+                      optionFilterProp="label"
                       onChange={(val: string) => {
-                        form.setFieldValue('isQuantityBased', QUANTITY_BASED_DEFAULT_CATEGORIES.has(val));
+                        form.setFieldValue('isQuantityBased', QUANTITY_BASED_DEFAULT_CATEGORY_SLUGS.has(val));
                       }}
-                    >
-                      {Object.entries(EQUIPMENT_CATEGORIES).map(([key, value]) => (
-                        <Select.Option key={key} value={key}>
-                          {value}
-                        </Select.Option>
-                      ))}
-                    </Select>
+                      options={activeCategories.map((c) => ({
+                        value: c.slug,
+                        label: c.labelHe,
+                      }))}
+                    />
                   </Form.Item>
 
                   <Form.Item

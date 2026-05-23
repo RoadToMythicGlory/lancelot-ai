@@ -23,10 +23,26 @@ export interface PresetRole {
   isCustom: boolean;
 }
 
+/**
+ * A preset equipment row. New (post-migration) presets are item-based and
+ * carry `equipmentId` + `quantity`; legacy presets are category-based and
+ * carry `count` + `unitSettings`. Both shapes coexist in the collection
+ * so the indexer/search keep working until every preset is re-saved.
+ */
 export interface PresetEquipment {
+  // Item-based fields (new shape)
+  equipmentId?: string;
+  equipmentName?: string;
+  quantity?: number;
+  purpose?: string;
+  audioConfig?: string;
+
+  // Always present (denormalized category snapshot)
   category: string;
   categoryLabel: string;
-  count: number;
+
+  // Legacy fields (read-only fallback)
+  count?: number;
   unitSettings?: Array<{
     unitIndex: number;
     purpose?: string;
@@ -146,9 +162,18 @@ function normalize(doc: any): PresetDoc {
       : [],
     equipment: Array.isArray(doc.equipment)
       ? doc.equipment.map((e: any) => ({
+          equipmentId: e.equipmentId ? String(e.equipmentId) : undefined,
+          equipmentName: e.equipmentName ? String(e.equipmentName) : undefined,
+          quantity:
+            e.quantity !== undefined && e.quantity !== null
+              ? Number(e.quantity)
+              : undefined,
+          purpose: e.purpose ? String(e.purpose) : undefined,
+          audioConfig: e.audioConfig ? String(e.audioConfig) : undefined,
           category: String(e.category || ''),
           categoryLabel: String(e.categoryLabel || e.category || ''),
-          count: Number(e.count || 0),
+          count:
+            e.count !== undefined && e.count !== null ? Number(e.count) : undefined,
           unitSettings: Array.isArray(e.unitSettings)
             ? e.unitSettings.map((u: any) => ({
                 unitIndex: Number(u.unitIndex || 0),

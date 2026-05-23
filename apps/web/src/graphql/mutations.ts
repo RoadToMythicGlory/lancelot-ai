@@ -512,6 +512,39 @@ export const DELETE_EQUIPMENT = gql`
   }
 `;
 
+// ─── EquipmentCategory CRUD (admin-only) ──────────────────────────────────
+// Slug is immutable once any equipment references the category; deletion is
+// refused while equipment uses it — admins must set isActive=false instead.
+export const CREATE_EQUIPMENT_CATEGORY = gql`
+  mutation CreateEquipmentCategory($input: EquipmentCategoryInput!) {
+    createEquipmentCategory(input: $input) {
+      id
+      slug
+      labelHe
+      sortOrder
+      isActive
+    }
+  }
+`;
+
+export const UPDATE_EQUIPMENT_CATEGORY = gql`
+  mutation UpdateEquipmentCategory($id: ID!, $input: UpdateEquipmentCategoryInput!) {
+    updateEquipmentCategory(id: $id, input: $input) {
+      id
+      slug
+      labelHe
+      sortOrder
+      isActive
+    }
+  }
+`;
+
+export const DELETE_EQUIPMENT_CATEGORY = gql`
+  mutation DeleteEquipmentCategory($id: ID!) {
+    deleteEquipmentCategory(id: $id)
+  }
+`;
+
 export const RETURN_EQUIPMENT_FROM_EVENT = gql`
   mutation ReturnEquipmentFromEvent($eventId: ID!, $equipmentIds: [String!]!) {
     returnEquipmentFromEvent(eventId: $eventId, equipmentIds: $equipmentIds) {
@@ -727,8 +760,13 @@ export const CREATE_EXTERNAL_BROADCAST_PRESET = gql`
         isCustom
       }
       equipment {
+        equipmentId
+        equipmentName
         category
         categoryLabel
+        quantity
+        purpose
+        audioConfig
         count
         unitSettings {
           unitIndex
@@ -757,8 +795,13 @@ export const UPDATE_EXTERNAL_BROADCAST_PRESET = gql`
         isCustom
       }
       equipment {
+        equipmentId
+        equipmentName
         category
         categoryLabel
+        quantity
+        purpose
+        audioConfig
         count
         unitSettings {
           unitIndex

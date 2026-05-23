@@ -111,7 +111,21 @@ function formatPreset(p: PresetDoc, index: number): string {
     lines.push('');
     lines.push('🎥 ציוד:');
     for (const e of p.equipment) {
-      lines.push(`   • ${e.count}x ${e.categoryLabel}`);
+      // Item-based row: print the equipment name + quantity directly,
+      // optionally followed by purpose / audio config.
+      if (e.equipmentId) {
+        const detail = [e.purpose, e.audioConfig].filter(Boolean).join(' — ');
+        const qty = e.quantity ?? 1;
+        lines.push(
+          `   • ${qty}x ${e.equipmentName || e.categoryLabel}` +
+            (detail ? ` (${detail})` : ''),
+        );
+        continue;
+      }
+
+      // Legacy row: render the category requirement and any per-unit
+      // settings the operator filled in before the migration.
+      lines.push(`   • ${e.count ?? 0}x ${e.categoryLabel}`);
       if (e.unitSettings) {
         for (const u of e.unitSettings) {
           if (u.purpose || u.assignedEquipmentName) {
@@ -156,9 +170,18 @@ async function fetchPresetById(id: string): Promise<PresetDoc | null> {
         : [],
       equipment: Array.isArray(doc.equipment)
         ? doc.equipment.map((e: any) => ({
+            equipmentId: e.equipmentId ? String(e.equipmentId) : undefined,
+            equipmentName: e.equipmentName ? String(e.equipmentName) : undefined,
+            quantity:
+              e.quantity !== undefined && e.quantity !== null
+                ? Number(e.quantity)
+                : undefined,
+            purpose: e.purpose ? String(e.purpose) : undefined,
+            audioConfig: e.audioConfig ? String(e.audioConfig) : undefined,
             category: String(e.category || ''),
             categoryLabel: String(e.categoryLabel || e.category || ''),
-            count: Number(e.count || 0),
+            count:
+              e.count !== undefined && e.count !== null ? Number(e.count) : undefined,
             unitSettings: Array.isArray(e.unitSettings)
               ? e.unitSettings.map((u: any) => ({
                   unitIndex: Number(u.unitIndex || 0),

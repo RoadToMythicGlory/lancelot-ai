@@ -18,6 +18,7 @@
     "seed:departments-users": "ts-node src/scripts/seed-departments-users.ts",
     "seed:department-users": "ts-node src/scripts/seed-department-users.ts",
     "seed:assignment-form-configs": "ts-node src/scripts/seed-assignment-form-configs.ts",
+    "seed:equipment-categories": "ts-node src/scripts/seed-equipment-categories.ts",
     "seed:production-mcr": "cross-env NODE_ENV=production ts-node src/scripts/seed-production-mcr-admin.ts",
     "fix:mcr-permissions": "cross-env NODE_ENV=production ts-node src/scripts/fix-mcr-admin-permissions.ts",
     "test:production-db": "cross-env NODE_ENV=production ts-node src/scripts/test-production-connection.ts",

@@ -37,7 +37,9 @@ import { metrics } from './services/metrics';
 import { warehouseRoutes } from './routes/warehouseRoutes';
 import { trackingRoutes } from './routes/trackingRoutes';
 import { equipmentSetsResolvers } from './resolvers/equipmentSets';
+import { equipmentCategoryResolvers } from './resolvers/equipmentCategory';
 import { internalAssignmentsResolvers } from './resolvers/internalAssignments';
+import { seedEquipmentCategories } from './scripts/seed-equipment-categories';
 import { venueResolvers } from './resolvers/venues';
 import { trackingResolvers } from './resolvers/tracking';
 import { roleTemplateResolvers } from './resolvers/roleTemplate';
@@ -66,6 +68,8 @@ const resolvers = {
     warehouseEquipmentStats: broadcastResolvers.Query.warehouseEquipmentStats,
     warehouseEquipmentForPicker: broadcastResolvers.Query.warehouseEquipmentForPicker,
     warehouseEquipmentCategories: broadcastResolvers.Query.warehouseEquipmentCategories,
+    // Single source of truth for equipment categories (slug + Hebrew label).
+    equipmentCategories: equipmentCategoryResolvers.Query.equipmentCategories,
     equipmentAssignmentsByEvent: broadcastResolvers.Query.equipmentAssignmentsByEvent,
     equipmentAssignments: broadcastResolvers.Query.equipmentAssignments,
     equipmentHistory: broadcastResolvers.Query.equipmentHistory,
@@ -138,6 +142,10 @@ const resolvers = {
     createExternalBroadcastPreset: broadcastResolvers.Mutation.createExternalBroadcastPreset,
     updateExternalBroadcastPreset: broadcastResolvers.Mutation.updateExternalBroadcastPreset,
     deleteExternalBroadcastPreset: broadcastResolvers.Mutation.deleteExternalBroadcastPreset,
+    // EquipmentCategory CRUD (admin-only, WAREHOUSE_MANAGE).
+    createEquipmentCategory: equipmentCategoryResolvers.Mutation.createEquipmentCategory,
+    updateEquipmentCategory: equipmentCategoryResolvers.Mutation.updateEquipmentCategory,
+    deleteEquipmentCategory: equipmentCategoryResolvers.Mutation.deleteEquipmentCategory,
     createVenue: venueResolvers.Mutation.createVenue,
     updateVenue: venueResolvers.Mutation.updateVenue,
     deleteVenue: venueResolvers.Mutation.deleteVenue,
@@ -254,6 +262,16 @@ async function startServer() {
     // before serving traffic. Subsequent admin mutations call the same
     // helper so changes are picked up without a restart.
     await reloadDepartmentRoleRegistry();
+
+    // Idempotent seed for the equipment_categories collection. Inserts any
+    // categories from the legacy hardcoded map (or distinct equipment.category
+    // slugs) that don't yet exist in the new collection. Never overwrites
+    // admin edits — safe to run on every boot.
+    try {
+      await seedEquipmentCategories();
+    } catch (err) {
+      console.error('Failed to seed equipment categories (continuing startup):', err);
+    }
     
     const app = express();
     const PORT = process.env.PORT || config.PORT || 4000;

@@ -117,8 +117,14 @@ export async function reindexAll(): Promise<IndexerStats> {
     try {
       const presets = await listAllPresets();
       for (const p of presets) {
+        // Item-based rows summarise as "{quantity}x {equipmentName}".
+        // Legacy rows (no equipmentId) summarise as "{count}x {categoryLabel}".
         const equipmentSummary = p.equipment
-          .map((e) => `${e.count}x ${e.categoryLabel}`)
+          .map((e) =>
+            e.equipmentId
+              ? `${e.quantity ?? 1}x ${e.equipmentName || e.categoryLabel}`
+              : `${e.count ?? 0}x ${e.categoryLabel}`,
+          )
           .join(', ');
         const rolesSummary = p.roles
           .map((r) => `${r.count}x ${r.roleLabel}`)

@@ -175,6 +175,43 @@ export default function Home() {
   const canManageBulletin = hasPermission(Permission.BULLETIN_MANAGE);
   const canViewOwnShifts = hasPermission(Permission.SHIFTS_VIEW_OWN);
 
+  // Quick-action gates. Mirror the sidebar so we never advertise a destination
+  // the user cannot actually open (ProtectedRoute on the target would just bounce
+  // them back). Keep these in lockstep with `components/Sidebar.tsx`.
+  const canSeeUsersAction = hasPermission(Permission.USERS_MANAGE_DEPT) || hasPermission(Permission.USERS_MANAGE_ALL);
+  const canSeeWarehouseAction = hasPermission(Permission.WAREHOUSE_VIEW);
+  const canSeeBroadcastPlanningAction = canViewBroadcasts;
+  const canSeeShiftsAction = canViewOwnShifts;
+  const canUseChat = hasPermission(Permission.CHAT_USE);
+  // The bulletin board widget is rendered on this page, so the "open bulletin"
+  // shortcut is only useful when the viewer can actually read posts.
+  const canSeeBulletinShortcut = canViewBulletin;
+
+  // Stat-card gates. Each tile leaks privileged information (active user count,
+  // department count, support ticket queue, critical alerts, etc.) that a regular
+  // employee should never see — gate them individually.
+  const canSeeUsersStat = hasPermission(Permission.USERS_VIEW);
+  const canSeeDepartmentsStat = hasPermission(Permission.USERS_VIEW);
+  const canSeeTodaysBroadcastsStat = canViewBroadcasts;
+  const canSeeActiveShiftsStat = hasPermission(Permission.SHIFTS_VIEW_ALL);
+  const canSeeSupportStat = hasPermission(Permission.IT_SUPPORT_VIEW);
+  const canSeeCriticalAlertsStat = hasPermission(Permission.DASHBOARD_MANAGE);
+
+  const anyStatVisible =
+    canSeeUsersStat ||
+    canSeeDepartmentsStat ||
+    canSeeTodaysBroadcastsStat ||
+    canSeeActiveShiftsStat ||
+    canSeeSupportStat ||
+    canSeeCriticalAlertsStat;
+  const anyQuickActionVisible =
+    canSeeBroadcastPlanningAction ||
+    canSeeShiftsAction ||
+    canSeeWarehouseAction ||
+    canSeeUsersAction ||
+    canUseChat ||
+    canSeeBulletinShortcut;
+
   // Compose / publish state for the bulletin board.
   const [bulletinModalOpen, setBulletinModalOpen] = useState(false);
   const [bulletinForm] = Form.useForm<{
@@ -579,141 +616,170 @@ export default function Home() {
         </div>
 
         {/* Stats Grid */}
-        <Row gutter={[16, 16]} className="mb-6">
-          <Col xs={24} sm={12} md={8} lg={4}>
-            <Card hoverable className="text-center">
-              <Statistic
-                title="משתמשים פעילים"
-                value={stats.activeUsers}
-                suffix={`/ ${stats.totalUsers}`}
-                prefix={<UserOutlined />}
-                valueStyle={{ color: '#3f8600' }}
-              />
-            </Card>
-          </Col>
-          <Col xs={24} sm={12} md={8} lg={4}>
-            <Card hoverable className="text-center">
-              <Statistic
-                title="מחלקות"
-                value={stats.totalDepartments}
-                prefix={<TeamOutlined />}
-                valueStyle={{ color: '#1890ff' }}
-              />
-            </Card>
-          </Col>
-          <Col xs={24} sm={12} md={8} lg={4}>
-            <Card hoverable className="text-center">
-              <Statistic
-                title="שידורים היום"
-                value={stats.todaysBroadcasts}
-                prefix={<VideoCameraOutlined />}
-                valueStyle={{ color: '#722ed1' }}
-              />
-            </Card>
+        {anyStatVisible && (
+          <Row gutter={[16, 16]} className="mb-6">
+            {canSeeUsersStat && (
+              <Col xs={24} sm={12} md={8} lg={4}>
+                <Card hoverable className="text-center">
+                  <Statistic
+                    title="משתמשים פעילים"
+                    value={stats.activeUsers}
+                    suffix={`/ ${stats.totalUsers}`}
+                    prefix={<UserOutlined />}
+                    valueStyle={{ color: '#3f8600' }}
+                  />
+                </Card>
               </Col>
-          <Col xs={24} sm={12} md={8} lg={4}>
-            <Card hoverable className="text-center">
-              <Statistic
-                title="משמרות פעילות"
-                value={stats.activeShifts}
-                prefix={<ScheduleOutlined />}
-                valueStyle={{ color: '#fa8c16' }}
-              />
-            </Card>
+            )}
+            {canSeeDepartmentsStat && (
+              <Col xs={24} sm={12} md={8} lg={4}>
+                <Card hoverable className="text-center">
+                  <Statistic
+                    title="מחלקות"
+                    value={stats.totalDepartments}
+                    prefix={<TeamOutlined />}
+                    valueStyle={{ color: '#1890ff' }}
+                  />
+                </Card>
               </Col>
-          <Col xs={24} sm={12} md={8} lg={4}>
-            <Card hoverable className="text-center">
-              <Statistic
-                title="כרטיסי תמיכה"
-                value={stats.openTickets}
-                prefix={<ToolOutlined />}
-                valueStyle={{ color: '#eb2f96' }}
-              />
-            </Card>
+            )}
+            {canSeeTodaysBroadcastsStat && (
+              <Col xs={24} sm={12} md={8} lg={4}>
+                <Card hoverable className="text-center">
+                  <Statistic
+                    title="שידורים היום"
+                    value={stats.todaysBroadcasts}
+                    prefix={<VideoCameraOutlined />}
+                    valueStyle={{ color: '#722ed1' }}
+                  />
+                </Card>
               </Col>
-          <Col xs={24} sm={12} md={8} lg={4}>
-            <Card hoverable className="text-center">
-              <Badge count={stats.criticalAlerts} offset={[-5, 5]}>
-                <Statistic
-                  title="התראות דחופות"
-                  value={stats.criticalAlerts}
-                  prefix={<BellOutlined />}
-                  valueStyle={{ color: '#f5222d' }}
-                />
-              </Badge>
-            </Card>
+            )}
+            {canSeeActiveShiftsStat && (
+              <Col xs={24} sm={12} md={8} lg={4}>
+                <Card hoverable className="text-center">
+                  <Statistic
+                    title="משמרות פעילות"
+                    value={stats.activeShifts}
+                    prefix={<ScheduleOutlined />}
+                    valueStyle={{ color: '#fa8c16' }}
+                  />
+                </Card>
               </Col>
-            </Row>
+            )}
+            {canSeeSupportStat && (
+              <Col xs={24} sm={12} md={8} lg={4}>
+                <Card hoverable className="text-center">
+                  <Statistic
+                    title="כרטיסי תמיכה"
+                    value={stats.openTickets}
+                    prefix={<ToolOutlined />}
+                    valueStyle={{ color: '#eb2f96' }}
+                  />
+                </Card>
+              </Col>
+            )}
+            {canSeeCriticalAlertsStat && (
+              <Col xs={24} sm={12} md={8} lg={4}>
+                <Card hoverable className="text-center">
+                  <Badge count={stats.criticalAlerts} offset={[-5, 5]}>
+                    <Statistic
+                      title="התראות דחופות"
+                      value={stats.criticalAlerts}
+                      prefix={<BellOutlined />}
+                      valueStyle={{ color: '#f5222d' }}
+                    />
+                  </Badge>
+                </Card>
+              </Col>
+            )}
+          </Row>
+        )}
 
         {/* Quick Actions */}
-        <Card title="פעולות מהירות" className="mb-6">
-          <Row gutter={[16, 16]}>
-            <Col xs={12} sm={8} md={6} lg={4}>
-                    <Button 
-                      type="primary" 
-                    icon={<RadarChartOutlined />} 
+        {anyQuickActionVisible && (
+          <Card title="פעולות מהירות" className="mb-6">
+            <Row gutter={[16, 16]}>
+              {canSeeBroadcastPlanningAction && (
+                <Col xs={12} sm={8} md={6} lg={4}>
+                  <Button
+                    type="primary"
+                    icon={<RadarChartOutlined />}
                     block
-                size="large"
-                onClick={() => router.push('/broadcast-planning')}
+                    size="large"
+                    onClick={() => router.push('/broadcast-planning')}
                   >
                     תכנון שידורים
                   </Button>
-            </Col>
-            <Col xs={12} sm={8} md={6} lg={4}>
-                  <Button 
-                    icon={<CalendarOutlined />} 
+                </Col>
+              )}
+              {canSeeShiftsAction && (
+                <Col xs={12} sm={8} md={6} lg={4}>
+                  <Button
+                    icon={<CalendarOutlined />}
                     block
-                size="large"
-                onClick={() => router.push('/shifts')}
+                    size="large"
+                    onClick={() => router.push('/shifts')}
                   >
                     ניהול משמרות
                   </Button>
-            </Col>
-            <Col xs={12} sm={8} md={6} lg={4}>
-              <Button 
-                icon={<ToolOutlined />} 
-                block 
-                size="large"
-                onClick={() => router.push('/warehouse')}
-              >
-                מחסן ציוד
-              </Button>
-            </Col>
-            <Col xs={12} sm={8} md={6} lg={4}>
-              <Button 
-                icon={<TeamOutlined />} 
-                block 
-                size="large"
-                onClick={() => router.push('/users')}
-              >
-                ניהול משתמשים
-              </Button>
-            </Col>
-            <Col xs={12} sm={8} md={6} lg={4}>
-                  <Button 
-                icon={<MessageOutlined />} 
+                </Col>
+              )}
+              {canSeeWarehouseAction && (
+                <Col xs={12} sm={8} md={6} lg={4}>
+                  <Button
+                    icon={<ToolOutlined />}
                     block
-                size="large"
-                onClick={() => message.info('צ\'אט יפתח בקרוב')}
+                    size="large"
+                    onClick={() => router.push('/warehouse')}
                   >
-                צ'אט צוות
+                    מחסן ציוד
                   </Button>
-            </Col>
-            <Col xs={12} sm={8} md={6} lg={4}>
-                  <Button 
-                icon={<BellOutlined />} 
+                </Col>
+              )}
+              {canSeeUsersAction && (
+                <Col xs={12} sm={8} md={6} lg={4}>
+                  <Button
+                    icon={<TeamOutlined />}
                     block
-                size="large"
-                type="dashed"
-                onClick={() => message.info('לוח מודעות יפתח בקרוב')}
+                    size="large"
+                    onClick={() => router.push('/users')}
                   >
-                לוח מודעות
+                    ניהול משתמשים
                   </Button>
-            </Col>
-          </Row>
-              </Card>
+                </Col>
+              )}
+              {canUseChat && (
+                <Col xs={12} sm={8} md={6} lg={4}>
+                  <Button
+                    icon={<MessageOutlined />}
+                    block
+                    size="large"
+                    onClick={() => message.info('צ\'אט יפתח בקרוב')}
+                  >
+                    צ'אט צוות
+                  </Button>
+                </Col>
+              )}
+              {canSeeBulletinShortcut && (
+                <Col xs={12} sm={8} md={6} lg={4}>
+                  <Button
+                    icon={<BellOutlined />}
+                    block
+                    size="large"
+                    type="dashed"
+                    onClick={() => message.info('לוח מודעות יפתח בקרוב')}
+                  >
+                    לוח מודעות
+                  </Button>
+                </Col>
+              )}
+            </Row>
+          </Card>
+        )}
 
-                {/* Today's Broadcasts */}
+                {/* Today's Broadcasts — only surfaced to users who can read broadcasts */}
+        {canViewBroadcasts && (
         <Row gutter={[16, 16]} className="mb-6">
           <Col xs={24}>
             <Card 
@@ -751,10 +817,13 @@ export default function Home() {
             </Card>
           </Col>
         </Row>
+        )}
 
         {/* Weekly Shifts + Broadcast Assignments and Bulletin Board */}
+        {(canViewOwnShifts || canViewBulletin) && (
         <Row gutter={[16, 16]}>
-          <Col xs={24} lg={12}>
+          {canViewOwnShifts && (
+          <Col xs={24} lg={canViewBulletin ? 12 : 24}>
             <Card 
               title={
                 <Space>
@@ -861,8 +930,10 @@ export default function Home() {
               )}
             </Card>
           </Col>
-          
-          <Col xs={24} lg={12}>
+          )}
+
+          {canViewBulletin && (
+          <Col xs={24} lg={canViewOwnShifts ? 12 : 24}>
             <Card
               title="לוח מודעות"
               loading={bulletinLoading}
@@ -971,7 +1042,9 @@ export default function Home() {
               )}
             </Card>
           </Col>
+          )}
         </Row>
+        )}
 
         {/* New Bulletin Post Modal */}
         <Modal

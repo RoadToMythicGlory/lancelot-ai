@@ -109,6 +109,7 @@ const InternalAssignmentsTab: React.FC<InternalAssignmentsTabProps> = ({ canMana
       { query: GET_INTERNAL_EQUIPMENT_ASSIGNMENTS, variables: { status: 'active' } },
       { query: GET_INTERNAL_EQUIPMENT_ASSIGNMENTS, variables: { status: 'all' } },
       'GetWarehouseEquipment',
+      'GetWarehouseEquipmentStats',
       'GetEquipmentHistory',
     ],
     awaitRefetchQueries: true,

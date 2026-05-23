@@ -12,6 +12,7 @@ import { useQuery, useMutation } from '@apollo/client';
 import { GET_WAREHOUSE_EQUIPMENT, GET_EMPLOYEES_BY_DEPARTMENT, GET_DEPARTMENTS, GET_BROADCAST_EVENT } from '../../graphql/queries';
 import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA } from '../../graphql/mutations';
 import DynamicDepartmentJobsPanel, { AssignmentJob } from '../assignments/DynamicDepartmentJobsPanel';
+import { useEquipmentCategories } from '../../hooks/useEquipmentCategories';
 
 const { Option } = Select;
 
@@ -64,6 +65,10 @@ const ExternalBroadcastsModal: React.FC<ExternalBroadcastsModalProps> = ({ visib
   const [selectedEquipment, setSelectedEquipment] = useState<Array<{ id: string; quantity: number }>>([]);
   const [departmentIds, setDepartmentIds] = useState<Record<string, string>>({});
   const [dynamicJobs, setDynamicJobs] = useState<AssignmentJob[]>([]);
+  // Category filters for the equipment table come from the canonical catalog
+  // — replacing the previously-hardcoded English values (camera/audio/...) which
+  // didn't actually match the slugs the backend stores (cameras/sound/...).
+  const { activeCategories: equipmentCategories } = useEquipmentCategories();
 
   // GraphQL mutation for updating department data
   const [updateDepartmentData] = useMutation(UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA, {
@@ -388,12 +393,7 @@ const ExternalBroadcastsModal: React.FC<ExternalBroadcastsModalProps> = ({ visib
       title: 'קטגוריה',
       dataIndex: 'category',
       key: 'category',
-      filters: [
-        { text: 'מצלמות', value: 'camera' },
-        { text: 'אודיו', value: 'audio' },
-        { text: 'תאורה', value: 'lighting' },
-        { text: 'אחר', value: 'other' }
-      ],
+      filters: equipmentCategories.map((c) => ({ text: c.labelHe, value: c.slug })),
       onFilter: (value: any, record: Equipment) => record.category === value
     },
     {

@@ -68,20 +68,58 @@ interface UpcomingEventsProps {
 // i.e. either some equipment was requested or an admin has manually
 // imported the event into the warehouse (sets a small flag in
 // `metadata.departments.warehouse.manuallyTracked`).
+//
+// "Requested equipment" can live in three different places depending on
+// how the event got to this state:
+//   1. `metadata.departments.warehouse.*`        — populated when the
+//      warehouse modal saves an assignment/scan (totalRequested,
+//      requestedItems, assignedItems).
+//   2. `metadata.departments.externalBroadcasts.customData.*` — populated
+//      when an admin enters requests from the External Broadcasts page.
+//      This includes both the new item-based `equipmentList` and the
+//      legacy category-based `equipmentRequests`; the warehouse needs to
+//      surface both so requested gear actually shows up here even if
+//      nobody has opened the warehouse modal yet.
+//   3. `metadata.warehouseData.*`                — legacy fallback for
+//      pre-departments events.
+function hasArrayWithLength(value: unknown): boolean {
+  return Array.isArray(value) && value.length > 0;
+}
+
 function hasWarehouseInterest(event: any): boolean {
-  const wh = event?.metadata?.departments?.warehouse;
-  if (!wh) return false;
-  if (wh.manuallyTracked === true) return true;
-  if ((wh.totalRequested || 0) > 0) return true;
-  if (Array.isArray(wh.requestedItems) && wh.requestedItems.length > 0) return true;
-  if (Array.isArray(wh.assignedItems) && wh.assignedItems.length > 0) return true;
+  const departments = event?.metadata?.departments;
+
+  const wh = departments?.warehouse;
+  if (wh) {
+    if (wh.manuallyTracked === true) return true;
+    if ((wh.totalRequested || 0) > 0) return true;
+    if (hasArrayWithLength(wh.requestedItems)) return true;
+    if (hasArrayWithLength(wh.assignedItems)) return true;
+    if (hasArrayWithLength(wh.customData?.requestedItems)) return true;
+    if (hasArrayWithLength(wh.customData?.assignedItems)) return true;
+    if ((wh.customData?.totalRequested || 0) > 0) return true;
+  }
+
+  // External Broadcasts is the primary entry point for "we need equipment
+  // for this event". Any non-empty equipmentList (item-based) or
+  // equipmentRequests (legacy category-based) means the warehouse is on
+  // the hook to fulfill it, so the event must appear in this widget.
+  const eb = departments?.externalBroadcasts;
+  if (eb) {
+    const cd = eb.customData || {};
+    if (hasArrayWithLength(cd.equipmentList)) return true;
+    if (hasArrayWithLength(cd.equipmentRequests)) return true;
+    if (hasArrayWithLength(eb.equipmentList)) return true;
+    if (hasArrayWithLength(eb.equipmentRequests)) return true;
+  }
+
   // Legacy fallback (older events stored data directly under metadata.warehouseData)
   const legacy = event?.metadata?.warehouseData;
   if (legacy) {
     if (legacy.manuallyTracked === true) return true;
     if ((legacy.totalRequested || 0) > 0) return true;
-    if (Array.isArray(legacy.requestedItems) && legacy.requestedItems.length > 0) return true;
-    if (Array.isArray(legacy.assignedItems) && legacy.assignedItems.length > 0) return true;
+    if (hasArrayWithLength(legacy.requestedItems)) return true;
+    if (hasArrayWithLength(legacy.assignedItems)) return true;
   }
   return false;
 }

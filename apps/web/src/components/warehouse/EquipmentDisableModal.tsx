@@ -57,7 +57,7 @@ const EquipmentDisableModal: React.FC<EquipmentDisableModalProps> = ({
   }, [historyData]);
 
   const [disableEquipment, { loading: disableLoading }] = useMutation(DISABLE_EQUIPMENT, {
-    refetchQueries: ['GetWarehouseEquipment', 'GetEquipmentHistory'],
+    refetchQueries: ['GetWarehouseEquipment', 'GetWarehouseEquipmentStats', 'GetEquipmentHistory'],
     onCompleted: () => {
       message.success('הציוד הושבת בהצלחה');
       disableForm.resetFields();
@@ -70,7 +70,7 @@ const EquipmentDisableModal: React.FC<EquipmentDisableModalProps> = ({
   });
 
   const [enableEquipment, { loading: enableLoading }] = useMutation(ENABLE_EQUIPMENT, {
-    refetchQueries: ['GetWarehouseEquipment', 'GetEquipmentHistory'],
+    refetchQueries: ['GetWarehouseEquipment', 'GetWarehouseEquipmentStats', 'GetEquipmentHistory'],
     onCompleted: () => {
       message.success('הציוד הופעל מחדש בהצלחה');
       enableForm.resetFields();

@@ -15,19 +15,12 @@ import type { ExportColumn, ExportReport } from '@/utils/warehouseReportExport';
 const { Text } = Typography;
 const { Option } = Select;
 
-const EQUIPMENT_CATEGORIES: Record<string, string> = {
-  cameras: 'מצלמות',
-  batteries: 'סוללות',
-  liveu_kits: 'ערכות LIVEU',
-  unity_kits: 'ערכות UNITY',
-  monitors: 'מוניטורים',
-  headphones: 'אוזניות',
-  stabilizers: 'מייצבים',
-  cards: 'כרטיסים',
-  adapters: 'מתאמים',
-  matrix_components: 'רכיבי מטריצה',
-  other: 'אחר',
-};
+// NOTE: this component previously declared its own 11-key category map.
+// That copy was unused (preset rows already carry their own `categoryLabel`
+// snapshot) and has been removed as part of unifying categories under the
+// canonical `equipmentCategories` GraphQL catalog. If you need a Hebrew
+// label for a slug from this file in the future, use the shared
+// `useEquipmentCategories` hook instead of re-introducing a local map.
 
 interface Equipment {
   id: string;
@@ -47,10 +40,26 @@ interface UnitSetting {
   assignedEquipmentName?: string;
 }
 
+// A preset equipment row can be in one of two shapes:
+//   - Item-based (post-migration): `equipmentId` + `quantity` reference a
+//     concrete `Equipment` document. There is nothing to fulfil — the
+//     assignment IS the equipment.
+//   - Legacy (pre-migration): `count` + per-unit `unitSettings` describe a
+//     category-level requirement that the operator reconciled to specific
+//     equipment via this fulfillment screen.
+//
+// New presets can never be saved in the legacy shape (the resolver
+// rejects it), so for legacy rows the screen is read-only — operators are
+// pointed back to External Broadcasts to upgrade.
 interface PresetEquipment {
+  equipmentId?: string;
+  equipmentName?: string;
   category: string;
   categoryLabel: string;
-  count: number;
+  quantity?: number;
+
+  // Legacy fields (read-only fallback).
+  count?: number;
   unitSettings?: UnitSetting[];
 }
 
@@ -62,6 +71,10 @@ interface Preset {
   roles: Array<{ roleKey: string; roleLabel: string; count: number; isCustom: boolean }>;
   equipment: PresetEquipment[];
 }
+
+const isItemBasedPresetEquipment = (eq: PresetEquipment): boolean => !!eq.equipmentId;
+const isLegacyPresetEquipment = (eq: PresetEquipment): boolean => !eq.equipmentId;
+const isLegacyPreset = (p: Preset): boolean => p.equipment.some(isLegacyPresetEquipment);
 
 interface Props {
   message: any;
@@ -114,46 +127,19 @@ const ExternalBroadcastRequests: React.FC<Props> = ({ message, canManage = false
     }));
   };
 
-  const handleSaveAssignments = async () => {
+  /**
+   * Saving fulfillment assignments only makes sense for legacy
+   * (category-based) preset rows — but those can no longer be persisted
+   * because the resolver rejects the legacy `count`/`unitSettings` fields
+   * on write. We therefore refuse the save and steer the operator to the
+   * External Broadcasts page, where they can re-author the preset in the
+   * item-based shape (which is its own assignment).
+   */
+  const handleSaveAssignments = () => {
     if (!selectedPreset) return;
-    try {
-      const updatedEquipment = selectedPreset.equipment.map(eq => {
-        const categoryAssignments = assignments[eq.category] || {};
-        const existingSettings = eq.unitSettings || [];
-
-        const unitSettings = Array.from({ length: eq.count }, (_, i) => {
-          const existing = existingSettings.find(u => u.unitIndex === i) || { unitIndex: i, purpose: '', audioConfig: '' };
-          const newAssignment = categoryAssignments[i];
-          return {
-            unitIndex: i,
-            purpose: existing.purpose || '',
-            audioConfig: existing.audioConfig || undefined,
-            assignedEquipmentId: newAssignment?.id || existing.assignedEquipmentId || undefined,
-            assignedEquipmentName: newAssignment?.name || existing.assignedEquipmentName || undefined,
-          };
-        });
-
-        return {
-          category: eq.category,
-          categoryLabel: eq.categoryLabel,
-          count: eq.count,
-          unitSettings,
-        };
-      });
-
-      await updatePreset({
-        variables: {
-          id: selectedPreset.id,
-          input: { equipment: updatedEquipment },
-        },
-      });
-
-      message.success('הקצאות הציוד נשמרו בפריסט בהצלחה');
-      setAssignments({});
-      await refetchPresets();
-    } catch (err: any) {
-      message.error(`שגיאה בשמירה: ${err.message}`);
-    }
+    message.warning(
+      'פריסט זה שמור בסכמה הישנה (לפי קטגוריות). יש לעדכן אותו בעמוד שידורי חוץ — שם בוחרים ציוד ספציפי לכל שורה במקום קטגוריה.',
+    );
   };
 
   // Load existing assignments when preset is selected
@@ -191,13 +177,24 @@ const ExternalBroadcastRequests: React.FC<Props> = ({ message, canManage = false
     };
 
     const presetRows: PresetRow[] = presetsWithEquipment.map((p) => {
-      const totalUnits = p.equipment.reduce((s, e) => s + e.count, 0);
+      const totalUnits = p.equipment.reduce(
+        (s, e) => s + (e.equipmentId ? (e.quantity ?? 0) : (e.count ?? 0)),
+        0,
+      );
       const assignedUnits = p.equipment.reduce(
-        (s, e) => s + (e.unitSettings?.filter((u) => u.assignedEquipmentId)?.length || 0),
+        (s, e) =>
+          s +
+          (e.equipmentId
+            ? (e.quantity ?? 0)
+            : (e.unitSettings?.filter((u) => u.assignedEquipmentId)?.length || 0)),
         0,
       );
       const categories = p.equipment
-        .map((e) => `${e.categoryLabel} ×${e.count}`)
+        .map((e) =>
+          e.equipmentId
+            ? `${e.equipmentName || e.categoryLabel} ×${e.quantity ?? 1}`
+            : `${e.categoryLabel} ×${e.count ?? 0}`,
+        )
         .join(' · ');
       return {
         name: p.name,
@@ -253,8 +250,25 @@ const ExternalBroadcastRequests: React.FC<Props> = ({ message, canManage = false
         const rows: UnitRow[] = [];
         let unitNumber = 1;
         p.equipment.forEach((eq) => {
+          if (eq.equipmentId) {
+            // Item-based: one row per requested unit, all already assigned
+            // to the same `equipmentName`.
+            const qty = eq.quantity ?? 1;
+            for (let idx = 0; idx < qty; idx += 1) {
+              rows.push({
+                unitNumber: unitNumber++,
+                purpose: eq.categoryLabel,
+                audio: '',
+                assignedName: eq.equipmentName || '',
+                pending: false,
+              });
+            }
+            return;
+          }
+
+          const count = eq.count ?? 0;
           const localCat = assignments[eq.category] || {};
-          for (let idx = 0; idx < eq.count; idx += 1) {
+          for (let idx = 0; idx < count; idx += 1) {
             const saved = eq.unitSettings?.find((u) => u.unitIndex === idx);
             const local = localCat[idx];
             const assignedName = local?.name || saved?.assignedEquipmentName || '';
@@ -267,7 +281,10 @@ const ExternalBroadcastRequests: React.FC<Props> = ({ message, canManage = false
             });
           }
         });
-        const totalUnits = p.equipment.reduce((s, e) => s + e.count, 0);
+        const totalUnits = p.equipment.reduce(
+          (s, e) => s + (e.equipmentId ? (e.quantity ?? 0) : (e.count ?? 0)),
+          0,
+        );
         const assignedUnits = rows.filter((r) => r.assignedName).length;
         return {
           key: p.id,
@@ -359,10 +376,23 @@ const ExternalBroadcastRequests: React.FC<Props> = ({ message, canManage = false
                 size="small"
                 dataSource={presetsWithEquipment}
                 renderItem={preset => {
-                  const totalUnits = preset.equipment.reduce((s, e) => s + e.count, 0);
-                  const assignedUnits = preset.equipment.reduce((s, e) =>
-                    s + (e.unitSettings?.filter(u => u.assignedEquipmentId)?.length || 0), 0
+                  // Item-based rows count their `quantity` and are
+                  // implicitly "assigned" (the equipmentId IS the
+                  // assignment). Legacy rows count `count` units and
+                  // count `assignedEquipmentId` settings.
+                  const totalUnits = preset.equipment.reduce(
+                    (s, e) => s + (e.equipmentId ? (e.quantity ?? 0) : (e.count ?? 0)),
+                    0,
                   );
+                  const assignedUnits = preset.equipment.reduce(
+                    (s, e) =>
+                      s +
+                      (e.equipmentId
+                        ? (e.quantity ?? 0)
+                        : (e.unitSettings?.filter(u => u.assignedEquipmentId)?.length || 0)),
+                    0,
+                  );
+                  const legacy = isLegacyPreset(preset);
 
                   return (
                     <List.Item
@@ -375,11 +405,20 @@ const ExternalBroadcastRequests: React.FC<Props> = ({ message, canManage = false
                       }}
                     >
                       <List.Item.Meta
-                        title={<Text strong>{preset.name}</Text>}
+                        title={
+                          <Space>
+                            <Text strong>{preset.name}</Text>
+                            {legacy && <Tag color="default">ישן</Tag>}
+                          </Space>
+                        }
                         description={
                           <Space size={4} wrap>
                             {preset.equipment.map((e, i) => (
-                              <Tag key={i} color="orange">{e.categoryLabel} x{e.count}</Tag>
+                              <Tag key={i} color="orange">
+                                {e.equipmentId
+                                  ? `${e.equipmentName || e.categoryLabel} x${e.quantity ?? 1}`
+                                  : `${e.categoryLabel} x${e.count ?? 0}`}
+                              </Tag>
                             ))}
                             <Tag color={assignedUnits >= totalUnits ? 'green' : assignedUnits > 0 ? 'gold' : 'default'}>
                               {assignedUnits}/{totalUnits} הוקצו
@@ -411,16 +450,21 @@ const ExternalBroadcastRequests: React.FC<Props> = ({ message, canManage = false
                   <Space>
                     <ToolOutlined />
                     <Text strong>הקצאת ציוד לפריסט - {selectedPreset.name}</Text>
+                    {isLegacyPreset(selectedPreset) && (
+                      <Tag color="default">ישן — נא לעדכן</Tag>
+                    )}
                   </Space>
-                  <Button
-                    type="primary"
-                    icon={<SaveOutlined />}
-                    onClick={handleSaveAssignments}
-                    loading={saving}
-                    disabled={!canManage || Object.keys(assignments).length === 0}
-                  >
-                    שמור הקצאות
-                  </Button>
+                  {isLegacyPreset(selectedPreset) && (
+                    <Button
+                      type="primary"
+                      icon={<SaveOutlined />}
+                      onClick={handleSaveAssignments}
+                      loading={saving}
+                      disabled={!canManage || Object.keys(assignments).length === 0}
+                    >
+                      שמור הקצאות
+                    </Button>
+                  )}
                 </div>
               }
             >
@@ -430,31 +474,89 @@ const ExternalBroadcastRequests: React.FC<Props> = ({ message, canManage = false
                 </Card>
               )}
 
-              {selectedPreset.equipment.map(eq => {
+              {isLegacyPreset(selectedPreset) && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  style={{ marginBottom: 16 }}
+                  message="פריסט בסכמה הישנה"
+                  description="פריסט זה שמור לפי קטגוריות (לפני המעבר לציוד ספציפי). אי אפשר לשמור הקצאות מכאן — נא לפתוח את עמוד שידורי חוץ ולעדכן את הפריסט עם פריטי ציוד ספציפיים."
+                />
+              )}
+
+              {selectedPreset.equipment.map((eq, eqIdx) => {
+                // Item-based row — the equipment IS the assignment, so we
+                // render a compact read-only card pointing at the
+                // referenced `Equipment` document.
+                if (isItemBasedPresetEquipment(eq)) {
+                  const referenced = eq.equipmentId
+                    ? allEquipment.find(e => e.id === eq.equipmentId)
+                    : undefined;
+                  const displayName = eq.equipmentName || referenced?.name || eq.categoryLabel;
+                  return (
+                    <Card
+                      key={`item-${eq.equipmentId || eqIdx}`}
+                      size="small"
+                      style={{ marginBottom: 12 }}
+                      title={
+                        <Space wrap>
+                          {eq.category === 'cameras' ? <VideoCameraOutlined /> : <ToolOutlined />}
+                          <Text strong>{displayName}</Text>
+                          <Tag color="orange">{eq.categoryLabel}</Tag>
+                          <Tag color="blue">דרישה: {eq.quantity ?? 1}</Tag>
+                          <Tag color="green">
+                            <CheckCircleOutlined /> ציוד מוקצה בפריסט
+                          </Tag>
+                        </Space>
+                      }
+                    >
+                      {referenced ? (
+                        <Space wrap size={4}>
+                          {referenced.brand && <Tag color="blue">{referenced.brand}</Tag>}
+                          {referenced.equipmentModel && (
+                            <Tag>{referenced.equipmentModel}</Tag>
+                          )}
+                          <Tag color={referenced.quantityAvailable > 0 ? 'green' : 'red'}>
+                            {referenced.quantityAvailable} זמין
+                          </Tag>
+                        </Space>
+                      ) : (
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          הציוד המקושר לא נמצא בקטלוג (ייתכן שהוסר)
+                        </Text>
+                      )}
+                    </Card>
+                  );
+                }
+
+                // Legacy row — preserve the original per-unit picker UI
+                // for visibility, but the save button is gated above.
+                const count = eq.count ?? 0;
                 const categoryEquipment = equipmentByCategory[eq.category] || [];
                 const availableEquipment = categoryEquipment.filter(e => e.status !== 'maintenance' && e.quantityAvailable > 0);
                 const unitSettings = eq.unitSettings || [];
 
                 return (
                   <Card
-                    key={eq.category}
+                    key={`legacy-${eq.category}-${eqIdx}`}
                     size="small"
                     style={{ marginBottom: 12 }}
                     title={
                       <Space>
                         {eq.category === 'cameras' ? <VideoCameraOutlined /> : <ToolOutlined />}
                         <Text strong>{eq.categoryLabel}</Text>
-                        <Tag color="blue">דרישה: {eq.count}</Tag>
+                        <Tag color="blue">דרישה: {count}</Tag>
                         <Tag color={
-                          unitSettings.filter(u => u.assignedEquipmentId).length >= eq.count ? 'green' :
+                          unitSettings.filter(u => u.assignedEquipmentId).length >= count ? 'green' :
                           unitSettings.filter(u => u.assignedEquipmentId).length > 0 ? 'gold' : 'default'
                         }>
-                          {unitSettings.filter(u => u.assignedEquipmentId).length}/{eq.count} הוקצו
+                          {unitSettings.filter(u => u.assignedEquipmentId).length}/{count} הוקצו
                         </Tag>
+                        <Tag color="default">ישן</Tag>
                       </Space>
                     }
                   >
-                    {Array.from({ length: eq.count }, (_, idx) => {
+                    {Array.from({ length: count }, (_, idx) => {
                       const unit = unitSettings.find(u => u.unitIndex === idx) || { unitIndex: idx, purpose: '', audioConfig: '' };
                       const newAssignment = assignments[eq.category]?.[idx];
                       const currentEquipId = newAssignment?.id || unit.assignedEquipmentId;
@@ -465,7 +567,7 @@ const ExternalBroadcastRequests: React.FC<Props> = ({ message, canManage = false
                           marginBottom: 8,
                           alignItems: 'center',
                           padding: '8px 0',
-                          borderBottom: idx < eq.count - 1 ? '1px solid #f5f5f5' : undefined,
+                          borderBottom: idx < count - 1 ? '1px solid #f5f5f5' : undefined,
                         }}>
                           <Col style={{ width: 36 }}>
                             <Tag>{idx + 1}</Tag>
@@ -495,7 +597,7 @@ const ExternalBroadcastRequests: React.FC<Props> = ({ message, canManage = false
                               style={{ width: '100%' }}
                               size="small"
                               allowClear
-                              disabled={!canManage}
+                              disabled
                               showSearch
                               filterOption={(input, option) =>
                                 (option?.label as string)?.toLowerCase().includes(input.toLowerCase()) ?? false

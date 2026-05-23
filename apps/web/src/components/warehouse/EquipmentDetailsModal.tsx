@@ -8,6 +8,7 @@ import TrackerTagBindingModal from './tracking/TrackerTagBindingModal';
 import dayjs from 'dayjs';
 import JsBarcode from 'jsbarcode';
 import { useReactToPrint } from 'react-to-print';
+import { useEquipmentCategories } from '../../hooks/useEquipmentCategories';
 
 interface EquipmentDetailsModalProps {
   visible: boolean;
@@ -20,21 +21,6 @@ interface EquipmentDetailsModalProps {
   canForceRelease?: boolean;
 }
 
-// Equipment categories mapping
-const EQUIPMENT_CATEGORIES = {
-  cameras: 'מצלמות',
-  batteries: 'סוללות',
-  liveu_kits: 'ערכות LIVEU',
-  unity_kits: 'ערכות UNITY',
-  monitors: 'מוניטורים',
-  headphones: 'אוזניות',
-  stabilizers: 'מייצבים',
-  cards: 'כרטיסים',
-  adapters: 'מתאמים',
-  matrix_components: 'רכיבי מטריצה',
-  other: 'אחר'
-};
-
 const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({ 
   visible, 
   equipment,
@@ -43,6 +29,10 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
   canManage = false,
   canForceRelease = false
 }) => {
+  // Category slug → Hebrew label resolution comes from the canonical catalog.
+  // We include inactive categories so equipment that was tagged with a now-
+  // disabled slug still shows the proper Hebrew label in the details view.
+  const { labelOf: categoryLabelOf } = useEquipmentCategories({ includeInactive: true });
   const [activeTab, setActiveTab] = useState('1');
   const componentRef = useRef<HTMLDivElement>(null);
   const [barcodeData, setBarcodeData] = useState<string>('');
@@ -363,7 +353,7 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
             color: '#333',
             fontFamily: 'Arial, sans-serif'
           }}>
-            {equipment?.category && `${EQUIPMENT_CATEGORIES[equipment.category as keyof typeof EQUIPMENT_CATEGORIES] || equipment.category}`}
+            {equipment?.category && categoryLabelOf(equipment.category)}
           </div>
           {equipment?.brand && (
             <div style={{ 
@@ -590,7 +580,7 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
               {equipment?.name}
             </Descriptions.Item>
             <Descriptions.Item label="קטגוריה">
-              <Tag color="blue">{EQUIPMENT_CATEGORIES[equipment?.category as keyof typeof EQUIPMENT_CATEGORIES] || equipment?.category}</Tag>
+              <Tag color="blue">{categoryLabelOf(equipment?.category)}</Tag>
             </Descriptions.Item>
             <Descriptions.Item label="ברקוד">
               <code>{equipment?.barcode}</code>

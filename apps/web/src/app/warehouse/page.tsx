@@ -16,13 +16,15 @@ import {
   CalendarOutlined,
   ExclamationCircleOutlined,
   PhoneOutlined,
+  TagsOutlined,
   FilePdfOutlined,
   EnvironmentOutlined,
   UserSwitchOutlined,
   ShareAltOutlined,
 } from '@ant-design/icons';
 import { useApolloClient, useQuery } from '@apollo/client';
-import { GET_WAREHOUSE_EQUIPMENT, GET_WAREHOUSE_EQUIPMENT_STATS, GET_WAREHOUSE_EQUIPMENT_CATEGORIES, GET_BROADCAST_EVENTS, GET_STALE_EQUIPMENT } from '../../graphql/queries';
+import { GET_WAREHOUSE_EQUIPMENT, GET_WAREHOUSE_EQUIPMENT_STATS, GET_BROADCAST_EVENTS, GET_STALE_EQUIPMENT } from '../../graphql/queries';
+import { useEquipmentCategories } from '../../hooks/useEquipmentCategories';
 import { GET_WAREHOUSES } from '../../graphql/warehouse-queries';
 import WarehouseExportButtons from '../../components/warehouse/WarehouseExportButtons';
 import type {
@@ -39,6 +41,7 @@ import EquipmentQuantityAdjustment from '../../components/warehouse/EquipmentQua
 import EquipmentDisableModal from '../../components/warehouse/EquipmentDisableModal';
 import VendorManagement from '../../components/warehouse/VendorManagement';
 import WarehouseManagement from '../../components/warehouse/WarehouseManagement';
+import EquipmentCategoriesManagement from '../../components/warehouse/EquipmentCategoriesManagement';
 import UpcomingEvents from '../../components/warehouse/UpcomingEvents';
 import ExternalBroadcastRequests from '../../components/warehouse/ExternalBroadcastRequests';
 import WarehousePdfImportModal from '../../components/warehouse/WarehousePdfImportModal';
@@ -162,9 +165,15 @@ const WarehousePage: React.FC = () => {
     return Object.keys(filter).length > 0 ? filter : undefined;
   }, [debouncedSearchText, selectedCategory, selectedStatus, selectedWarehouse]);
 
+  // The summary cards must reflect every dispatch/return/disable/edit —
+  // including ones triggered from other modals or other tabs. Every
+  // mutation that mutates inventory now lists `GetWarehouseEquipmentStats`
+  // in its `refetchQueries`, and we add a gentle 15s poll as a safety
+  // net for cross-tab/cross-user activity.
   const { data: equipmentStatsData } = useQuery(GET_WAREHOUSE_EQUIPMENT_STATS, {
     variables: { filter: equipmentFilter },
     fetchPolicy: 'cache-and-network',
+    pollInterval: 15000,
   });
 
   // Pagination total mirrors what the user is currently viewing. The
@@ -201,11 +210,12 @@ const WarehousePage: React.FC = () => {
   });
   const equipment: Equipment[] = equipmentData?.warehouseEquipment || [];
 
-  // Distinct categories across the full active catalog so the dropdown
-  // doesn't shrink to "categories present on the current page".
-  const { data: categoriesData } = useQuery(GET_WAREHOUSE_EQUIPMENT_CATEGORIES, {
-    fetchPolicy: 'cache-first',
-  });
+  // Canonical category catalog (single source of truth). Filter shows the
+  // full active list including categories that have zero equipment, with
+  // their Hebrew labels instead of raw slugs. Inactive categories are
+  // included so a selected disabled category continues to render correctly.
+  const { categories: equipmentCategoryCatalog, labelOf: categoryLabelOf } =
+    useEquipmentCategories({ includeInactive: true });
 
   // Warehouses (populates the location filter dropdown)
   const { data: warehousesData } = useQuery(GET_WAREHOUSES, {
@@ -227,10 +237,9 @@ const WarehousePage: React.FC = () => {
     skip: activeTab !== 'history' || !dateRangeValid || !canViewBroadcasts
   });
 
-  // Categories for the filter dropdown — pulled from a dedicated lightweight
-  // query so it covers the full ~4k-row catalog regardless of which page
-  // the user is currently viewing.
-  const categories: string[] = categoriesData?.warehouseEquipmentCategories ?? [];
+  // Active subset shown by default in the filter dropdown (admins can still
+  // see disabled categories applied to existing equipment via labelOf).
+  const filterCategories = equipmentCategoryCatalog.filter((c) => c.isActive);
 
   // Reset to first page whenever filters/search change
   React.useEffect(() => {
@@ -706,8 +715,8 @@ const WarehousePage: React.FC = () => {
               suffixIcon={<FilterOutlined />}
             >
               <Select.Option value="all">כל הקטגוריות</Select.Option>
-              {categories.map(cat => (
-                <Select.Option key={cat} value={cat}>{cat}</Select.Option>
+              {filterCategories.map((cat) => (
+                <Select.Option key={cat.slug} value={cat.slug}>{cat.labelHe}</Select.Option>
               ))}
             </Select>
           </Col>
@@ -854,7 +863,7 @@ const WarehousePage: React.FC = () => {
                   <div className="flex justify-between items-center mb-2">
                     <Space>
                       <strong className="text-lg">{item.name}</strong>
-                      <Tag color="blue">{item.category}</Tag>
+                      <Tag color="blue">{categoryLabelOf(item.category)}</Tag>
                       <Tag color={getStatusColor(item.status)}>
                         {getStatusText(item.status)}
                       </Tag>
@@ -1268,6 +1277,7 @@ const WarehousePage: React.FC = () => {
             { key: 'internal-assignments', icon: <UserSwitchOutlined />, label: 'הקצאות פנימיות' },
             { key: 'vendors', icon: <PhoneOutlined />, label: 'ספקים' },
             { key: 'warehouses', icon: <HomeOutlined />, label: 'מחסנים' },
+            { key: 'equipment-categories', icon: <TagsOutlined />, label: 'קטגוריות ציוד' },
             canViewBroadcasts && { key: 'upcoming-events', icon: <CalendarOutlined />, label: 'אירועים קרובים' },
             { key: 'equipment-sets', icon: <InboxOutlined />, label: 'סטים' },
             { key: 'shared-engineering', icon: <ShareAltOutlined />, label: 'ציוד הנדסה שיתופי' },
@@ -1287,6 +1297,8 @@ const WarehousePage: React.FC = () => {
                 return <VendorManagement canManage={canManageWarehouse} />;
               case 'warehouses':
                 return <WarehouseManagement canManage={canManageWarehouse} />;
+              case 'equipment-categories':
+                return <EquipmentCategoriesManagement canManage={canManageWarehouse} />;
               case 'upcoming-events':
                 return canViewBroadcasts ? <UpcomingEvents /> : null;
               case 'equipment-sets':
@@ -1475,7 +1487,7 @@ const WarehousePage: React.FC = () => {
                       <div className="flex justify-between items-center mb-1">
                         <Space>
                           <strong>{item.name}</strong>
-                          {item.category && <Tag color="blue">{item.category}</Tag>}
+                          {item.category && <Tag color="blue">{categoryLabelOf(item.category)}</Tag>}
                           <Tag color={getStatusColor(item.status)}>
                             {getStatusText(item.status)}
                           </Tag>

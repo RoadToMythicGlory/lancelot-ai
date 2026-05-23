@@ -1317,7 +1317,7 @@ const WarehousePage: React.FC = () => {
           return (
             <>
               <div
-                className="flex flex-nowrap items-center gap-1 mb-6 p-1.5 bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto"
+                className="flex flex-nowrap items-center justify-center gap-2 mb-6 px-6 py-1.5 bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto"
                 role="tablist"
                 aria-label="ניווט מחסן"
               >

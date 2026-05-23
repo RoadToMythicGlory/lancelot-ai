@@ -140,3 +140,5 @@ uploads/
 # Local-only commit message scratch files used when scripting commits
 .git-commit-msg.tmp
 *.commit-msg.tmp
+
+report.txt

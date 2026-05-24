@@ -188,6 +188,16 @@ async function checkStaleEquipment() {
 const CAPACITY_RESOURCE = 'warehouse_capacity';
 
 /**
+ * Absolute minimum occupied volume (in m³) before a "near full" alert is
+ * allowed to fire. A single small item on a tiny shelf can be at 100% of
+ * the shelf's capacity yet still represent a negligible amount of actual
+ * material — alerting on those cases just trains people to ignore the
+ * inbox. 0.05 m³ ≈ 50 L (roughly a large carry-on suitcase) is the floor
+ * below which "near full" stops being useful.
+ */
+const MIN_OCCUPIED_VOLUME_FOR_ALERT_M3 = 0.05;
+
+/**
  * Round the utilization down to the nearest 10% step (capped at 100).
  * We bake that bucket into the de-dup `resourceId` so the same
  * "near-full" condition only alerts once until either:
@@ -198,6 +208,17 @@ const CAPACITY_RESOURCE = 'warehouse_capacity';
 function capacityBucket(percent: number): number {
   if (percent >= 100) return 100;
   return Math.floor(percent / 10) * 10;
+}
+
+/**
+ * Returns true when the location's near-full / over-capacity signal is
+ * backed by a meaningful amount of physical volume. Tiny absolute
+ * volumes (a single battery on a battery-sized shelf) shouldn't trigger
+ * inbox notifications even though their percentage is 100%.
+ */
+function isAlertWorthy(occ: WarehouseOccupancy | StoragePlaceOccupancy): boolean {
+  if (!occ.isNearFull && !occ.isOverCapacity) return false;
+  return occ.occupiedVolume >= MIN_OCCUPIED_VOLUME_FOR_ALERT_M3;
 }
 
 async function checkWarehouseCapacity() {
@@ -237,22 +258,31 @@ async function checkWarehouseCapacity() {
       occupancy: WarehouseOccupancy | StoragePlaceOccupancy;
     };
     const alerts: Alert[] = [];
+    // Resource id prefixes for locations we evaluated and found *not*
+    // near-full this cycle. Used to auto-dismiss stale notifications
+    // (e.g. a warehouse was at 80%, equipment moved out, now 5% — the
+    // old "near full" notification should go away).
+    const healthyPrefixes: string[] = [];
 
     for (const warehouse of warehouses) {
       const whItems = itemsByWarehouse.get(warehouse._id.toString()) || [];
       const { warehouse: whOccupancy, places } = computeWarehouseOccupancy(warehouse, whItems);
-      if (whOccupancy.isNearFull) {
+      const whPrefix = `warehouse:${warehouse._id.toString()}:`;
+      if (isAlertWorthy(whOccupancy)) {
         alerts.push({
           kind: 'warehouse',
           warehouseId: warehouse._id.toString(),
           warehouseName: warehouse.name,
           occupancy: whOccupancy,
         });
+      } else {
+        healthyPrefixes.push(whPrefix);
       }
       for (const place of warehouse.storagePlaces || []) {
         const placeId = place._id.toString();
         const placeOcc = places.get(placeId);
-        if (placeOcc?.isNearFull) {
+        const placePrefix = `place:${warehouse._id.toString()}:${placeId}:`;
+        if (placeOcc && isAlertWorthy(placeOcc)) {
           alerts.push({
             kind: 'place',
             warehouseId: warehouse._id.toString(),
@@ -261,7 +291,35 @@ async function checkWarehouseCapacity() {
             placeName: place.name,
             occupancy: placeOcc,
           });
+        } else {
+          healthyPrefixes.push(placePrefix);
         }
+      }
+    }
+
+    // Auto-dismiss any open notifications for locations that are no
+    // longer near-full. We match by prefix so notifications across all
+    // buckets (b0, b80, b100, …) for the same location get cleared in
+    // one query.
+    if (healthyPrefixes.length > 0) {
+      const orClauses = healthyPrefixes.map((prefix) => ({
+        // Anchor on the start of the resourceId; escape regex meta-chars
+        // even though our prefixes only contain `:` and alphanumerics
+        // today, just to stay safe if the format evolves.
+        resourceId: new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
+      }));
+      const dismissed = await Notification.updateMany(
+        {
+          resource: CAPACITY_RESOURCE,
+          isDismissed: { $ne: true },
+          $or: orClauses,
+        },
+        { $set: { isDismissed: true } },
+      );
+      if (dismissed.modifiedCount > 0) {
+        logger.info(
+          `checkWarehouseCapacity: auto-dismissed ${dismissed.modifiedCount} stale notifications`,
+        );
       }
     }
 

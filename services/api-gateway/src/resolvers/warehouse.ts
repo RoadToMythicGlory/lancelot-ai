@@ -10,6 +10,14 @@ import {
   WarehouseDimensionUnit,
   WarehouseStoragePlaceType,
 } from '../models/warehouse.models';
+import { Equipment } from '../models/equipment.models';
+import {
+  computeWarehouseOccupancy,
+  mapDimensionsToGraphQL,
+  normalizeDimensionsInput,
+  type StoragePlaceOccupancy,
+  type WarehouseOccupancy,
+} from '../services/warehouseCapacity.service';
 
 // Hard cap on the warehouse list query — the UI never paginates this
 // because it's expected to be tiny (a handful of physical buildings).
@@ -42,7 +50,17 @@ function normalizePlaceType(type?: string | null): WarehouseStoragePlaceType {
   return 'other';
 }
 
-function mapStoragePlace(place: any) {
+// Clamp a 0-100 threshold input. Treat anything out of range or
+// non-finite as "no override" so the warehouse default kicks in.
+function normalizeThresholdPercent(value: unknown): number | undefined {
+  if (value === null || value === undefined) return undefined;
+  const num = Number(value);
+  if (!Number.isFinite(num)) return undefined;
+  if (num < 0 || num > 100) return undefined;
+  return num;
+}
+
+export function mapStoragePlace(place: any, occupancy?: StoragePlaceOccupancy | null) {
   return {
     id: place._id?.toString(),
     name: place.name,
@@ -50,12 +68,28 @@ function mapStoragePlace(place: any) {
     code: place.code || null,
     notes: place.notes || null,
     isActive: place.isActive !== false,
+    dimensions: mapDimensionsToGraphQL(place.dimensions),
+    capacityAlertThresholdPercent:
+      typeof place.capacityAlertThresholdPercent === 'number'
+        ? place.capacityAlertThresholdPercent
+        : null,
+    occupancy: occupancy ?? null,
     createdAt: place.createdAt ? new Date(place.createdAt).toISOString() : null,
     updatedAt: place.updatedAt ? new Date(place.updatedAt).toISOString() : null,
   };
 }
 
-export function mapWarehouseToGraphQL(warehouse: IWarehouse | any) {
+/**
+ * Map a warehouse Mongoose doc (or plain object) into the GraphQL
+ * payload. When `occupancy` is provided, the warehouse-level and
+ * per-place occupancy snapshots are injected; otherwise those fields
+ * are `null` (mutations return null occupancy — clients should re-query
+ * when they need fresh numbers).
+ */
+export function mapWarehouseToGraphQL(
+  warehouse: IWarehouse | any,
+  occupancy?: { warehouse: WarehouseOccupancy; places: Map<string, StoragePlaceOccupancy> } | null,
+) {
   if (!warehouse) return null;
   return {
     id: warehouse._id.toString(),
@@ -70,10 +104,17 @@ export function mapWarehouseToGraphQL(warehouse: IWarehouse | any) {
           unit: warehouse.dimensions.unit || 'meters',
         }
       : null,
+    capacityAlertThresholdPercent:
+      typeof warehouse.capacityAlertThresholdPercent === 'number'
+        ? warehouse.capacityAlertThresholdPercent
+        : null,
     storagePlaces: Array.isArray(warehouse.storagePlaces)
-      ? warehouse.storagePlaces.map(mapStoragePlace)
+      ? warehouse.storagePlaces.map((p: any) =>
+          mapStoragePlace(p, occupancy?.places.get(p._id?.toString())),
+        )
       : [],
     isActive: warehouse.isActive !== false,
+    occupancy: occupancy?.warehouse ?? null,
     createdBy: warehouse.createdBy || null,
     createdAt: warehouse.createdAt
       ? new Date(warehouse.createdAt).toISOString()
@@ -82,6 +123,56 @@ export function mapWarehouseToGraphQL(warehouse: IWarehouse | any) {
       ? new Date(warehouse.updatedAt).toISOString()
       : new Date().toISOString(),
   };
+}
+
+/**
+ * Load every equipment row currently assigned to the given warehouses
+ * and compute occupancy snapshots for each. Returns a map keyed by
+ * `warehouse._id.toString()` for cheap lookups when mapping.
+ */
+export async function loadOccupancyForWarehouses(
+  warehouses: any[],
+): Promise<Map<string, { warehouse: WarehouseOccupancy; places: Map<string, StoragePlaceOccupancy> }>> {
+  const result = new Map<
+    string,
+    { warehouse: WarehouseOccupancy; places: Map<string, StoragePlaceOccupancy> }
+  >();
+  if (!Array.isArray(warehouses) || warehouses.length === 0) return result;
+
+  const warehouseIds = warehouses
+    .map((w) => w?._id)
+    .filter((id): id is mongoose.Types.ObjectId => !!id);
+  if (warehouseIds.length === 0) return result;
+
+  // We only need the fields that matter for occupancy math. Keep the
+  // projection lean so this stays cheap on org-sized catalogs (~5k items).
+  const items = await Equipment.find({ warehouseId: { $in: warehouseIds } })
+    .select({
+      warehouseId: 1,
+      storagePlaceId: 1,
+      dimensions: 1,
+      quantityTotal: 1,
+      quantityAssigned: 1,
+    })
+    .lean()
+    .exec();
+
+  const itemsByWarehouse = new Map<string, any[]>();
+  for (const item of items) {
+    const key = item.warehouseId?.toString();
+    if (!key) continue;
+    if (!itemsByWarehouse.has(key)) itemsByWarehouse.set(key, []);
+    itemsByWarehouse.get(key)!.push(item);
+  }
+
+  for (const warehouse of warehouses) {
+    const key = warehouse?._id?.toString();
+    if (!key) continue;
+    const whItems = itemsByWarehouse.get(key) || [];
+    result.set(key, computeWarehouseOccupancy(warehouse, whItems));
+  }
+
+  return result;
 }
 
 export const warehouseResolvers = {
@@ -108,7 +199,10 @@ export const warehouseResolvers = {
         .limit(MAX_WAREHOUSE_LIST)
         .exec();
 
-      return docs.map(mapWarehouseToGraphQL);
+      const occupancyByWarehouse = await loadOccupancyForWarehouses(docs);
+      return docs.map((doc) =>
+        mapWarehouseToGraphQL(doc, occupancyByWarehouse.get(doc._id.toString())),
+      );
     },
 
     warehouse: async (_: any, { id }: { id: string }, context: any) => {
@@ -119,7 +213,9 @@ export const warehouseResolvers = {
         throw new Error('Invalid warehouse ID');
       }
       const doc = await Warehouse.findById(id).exec();
-      return mapWarehouseToGraphQL(doc);
+      if (!doc) return null;
+      const occupancyByWarehouse = await loadOccupancyForWarehouses([doc]);
+      return mapWarehouseToGraphQL(doc, occupancyByWarehouse.get(doc._id.toString()));
     },
   },
 
@@ -140,13 +236,17 @@ export const warehouseResolvers = {
               unit: normalizeUnit(input.dimensions.unit),
             }
           : undefined,
+        capacityAlertThresholdPercent: normalizeThresholdPercent(
+          input.capacityAlertThresholdPercent,
+        ),
         isActive: input.isActive !== false,
         storagePlaces: [],
         createdBy: user?.userId,
       });
 
       const saved = await warehouse.save();
-      return mapWarehouseToGraphQL(saved);
+      const occupancy = await loadOccupancyForWarehouses([saved]);
+      return mapWarehouseToGraphQL(saved, occupancy.get(saved._id.toString()));
     },
 
     updateWarehouse: async (
@@ -182,9 +282,15 @@ export const warehouseResolvers = {
           };
         }
       }
+      if (input.capacityAlertThresholdPercent !== undefined) {
+        warehouse.capacityAlertThresholdPercent = normalizeThresholdPercent(
+          input.capacityAlertThresholdPercent,
+        );
+      }
 
       const saved = await warehouse.save();
-      return mapWarehouseToGraphQL(saved);
+      const occupancy = await loadOccupancyForWarehouses([saved]);
+      return mapWarehouseToGraphQL(saved, occupancy.get(saved._id.toString()));
     },
 
     deleteWarehouse: async (_: any, { id }: { id: string }, context: any) => {
@@ -198,7 +304,6 @@ export const warehouseResolvers = {
       // Detach equipment that points to this warehouse so we don't end up
       // with dangling references. We don't hard-delete the equipment —
       // just clear the location fields so it shows up as "unassigned".
-      const { Equipment } = await import('../models/equipment.models');
       await Equipment.updateMany(
         { warehouseId: new mongoose.Types.ObjectId(id) },
         { $set: { warehouseId: null, storagePlaceId: null, currentLocation: null } },
@@ -231,10 +336,22 @@ export const warehouseResolvers = {
         code: input.code ?? undefined,
         notes: input.notes ?? undefined,
         isActive: input.isActive !== false,
+        dimensions: input.dimensions
+          ? {
+              length: input.dimensions.length ?? undefined,
+              width: input.dimensions.width ?? undefined,
+              height: input.dimensions.height ?? undefined,
+              unit: normalizeUnit(input.dimensions.unit),
+            }
+          : undefined,
+        capacityAlertThresholdPercent: normalizeThresholdPercent(
+          input.capacityAlertThresholdPercent,
+        ),
       } as any);
 
       const saved = await warehouse.save();
-      return mapWarehouseToGraphQL(saved);
+      const occupancy = await loadOccupancyForWarehouses([saved]);
+      return mapWarehouseToGraphQL(saved, occupancy.get(saved._id.toString()));
     },
 
     updateWarehouseStoragePlace: async (
@@ -271,9 +388,27 @@ export const warehouseResolvers = {
       if (input.code !== undefined) place.code = input.code;
       if (input.notes !== undefined) place.notes = input.notes;
       if (input.isActive !== undefined) place.isActive = !!input.isActive;
+      if (input.dimensions !== undefined) {
+        if (input.dimensions === null) {
+          place.dimensions = undefined;
+        } else {
+          place.dimensions = {
+            length: input.dimensions.length ?? undefined,
+            width: input.dimensions.width ?? undefined,
+            height: input.dimensions.height ?? undefined,
+            unit: normalizeUnit(input.dimensions.unit),
+          };
+        }
+      }
+      if (input.capacityAlertThresholdPercent !== undefined) {
+        place.capacityAlertThresholdPercent = normalizeThresholdPercent(
+          input.capacityAlertThresholdPercent,
+        );
+      }
 
       const saved = await warehouse.save();
-      return mapWarehouseToGraphQL(saved);
+      const occupancy = await loadOccupancyForWarehouses([saved]);
+      return mapWarehouseToGraphQL(saved, occupancy.get(saved._id.toString()));
     },
 
     deleteWarehouseStoragePlace: async (
@@ -302,7 +437,6 @@ export const warehouseResolvers = {
       }
 
       // Detach any equipment that referenced this specific place.
-      const { Equipment } = await import('../models/equipment.models');
       await Equipment.updateMany(
         { storagePlaceId: new mongoose.Types.ObjectId(placeId) },
         { $set: { storagePlaceId: null } },
@@ -310,7 +444,8 @@ export const warehouseResolvers = {
 
       place.deleteOne();
       const saved = await warehouse.save();
-      return mapWarehouseToGraphQL(saved);
+      const occupancy = await loadOccupancyForWarehouses([saved]);
+      return mapWarehouseToGraphQL(saved, occupancy.get(saved._id.toString()));
     },
   },
 };

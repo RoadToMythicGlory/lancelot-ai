@@ -14,6 +14,7 @@ import {
   List,
   Modal,
   Popconfirm,
+  Progress,
   Row,
   Select,
   Space,
@@ -21,13 +22,16 @@ import {
   Switch,
   Table,
   Tag,
+  Tooltip,
 } from 'antd';
 import {
+  AppstoreOutlined,
   DeleteOutlined,
   EditOutlined,
   EnvironmentOutlined,
   HomeOutlined,
   PlusOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import { useMutation, useQuery } from '@apollo/client';
 import {
@@ -40,12 +44,32 @@ import {
   UPDATE_WAREHOUSE_STORAGE_PLACE,
   WAREHOUSE_DIMENSION_UNIT_OPTIONS,
   WAREHOUSE_STORAGE_PLACE_TYPE_OPTIONS,
+  formatCubicMeters,
+  formatPercent,
   getDimensionUnitLabel,
   getStoragePlaceTypeLabel,
 } from '../../graphql/warehouse-queries';
 import { GET_WAREHOUSE_EQUIPMENT } from '../../graphql/queries';
 import WarehouseExportButtons from './WarehouseExportButtons';
+import WarehouseEquipmentListModal from './WarehouseEquipmentListModal';
 import type { ExportColumn, ExportReport } from '@/utils/warehouseReportExport';
+
+interface OccupancySnapshot {
+  capacityVolume?: number | null;
+  occupiedVolume: number;
+  availableVolume?: number | null;
+  utilizationPercent?: number | null;
+  alertThresholdPercent: number;
+  isNearFull: boolean;
+  isOverCapacity: boolean;
+  storedItemCount: number;
+  itemsMissingDimensions: number;
+  unit: string;
+}
+
+interface WarehouseOccupancySnapshot extends OccupancySnapshot {
+  placesNearFull: number;
+}
 
 interface WarehouseStoragePlace {
   id: string;
@@ -54,6 +78,9 @@ interface WarehouseStoragePlace {
   code?: string | null;
   notes?: string | null;
   isActive: boolean;
+  dimensions?: WarehouseDimensions | null;
+  capacityAlertThresholdPercent?: number | null;
+  occupancy?: OccupancySnapshot | null;
 }
 
 interface WarehouseDimensions {
@@ -69,8 +96,26 @@ interface Warehouse {
   description?: string | null;
   address?: string | null;
   dimensions?: WarehouseDimensions | null;
+  capacityAlertThresholdPercent?: number | null;
   storagePlaces: WarehouseStoragePlace[];
   isActive: boolean;
+  occupancy?: WarehouseOccupancySnapshot | null;
+}
+
+// Map a 0-100 utilization percent to an antd Progress status colour.
+// Over-capacity → red, at/above threshold → orange, otherwise normal.
+function progressStatusFor(occupancy: OccupancySnapshot | null | undefined) {
+  if (!occupancy) return undefined;
+  if (occupancy.isOverCapacity) return 'exception' as const;
+  if (occupancy.isNearFull) return 'active' as const;
+  return 'normal' as const;
+}
+
+function progressStrokeColor(occupancy: OccupancySnapshot | null | undefined): string | undefined {
+  if (!occupancy) return undefined;
+  if (occupancy.isOverCapacity) return '#ff4d4f';
+  if (occupancy.isNearFull) return '#faad14';
+  return undefined;
 }
 
 interface WarehouseManagementProps {
@@ -86,6 +131,7 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
   const [editingWarehouse, setEditingWarehouse] = useState<Warehouse | null>(null);
   const [activeWarehouseId, setActiveWarehouseId] = useState<string | null>(null);
   const [editingPlace, setEditingPlace] = useState<WarehouseStoragePlace | null>(null);
+  const [equipmentModalWarehouse, setEquipmentModalWarehouse] = useState<Warehouse | null>(null);
 
   const { data, loading, refetch } = useQuery(GET_WAREHOUSES, {
     fetchPolicy: 'cache-and-network',
@@ -193,6 +239,8 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
         description: editingWarehouse.description ?? undefined,
         address: editingWarehouse.address ?? undefined,
         isActive: editingWarehouse.isActive,
+        capacityAlertThresholdPercent:
+          editingWarehouse.capacityAlertThresholdPercent ?? 75,
         dimensions: {
           length: editingWarehouse.dimensions?.length ?? undefined,
           width: editingWarehouse.dimensions?.width ?? undefined,
@@ -203,6 +251,7 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
     } else {
       warehouseForm.setFieldsValue({
         isActive: true,
+        capacityAlertThresholdPercent: 75,
         dimensions: { unit: 'meters' },
       });
     }
@@ -216,6 +265,11 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
         description: values.description?.trim() || null,
         address: values.address?.trim() || null,
         isActive: values.isActive ?? true,
+        capacityAlertThresholdPercent:
+          values.capacityAlertThresholdPercent === undefined ||
+          values.capacityAlertThresholdPercent === null
+            ? null
+            : Number(values.capacityAlertThresholdPercent),
         dimensions: values.dimensions
           ? {
               length: values.dimensions.length ?? null,
@@ -263,9 +317,21 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
         code: editingPlace.code ?? undefined,
         notes: editingPlace.notes ?? undefined,
         isActive: editingPlace.isActive,
+        capacityAlertThresholdPercent:
+          editingPlace.capacityAlertThresholdPercent ?? undefined,
+        dimensions: {
+          length: editingPlace.dimensions?.length ?? undefined,
+          width: editingPlace.dimensions?.width ?? undefined,
+          height: editingPlace.dimensions?.height ?? undefined,
+          unit: editingPlace.dimensions?.unit || 'centimeters',
+        },
       });
     } else {
-      placeForm.setFieldsValue({ type: 'shelf', isActive: true });
+      placeForm.setFieldsValue({
+        type: 'shelf',
+        isActive: true,
+        dimensions: { unit: 'centimeters' },
+      });
     }
   }, [isPlaceModalOpen, editingPlace, placeForm]);
 
@@ -273,12 +339,30 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
     if (!activeWarehouseId) return;
     try {
       const values = await placeForm.validateFields();
+      const dims = values.dimensions || {};
+      const hasDimensions =
+        (dims.length !== undefined && dims.length !== null) ||
+        (dims.width !== undefined && dims.width !== null) ||
+        (dims.height !== undefined && dims.height !== null);
       const input = {
         name: values.name?.trim(),
         type: values.type || 'other',
         code: values.code?.trim() || null,
         notes: values.notes?.trim() || null,
         isActive: values.isActive ?? true,
+        dimensions: hasDimensions
+          ? {
+              length: dims.length ?? null,
+              width: dims.width ?? null,
+              height: dims.height ?? null,
+              unit: dims.unit || 'centimeters',
+            }
+          : null,
+        capacityAlertThresholdPercent:
+          values.capacityAlertThresholdPercent === undefined ||
+          values.capacityAlertThresholdPercent === null
+            ? null
+            : Number(values.capacityAlertThresholdPercent),
       };
       if (editingPlace) {
         await updatePlace({
@@ -336,6 +420,23 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
         numeric: true,
         value: (r) => r.storagePlaces.length,
       },
+      {
+        key: 'occupancy',
+        label: 'תפוסה',
+        value: (r) => {
+          const o = r.occupancy;
+          if (!o || o.capacityVolume === null || o.capacityVolume === undefined) {
+            return 'קיבולת לא הוגדרה';
+          }
+          return `${formatPercent(o.utilizationPercent)} (${formatCubicMeters(o.occupiedVolume)} / ${formatCubicMeters(o.capacityVolume)})`;
+        },
+      },
+      {
+        key: 'placesNearFull',
+        label: 'מקומות כמעט מלאים',
+        numeric: true,
+        value: (r) => r.occupancy?.placesNearFull ?? 0,
+      },
     ];
 
     type FlatPlace = WarehouseStoragePlace & { warehouseName: string };
@@ -359,6 +460,24 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
           r.isActive
             ? { label: 'פעיל', variant: 'active' }
             : { label: 'לא פעיל', variant: 'danger' },
+      },
+      { key: 'dimensions', label: 'מידות', value: (r) => dimToString(r.dimensions) },
+      {
+        key: 'occupancy',
+        label: 'תפוסה',
+        value: (r) => {
+          const o = r.occupancy;
+          if (!o || o.capacityVolume === null || o.capacityVolume === undefined) {
+            return 'קיבולת לא הוגדרה';
+          }
+          return `${formatPercent(o.utilizationPercent)} (${formatCubicMeters(o.occupiedVolume)} / ${formatCubicMeters(o.capacityVolume)})`;
+        },
+        status: (r) => {
+          if (!r.occupancy) return null;
+          if (r.occupancy.isOverCapacity) return { label: 'מעבר לקיבולת', variant: 'danger' };
+          if (r.occupancy.isNearFull) return { label: 'כמעט מלא', variant: 'warn' };
+          return null;
+        },
       },
       { key: 'notes', label: 'הערות', value: (r) => r.notes || '' },
     ];
@@ -421,6 +540,62 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
     );
   };
 
+  // Compact occupancy display reused by both the warehouse list (a
+  // single warehouse row) and the storage place table.
+  const renderOccupancy = (occupancy: OccupancySnapshot | null | undefined) => {
+    if (!occupancy) {
+      return <span className="text-gray-400 text-xs">קיבולת לא הוגדרה</span>;
+    }
+    if (occupancy.capacityVolume === null || occupancy.capacityVolume === undefined) {
+      return (
+        <Space size={4} direction="vertical" style={{ width: '100%' }}>
+          <span className="text-xs text-gray-500">
+            תפוס: {formatCubicMeters(occupancy.occupiedVolume)}
+          </span>
+          <span className="text-gray-400 text-xs">קיבולת לא הוגדרה</span>
+        </Space>
+      );
+    }
+    const pct = Math.max(0, Math.min(100, occupancy.utilizationPercent ?? 0));
+    const tooltipParts = [
+      `תפוס: ${formatCubicMeters(occupancy.occupiedVolume)}`,
+      `קיבולת: ${formatCubicMeters(occupancy.capacityVolume)}`,
+      `פנוי: ${formatCubicMeters(occupancy.availableVolume)}`,
+      `סף התראה: ${formatPercent(occupancy.alertThresholdPercent)}`,
+    ];
+    if (occupancy.itemsMissingDimensions > 0) {
+      tooltipParts.push(`${occupancy.itemsMissingDimensions} פריטים ללא מידות`);
+    }
+    return (
+      <Tooltip title={tooltipParts.join(' · ')}>
+        <Space direction="vertical" size={2} style={{ width: '100%' }}>
+          <Progress
+            percent={pct}
+            size="small"
+            status={progressStatusFor(occupancy)}
+            strokeColor={progressStrokeColor(occupancy)}
+            format={(v) => formatPercent(v ?? 0)}
+          />
+          <Space size={4} wrap>
+            {occupancy.isOverCapacity && (
+              <Tag color="red" icon={<WarningOutlined />}>
+                מעבר לקיבולת
+              </Tag>
+            )}
+            {!occupancy.isOverCapacity && occupancy.isNearFull && (
+              <Tag color="orange" icon={<WarningOutlined />}>
+                כמעט מלא
+              </Tag>
+            )}
+            <span className="text-xs text-gray-500">
+              פנוי {formatCubicMeters(occupancy.availableVolume)}
+            </span>
+          </Space>
+        </Space>
+      </Tooltip>
+    );
+  };
+
   return (
     <div>
       <Alert
@@ -472,8 +647,22 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
                     className={`cursor-pointer ${
                       activeWarehouse?.id === warehouse.id ? 'bg-blue-50' : ''
                     }`}
-                    actions={
-                      canManage
+                    actions={[
+                      <Tooltip key="equipment" title="הצג ציוד במחסן">
+                        <Button
+                          size="small"
+                          type="primary"
+                          ghost
+                          icon={<AppstoreOutlined />}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEquipmentModalWarehouse(warehouse);
+                          }}
+                        >
+                          הצג ציוד במחסן
+                        </Button>
+                      </Tooltip>,
+                      ...(canManage
                         ? [
                             <Button
                               key="edit"
@@ -503,8 +692,8 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
                               />
                             </Popconfirm>,
                           ]
-                        : undefined
-                    }
+                        : []),
+                    ]}
                   >
                     <List.Item.Meta
                       title={
@@ -514,6 +703,12 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
                           <Tag color="blue">
                             {warehouse.storagePlaces.length} מיקומים
                           </Tag>
+                          {warehouse.occupancy && warehouse.occupancy.placesNearFull > 0 && (
+                            <Tag color="orange" icon={<WarningOutlined />}>
+                              {warehouse.occupancy.placesNearFull} מקומות
+                              {warehouse.occupancy.placesNearFull === 1 ? '' : ''} כמעט מלאים
+                            </Tag>
+                          )}
                         </Space>
                       }
                       description={
@@ -525,6 +720,9 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
                           )}
                           <div className="text-xs text-gray-500 mt-1">
                             {renderDimensions(warehouse)}
+                          </div>
+                          <div className="mt-2" style={{ maxWidth: 280 }}>
+                            {renderOccupancy(warehouse.occupancy)}
                           </div>
                         </div>
                       }
@@ -594,6 +792,13 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
                     key: 'code',
                     render: (code: string | null) =>
                       code ? <code>{code}</code> : <span className="text-gray-400">-</span>,
+                  },
+                  {
+                    title: 'תפוסה',
+                    key: 'occupancy',
+                    width: 280,
+                    render: (_: unknown, record: WarehouseStoragePlace) =>
+                      renderOccupancy(record.occupancy),
                   },
                   {
                     title: 'הערות',
@@ -698,6 +903,15 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
           </Row>
 
           <Form.Item
+            name="capacityAlertThresholdPercent"
+            label="סף התראת תפוסה (%)"
+            tooltip="כשמקום אחסון מגיע לאחוז זה מהקיבולת — תישלח התראה. ניתן לדרוס לכל מקום אחסון בנפרד."
+            initialValue={75}
+          >
+            <InputNumber min={0} max={100} style={{ width: '100%' }} addonAfter="%" />
+          </Form.Item>
+
+          <Form.Item
             name="isActive"
             label="מחסן פעיל"
             valuePropName="checked"
@@ -740,6 +954,43 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
           <Form.Item name="notes" label="הערות">
             <Input.TextArea rows={2} placeholder="הערות פנימיות" />
           </Form.Item>
+
+          <div className="mb-2 font-medium">קיבולת פיזית (אופציונלי)</div>
+          <div style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>
+            ערכי הגודל נחוצים כדי לחשב כמה מקום פנוי במדף/בארון ולשלוח התראת
+            "כמעט מלא".
+          </div>
+          <Row gutter={8}>
+            <Col span={6}>
+              <Form.Item name={['dimensions', 'length']} label="אורך">
+                <InputNumber min={0} style={{ width: '100%' }} placeholder="0" />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item name={['dimensions', 'width']} label="רוחב">
+                <InputNumber min={0} style={{ width: '100%' }} placeholder="0" />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item name={['dimensions', 'height']} label="גובה">
+                <InputNumber min={0} style={{ width: '100%' }} placeholder="0" />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item name={['dimensions', 'unit']} label="יחידה">
+                <Select options={WAREHOUSE_DIMENSION_UNIT_OPTIONS} />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item
+            name="capacityAlertThresholdPercent"
+            label="סף התראת תפוסה למקום זה (%)"
+            tooltip="אם ריק — ישתמשו בסף ברירת המחדל של המחסן (75%)."
+          >
+            <InputNumber min={0} max={100} style={{ width: '100%' }} addonAfter="%" placeholder="ברירת המחדל של המחסן" />
+          </Form.Item>
+
           <Form.Item
             name="isActive"
             label="מיקום פעיל"
@@ -750,6 +1001,20 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
           </Form.Item>
         </Form>
       </Modal>
+
+      <WarehouseEquipmentListModal
+        open={!!equipmentModalWarehouse}
+        warehouse={
+          equipmentModalWarehouse
+            ? {
+                id: equipmentModalWarehouse.id,
+                name: equipmentModalWarehouse.name,
+                occupancy: equipmentModalWarehouse.occupancy,
+              }
+            : null
+        }
+        onClose={() => setEquipmentModalWarehouse(null)}
+      />
     </div>
   );
 };

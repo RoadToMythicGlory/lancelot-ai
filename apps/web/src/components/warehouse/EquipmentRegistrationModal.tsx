@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Modal, Form, Input, Select, DatePicker, InputNumber, Button, Tabs, message, Space, Upload, Switch } from 'antd';
+import { Modal, Form, Input, Select, DatePicker, InputNumber, Button, Tabs, message, Space, Upload, Switch, Row, Col } from 'antd';
 import { PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import { useMutation } from '@apollo/client';
 import { CREATE_EQUIPMENT } from '../../graphql/mutations';
@@ -9,6 +9,7 @@ import type { TabsProps } from 'antd';
 import dayjs from 'dayjs';
 import WarehouseLocationPicker from './WarehouseLocationPicker';
 import { useEquipmentCategories } from '../../hooks/useEquipmentCategories';
+import { WAREHOUSE_DIMENSION_UNIT_OPTIONS } from '../../graphql/warehouse-queries';
 
 const { TextArea } = Input;
 
@@ -68,6 +69,19 @@ const EquipmentRegistrationModal: React.FC<EquipmentRegistrationModalProps> = ({
       // sole source of truth.
       const hasLegacyStorage = !!(values.row || values.shelf || values.cell);
 
+      // Only send dimensions when at least one value is filled in — the
+      // backend treats `null` and "all-undefined" as "no size" the same
+      // way, but keeping the payload clean makes resolver logs nicer.
+      const dims = values.dimensions || {};
+      const hasDimensions =
+        dims.length !== undefined && dims.length !== null
+          ? true
+          : dims.width !== undefined && dims.width !== null
+            ? true
+            : dims.height !== undefined && dims.height !== null
+              ? true
+              : false;
+
       const input = {
         name: values.name,
         category: values.category,
@@ -84,6 +98,14 @@ const EquipmentRegistrationModal: React.FC<EquipmentRegistrationModalProps> = ({
               row: values.row || null,
               shelf: values.shelf || null,
               cell: values.cell || null,
+            }
+          : null,
+        dimensions: hasDimensions
+          ? {
+              length: dims.length ?? null,
+              width: dims.width ?? null,
+              height: dims.height ?? null,
+              unit: dims.unit || 'centimeters',
             }
           : null,
         warehouseId: values.warehouseId || null,
@@ -283,6 +305,42 @@ const EquipmentRegistrationModal: React.FC<EquipmentRegistrationModalProps> = ({
                       )}
                     </Upload>
                   </Form.Item>
+
+                  <div>
+                    <div style={{ marginBottom: 8, fontWeight: 500 }}>
+                      מידות פיזיות (אופציונלי)
+                    </div>
+                    <div style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>
+                      מידות הפריט נחוצות לחישוב תפוסת המחסן והתראות "כמעט מלא".
+                      ניתן להשאיר ריק עבור פריטים שאינם תופסים מקום משמעותי.
+                    </div>
+                    <Row gutter={8}>
+                      <Col span={6}>
+                        <Form.Item name={['dimensions', 'length']} label="אורך">
+                          <InputNumber min={0} style={{ width: '100%' }} placeholder="0" />
+                        </Form.Item>
+                      </Col>
+                      <Col span={6}>
+                        <Form.Item name={['dimensions', 'width']} label="רוחב">
+                          <InputNumber min={0} style={{ width: '100%' }} placeholder="0" />
+                        </Form.Item>
+                      </Col>
+                      <Col span={6}>
+                        <Form.Item name={['dimensions', 'height']} label="גובה">
+                          <InputNumber min={0} style={{ width: '100%' }} placeholder="0" />
+                        </Form.Item>
+                      </Col>
+                      <Col span={6}>
+                        <Form.Item
+                          name={['dimensions', 'unit']}
+                          label="יחידה"
+                          initialValue="centimeters"
+                        >
+                          <Select options={WAREHOUSE_DIMENSION_UNIT_OPTIONS} />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                  </div>
                 </Space>
               ),
             },

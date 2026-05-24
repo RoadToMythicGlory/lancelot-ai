@@ -351,17 +351,48 @@ export const GET_WAREHOUSE_EQUIPMENT = gql`
         shelf
         cell
       }
+      dimensions {
+        length
+        width
+        height
+        unit
+      }
       warehouseId
       storagePlaceId
       warehouse {
         id
         name
+        occupancy {
+          capacityVolume
+          occupiedVolume
+          availableVolume
+          utilizationPercent
+          alertThresholdPercent
+          isNearFull
+          isOverCapacity
+        }
       }
       storagePlace {
         id
         name
         type
         code
+        dimensions {
+          length
+          width
+          height
+          unit
+        }
+        capacityAlertThresholdPercent
+        occupancy {
+          capacityVolume
+          occupiedVolume
+          availableVolume
+          utilizationPercent
+          alertThresholdPercent
+          isNearFull
+          isOverCapacity
+        }
       }
       isQuantityBased
       isSharedEngineeringEquipment

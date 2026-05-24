@@ -14,6 +14,11 @@ import {
   detachShadowMcrEventOnBroadcastDelete,
 } from '../services/mcrShadowEvent';
 import { syncSharedEngineeringSnapshotForEvent } from '../services/sharedEngineeringSnapshot';
+import {
+  computeWarehouseOccupancy,
+  mapDimensionsToGraphQL,
+  normalizeDimensionsInput,
+} from '../services/warehouseCapacity.service';
 import { createLogger } from '../utils/logger';
 
 const log = createLogger('broadcast-resolver');
@@ -180,10 +185,18 @@ async function buildLocationStringFromWarehouse(
 // Build the new structured "warehouse"/"storagePlace" GraphQL fields
 // alongside the equipment payload. We expose lightweight snapshots so
 // list views don't need a second round-trip.
+//
+// `warehouseCache` may carry an `_occupancy` field per warehouse
+// (`{ warehouse, places }`) — populated by `loadWarehousesForEquipment`
+// so the equipment list returns up-to-date occupancy without an extra
+// round-trip.
 function buildEquipmentLocationFields(equipment: any, warehouseCache: Map<string, any>) {
   const warehouseId = equipment.warehouseId ? equipment.warehouseId.toString() : null;
   const storagePlaceId = equipment.storagePlaceId ? equipment.storagePlaceId.toString() : null;
   const warehouse = warehouseId ? warehouseCache.get(warehouseId) : null;
+  const occupancy = warehouse?._occupancy as
+    | { warehouse: any; places: Map<string, any> }
+    | undefined;
 
   let storagePlace: any = null;
   if (warehouse && storagePlaceId) {
@@ -198,6 +211,12 @@ function buildEquipmentLocationFields(equipment: any, warehouseCache: Map<string
         code: place.code || null,
         notes: place.notes || null,
         isActive: place.isActive !== false,
+        dimensions: mapDimensionsToGraphQL(place.dimensions),
+        capacityAlertThresholdPercent:
+          typeof place.capacityAlertThresholdPercent === 'number'
+            ? place.capacityAlertThresholdPercent
+            : null,
+        occupancy: occupancy?.places?.get(place._id.toString()) ?? null,
         createdAt: place.createdAt ? new Date(place.createdAt).toISOString() : null,
         updatedAt: place.updatedAt ? new Date(place.updatedAt).toISOString() : null,
       };
@@ -218,6 +237,10 @@ function buildEquipmentLocationFields(equipment: any, warehouseCache: Map<string
               unit: warehouse.dimensions.unit || 'meters',
             }
           : null,
+        capacityAlertThresholdPercent:
+          typeof warehouse.capacityAlertThresholdPercent === 'number'
+            ? warehouse.capacityAlertThresholdPercent
+            : null,
         storagePlaces: Array.isArray(warehouse.storagePlaces)
           ? warehouse.storagePlaces.map((p: any) => ({
               id: p._id.toString(),
@@ -226,11 +249,18 @@ function buildEquipmentLocationFields(equipment: any, warehouseCache: Map<string
               code: p.code || null,
               notes: p.notes || null,
               isActive: p.isActive !== false,
+              dimensions: mapDimensionsToGraphQL(p.dimensions),
+              capacityAlertThresholdPercent:
+                typeof p.capacityAlertThresholdPercent === 'number'
+                  ? p.capacityAlertThresholdPercent
+                  : null,
+              occupancy: occupancy?.places?.get(p._id.toString()) ?? null,
               createdAt: p.createdAt ? new Date(p.createdAt).toISOString() : null,
               updatedAt: p.updatedAt ? new Date(p.updatedAt).toISOString() : null,
             }))
           : [],
         isActive: warehouse.isActive !== false,
+        occupancy: occupancy?.warehouse ?? null,
         createdBy: warehouse.createdBy || null,
         createdAt: warehouse.createdAt
           ? new Date(warehouse.createdAt).toISOString()
@@ -252,6 +282,13 @@ function buildEquipmentLocationFields(equipment: any, warehouseCache: Map<string
 // Bulk load warehouses referenced by a list of equipment rows so the
 // `warehouseEquipment` list resolver stays O(1) DB queries instead of
 // O(N).
+//
+// We also attach a precomputed occupancy snapshot per warehouse so
+// `buildEquipmentLocationFields` can surface volume utilisation on the
+// embedded warehouse/place objects without forcing every consumer to
+// query `warehouses { occupancy }` separately. The occupancy needs the
+// full per-warehouse equipment set (not just the items in the slice
+// we're mapping), so we re-load that here.
 async function loadWarehousesForEquipment(items: any[]): Promise<Map<string, any>> {
   const ids = new Set<string>();
   for (const item of items) {
@@ -260,12 +297,37 @@ async function loadWarehousesForEquipment(items: any[]): Promise<Map<string, any
     }
   }
   if (ids.size === 0) return new Map();
-  const docs = await Warehouse.find({
-    _id: { $in: Array.from(ids).map((id) => new mongoose.Types.ObjectId(id)) },
-  }).exec();
+  const objectIds = Array.from(ids).map((id) => new mongoose.Types.ObjectId(id));
+  const [docs, occupancyItems] = await Promise.all([
+    Warehouse.find({ _id: { $in: objectIds } }).exec(),
+    Equipment.find({ warehouseId: { $in: objectIds } })
+      .select({
+        warehouseId: 1,
+        storagePlaceId: 1,
+        dimensions: 1,
+        quantityTotal: 1,
+        quantityAssigned: 1,
+      })
+      .lean()
+      .exec(),
+  ]);
+
+  const itemsByWarehouse = new Map<string, any[]>();
+  for (const item of occupancyItems) {
+    const key = item.warehouseId?.toString();
+    if (!key) continue;
+    if (!itemsByWarehouse.has(key)) itemsByWarehouse.set(key, []);
+    itemsByWarehouse.get(key)!.push(item);
+  }
+
   const cache = new Map<string, any>();
   for (const doc of docs) {
-    cache.set(doc._id.toString(), doc);
+    const key = doc._id.toString();
+    const occupancy = computeWarehouseOccupancy(doc, itemsByWarehouse.get(key) || []);
+    // Attach as a non-enumerable-ish helper field so downstream
+    // consumers can pick it up without a parallel structure.
+    (doc as any)._occupancy = occupancy;
+    cache.set(key, doc);
   }
   return cache;
 }
@@ -429,6 +491,7 @@ export const broadcastResolvers = {
           manualLink: item.manualLink || null,
           imageUrl: item.imageUrl || null,
           storage: item.storage || null,
+          dimensions: mapDimensionsToGraphQL(item.dimensions),
           ...buildEquipmentLocationFields(item, warehouseCache),
           isQuantityBased: item.isQuantityBased || false,
           isSharedEngineeringEquipment: item.isSharedEngineeringEquipment || false,
@@ -1573,6 +1636,7 @@ export const broadcastResolvers = {
           manualLink: input.manualLink,
           imageUrl: input.imageUrl,
           storage: input.storage,
+          dimensions: normalizeDimensionsInput(input.dimensions),
           warehouseId,
           storagePlaceId,
           currentLocation,
@@ -1608,6 +1672,7 @@ export const broadcastResolvers = {
           manualLink: savedEquipment.manualLink || null,
           imageUrl: savedEquipment.imageUrl || null,
           storage: savedEquipment.storage || null,
+          dimensions: mapDimensionsToGraphQL(savedEquipment.dimensions),
           ...buildEquipmentLocationFields(savedEquipment, warehouseCache),
           isQuantityBased: savedEquipment.isQuantityBased || false,
           isSharedEngineeringEquipment: savedEquipment.isSharedEngineeringEquipment || false,
@@ -1651,6 +1716,20 @@ export const broadcastResolvers = {
           updateData.storage = input.storage;
           if (input.storage && !input.warehouseId) {
             updateData.currentLocation = `Row ${input.storage.row}, Shelf ${input.storage.shelf}, Cell ${input.storage.cell}`;
+          }
+        }
+        // Optional per-item dimensions. Sending `null` clears them so
+        // the item drops back to "size unknown" in capacity reports.
+        if (input.dimensions !== undefined) {
+          if (input.dimensions === null) {
+            updateData.dimensions = undefined;
+          } else {
+            const normalized = normalizeDimensionsInput(input.dimensions);
+            if (normalized) {
+              updateData.dimensions = normalized;
+            } else {
+              updateData.dimensions = undefined;
+            }
           }
         }
 
@@ -1757,6 +1836,7 @@ export const broadcastResolvers = {
           manualLink: updatedEquipment.manualLink || null,
           imageUrl: updatedEquipment.imageUrl || null,
           storage: updatedEquipment.storage || null,
+          dimensions: mapDimensionsToGraphQL(updatedEquipment.dimensions),
           ...buildEquipmentLocationFields(updatedEquipment, warehouseCache),
           isQuantityBased: updatedEquipment.isQuantityBased || false,
           isSharedEngineeringEquipment: updatedEquipment.isSharedEngineeringEquipment || false,

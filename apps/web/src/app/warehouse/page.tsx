@@ -86,6 +86,12 @@ interface Equipment {
   storagePlaceId?: string | null;
   warehouse?: { id: string; name: string } | null;
   storagePlace?: { id: string; name: string; type?: string; code?: string | null } | null;
+  dimensions?: {
+    length?: number | null;
+    width?: number | null;
+    height?: number | null;
+    unit?: string | null;
+  } | null;
   isQuantityBased: boolean;
   isSharedEngineeringEquipment?: boolean;
   isDisabled: boolean;

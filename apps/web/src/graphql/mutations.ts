@@ -440,6 +440,12 @@ export const CREATE_EQUIPMENT = gql`
         shelf
         cell
       }
+      dimensions {
+        length
+        width
+        height
+        unit
+      }
       warehouseId
       storagePlaceId
       warehouse {
@@ -485,6 +491,12 @@ export const UPDATE_EQUIPMENT = gql`
         row
         shelf
         cell
+      }
+      dimensions {
+        length
+        width
+        height
+        unit
       }
       warehouseId
       storagePlaceId

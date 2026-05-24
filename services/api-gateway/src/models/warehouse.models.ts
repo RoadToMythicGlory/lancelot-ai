@@ -46,6 +46,11 @@ export const WAREHOUSE_STORAGE_PLACE_TYPES: WarehouseStoragePlaceType[] = [
   'other',
 ];
 
+// Default alert threshold (percentage) used when neither the warehouse
+// nor the storage place defines its own value. Surfaced via the
+// warehouse capacity calculations + scheduled near-full notifications.
+export const DEFAULT_CAPACITY_ALERT_THRESHOLD_PERCENT = 75;
+
 export interface IWarehouseStoragePlace {
   _id: Types.ObjectId;
   name: string;
@@ -53,6 +58,15 @@ export interface IWarehouseStoragePlace {
   code?: string;
   notes?: string;
   isActive: boolean;
+  // Optional physical capacity for this specific place (a shelf, a bin,
+  // ...). When fully populated, drives the volume occupancy reporting in
+  // the warehouse UI and the near-full alerts. Falls back to "capacity
+  // not configured" when any of length/width/height is missing.
+  dimensions?: IWarehouseDimensions;
+  // Optional per-place override of the warehouse-level alert threshold.
+  // Stored as a percentage (0-100). When undefined the warehouse value
+  // (or the system default) is used.
+  capacityAlertThresholdPercent?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -70,6 +84,10 @@ export interface IWarehouse extends Document {
   description?: string;
   address?: string;
   dimensions?: IWarehouseDimensions;
+  // Default alert threshold (percent) applied to every storage place that
+  // doesn't override it explicitly. When undefined the system-wide
+  // DEFAULT_CAPACITY_ALERT_THRESHOLD_PERCENT (75%) is used.
+  capacityAlertThresholdPercent?: number;
   storagePlaces: Types.DocumentArray<IWarehouseStoragePlace & Document>;
   isActive: boolean;
   createdBy?: string;
@@ -89,6 +107,17 @@ const storagePlaceSchema = new Schema<IWarehouseStoragePlace>(
     code: { type: String, trim: true },
     notes: { type: String, trim: true },
     isActive: { type: Boolean, default: true, required: true },
+    dimensions: {
+      length: { type: Number, min: 0 },
+      width: { type: Number, min: 0 },
+      height: { type: Number, min: 0 },
+      unit: {
+        type: String,
+        enum: WAREHOUSE_DIMENSION_UNITS,
+        default: 'meters',
+      },
+    },
+    capacityAlertThresholdPercent: { type: Number, min: 0, max: 100 },
   },
   { timestamps: true, _id: true },
 );
@@ -114,6 +143,7 @@ const warehouseSchema = new Schema<IWarehouse>(
         default: 'meters',
       },
     },
+    capacityAlertThresholdPercent: { type: Number, min: 0, max: 100 },
     storagePlaces: { type: [storagePlaceSchema], default: [] },
     isActive: { type: Boolean, default: true, required: true },
     createdBy: String,

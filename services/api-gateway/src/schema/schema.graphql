@@ -330,7 +330,12 @@ type WarehouseEquipment {
   warehouse: Warehouse
   storagePlace: WarehouseStoragePlace
   storage: StorageLocation
-  
+
+  # Optional per-item physical size. Used by the warehouse capacity
+  # math to determine how much volume a single unit of this item
+  # consumes inside its storage place. All fields are optional.
+  dimensions: EquipmentDimensions
+
   # Quantity-based items use pool tracking instead of per-unit barcodes
   isQuantityBased: Boolean!
 
@@ -418,14 +423,31 @@ type Warehouse {
   description: String
   address: String
   dimensions: WarehouseDimensions
+  # Default near-full alert threshold for places inside this warehouse,
+  # as a percentage (0-100). Falls back to 75 when undefined.
+  capacityAlertThresholdPercent: Float
   storagePlaces: [WarehouseStoragePlace!]!
   isActive: Boolean!
+  # Aggregated volume-based occupancy snapshot across every storage
+  # place. `capacityVolume` is `null` when no place has dimensions
+  # configured. Volumes are reported in cubic meters; the helper
+  # normalizes all input units before aggregating.
+  occupancy: WarehouseOccupancy
   createdBy: String
   createdAt: DateTime!
   updatedAt: DateTime!
 }
 
 type WarehouseDimensions {
+  length: Float
+  width: Float
+  height: Float
+  unit: String!
+}
+
+# Shared reusable shape for any optional physical size — equipment items
+# and storage places both consume it.
+type EquipmentDimensions {
   length: Float
   width: Float
   height: Float
@@ -439,11 +461,75 @@ type WarehouseStoragePlace {
   code: String
   notes: String
   isActive: Boolean!
+  # Optional physical size of this place (a shelf, bin, room ...).
+  # When complete (length+width+height set) it acts as the capacity
+  # the volume-based occupancy math is compared against.
+  dimensions: WarehouseDimensions
+  # Optional per-place override of the warehouse-level alert threshold,
+  # as a percentage (0-100).
+  capacityAlertThresholdPercent: Float
+  # Live occupancy snapshot for this place. `null` when the place has
+  # no dimensions configured (capacity is unknown).
+  occupancy: StoragePlaceOccupancy
   createdAt: DateTime
   updatedAt: DateTime
 }
 
+# Volume-based occupancy report for a single storage place.
+type StoragePlaceOccupancy {
+  # Total capacity (cubic meters). Null when the place dimensions are
+  # not fully configured.
+  capacityVolume: Float
+  # Sum of dimensions(volume) * storedQuantity for every equipment row
+  # currently assigned to this place. `storedQuantity` is
+  # `quantityTotal - quantityAssigned` so items checked out to events
+  # don't take up shelf space.
+  occupiedVolume: Float!
+  # max(0, capacityVolume - occupiedVolume) — `null` when capacity is
+  # unknown.
+  availableVolume: Float
+  # 0-100+ percentage. `null` when capacity is unknown.
+  utilizationPercent: Float
+  # Effective threshold (per-place override, warehouse default, or 75).
+  alertThresholdPercent: Float!
+  # True when utilizationPercent >= alertThresholdPercent.
+  isNearFull: Boolean!
+  # True when occupiedVolume > capacityVolume.
+  isOverCapacity: Boolean!
+  # Number of equipment documents currently mapped to this place.
+  storedItemCount: Int!
+  # Number of items missing dimensions — excluded from occupiedVolume.
+  itemsMissingDimensions: Int!
+  unit: String!
+}
+
+# Aggregated occupancy report for a warehouse — sums across every
+# storage place. Items assigned only to the warehouse (no place) are
+# counted at warehouse level too.
+type WarehouseOccupancy {
+  capacityVolume: Float
+  occupiedVolume: Float!
+  availableVolume: Float
+  utilizationPercent: Float
+  alertThresholdPercent: Float!
+  isNearFull: Boolean!
+  isOverCapacity: Boolean!
+  storedItemCount: Int!
+  itemsMissingDimensions: Int!
+  # Number of storage places inside this warehouse currently at or
+  # above their effective alert threshold.
+  placesNearFull: Int!
+  unit: String!
+}
+
 input WarehouseDimensionsInput {
+  length: Float
+  width: Float
+  height: Float
+  unit: String
+}
+
+input EquipmentDimensionsInput {
   length: Float
   width: Float
   height: Float
@@ -455,6 +541,7 @@ input CreateWarehouseInput {
   description: String
   address: String
   dimensions: WarehouseDimensionsInput
+  capacityAlertThresholdPercent: Float
   isActive: Boolean
 }
 
@@ -463,6 +550,7 @@ input UpdateWarehouseInput {
   description: String
   address: String
   dimensions: WarehouseDimensionsInput
+  capacityAlertThresholdPercent: Float
   isActive: Boolean
 }
 
@@ -472,6 +560,8 @@ input CreateWarehouseStoragePlaceInput {
   code: String
   notes: String
   isActive: Boolean
+  dimensions: WarehouseDimensionsInput
+  capacityAlertThresholdPercent: Float
 }
 
 input UpdateWarehouseStoragePlaceInput {
@@ -480,6 +570,8 @@ input UpdateWarehouseStoragePlaceInput {
   code: String
   notes: String
   isActive: Boolean
+  dimensions: WarehouseDimensionsInput
+  capacityAlertThresholdPercent: Float
 }
 
 input WarehouseFilter {
@@ -518,6 +610,7 @@ input CreateEquipmentInput {
   storage: StorageLocationInput
   warehouseId: ID
   storagePlaceId: ID
+  dimensions: EquipmentDimensionsInput
   quantityTotal: Int!
   isQuantityBased: Boolean
   isSharedEngineeringEquipment: Boolean
@@ -537,6 +630,7 @@ input UpdateEquipmentInput {
   storage: StorageLocationInput
   warehouseId: ID
   storagePlaceId: ID
+  dimensions: EquipmentDimensionsInput
   status: String
   condition: String
   quantityTotal: Int

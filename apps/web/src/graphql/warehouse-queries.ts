@@ -4,6 +4,41 @@ import { gql } from '@apollo/client';
 // storage places (rows / shelves / cells / etc.). They are used to drive
 // the equipment location pickers — see WarehouseManagement.tsx and the
 // equipment registration / edit modals.
+// Shared GraphQL fragment for the volume-based occupancy snapshot
+// returned for every warehouse / storage place. Kept as a tagged literal
+// constant so query strings stay deduplicated.
+const WAREHOUSE_OCCUPANCY_FIELDS = `
+  capacityVolume
+  occupiedVolume
+  availableVolume
+  utilizationPercent
+  alertThresholdPercent
+  isNearFull
+  isOverCapacity
+  storedItemCount
+  itemsMissingDimensions
+  unit
+`;
+
+const STORAGE_PLACE_FIELDS = `
+  id
+  name
+  type
+  code
+  notes
+  isActive
+  dimensions {
+    length
+    width
+    height
+    unit
+  }
+  capacityAlertThresholdPercent
+  occupancy {
+    ${WAREHOUSE_OCCUPANCY_FIELDS}
+  }
+`;
+
 export const GET_WAREHOUSES = gql`
   query GetWarehouses($filter: WarehouseFilter) {
     warehouses(filter: $filter) {
@@ -17,13 +52,13 @@ export const GET_WAREHOUSES = gql`
         height
         unit
       }
+      capacityAlertThresholdPercent
       storagePlaces {
-        id
-        name
-        type
-        code
-        notes
-        isActive
+        ${STORAGE_PLACE_FIELDS}
+      }
+      occupancy {
+        ${WAREHOUSE_OCCUPANCY_FIELDS}
+        placesNearFull
       }
       isActive
       createdAt
@@ -45,13 +80,13 @@ export const GET_WAREHOUSE = gql`
         height
         unit
       }
+      capacityAlertThresholdPercent
       storagePlaces {
-        id
-        name
-        type
-        code
-        notes
-        isActive
+        ${STORAGE_PLACE_FIELDS}
+      }
+      occupancy {
+        ${WAREHOUSE_OCCUPANCY_FIELDS}
+        placesNearFull
       }
       isActive
       createdAt
@@ -73,13 +108,13 @@ export const CREATE_WAREHOUSE = gql`
         height
         unit
       }
+      capacityAlertThresholdPercent
       storagePlaces {
-        id
-        name
-        type
-        code
-        notes
-        isActive
+        ${STORAGE_PLACE_FIELDS}
+      }
+      occupancy {
+        ${WAREHOUSE_OCCUPANCY_FIELDS}
+        placesNearFull
       }
       isActive
     }
@@ -99,13 +134,13 @@ export const UPDATE_WAREHOUSE = gql`
         height
         unit
       }
+      capacityAlertThresholdPercent
       storagePlaces {
-        id
-        name
-        type
-        code
-        notes
-        isActive
+        ${STORAGE_PLACE_FIELDS}
+      }
+      occupancy {
+        ${WAREHOUSE_OCCUPANCY_FIELDS}
+        placesNearFull
       }
       isActive
     }
@@ -126,12 +161,11 @@ export const CREATE_WAREHOUSE_STORAGE_PLACE = gql`
     createWarehouseStoragePlace(warehouseId: $warehouseId, input: $input) {
       id
       storagePlaces {
-        id
-        name
-        type
-        code
-        notes
-        isActive
+        ${STORAGE_PLACE_FIELDS}
+      }
+      occupancy {
+        ${WAREHOUSE_OCCUPANCY_FIELDS}
+        placesNearFull
       }
     }
   }
@@ -150,12 +184,11 @@ export const UPDATE_WAREHOUSE_STORAGE_PLACE = gql`
     ) {
       id
       storagePlaces {
-        id
-        name
-        type
-        code
-        notes
-        isActive
+        ${STORAGE_PLACE_FIELDS}
+      }
+      occupancy {
+        ${WAREHOUSE_OCCUPANCY_FIELDS}
+        placesNearFull
       }
     }
   }
@@ -166,12 +199,11 @@ export const DELETE_WAREHOUSE_STORAGE_PLACE = gql`
     deleteWarehouseStoragePlace(warehouseId: $warehouseId, placeId: $placeId) {
       id
       storagePlaces {
-        id
-        name
-        type
-        code
-        notes
-        isActive
+        ${STORAGE_PLACE_FIELDS}
+      }
+      occupancy {
+        ${WAREHOUSE_OCCUPANCY_FIELDS}
+        placesNearFull
       }
     }
   }
@@ -213,4 +245,29 @@ export function getStoragePlaceTypeLabel(type: string): string {
 export function getDimensionUnitLabel(unit: string): string {
   const found = WAREHOUSE_DIMENSION_UNIT_OPTIONS.find((opt) => opt.value === unit);
   return found ? found.label : unit;
+}
+
+// All backend occupancy snapshots are reported in cubic meters (the
+// `unit` field on the response is `"meters"`). Format the magnitude
+// with a nicer unit so a 0.0035 m³ shelf doesn't render as "0.00 m³".
+export function formatCubicMeters(volume: number | null | undefined): string {
+  if (volume === null || volume === undefined || !Number.isFinite(volume)) {
+    return '—';
+  }
+  if (volume >= 1) {
+    return `${volume.toFixed(volume >= 10 ? 1 : 2)} m³`;
+  }
+  // < 1 m³ → show in liters (1 m³ = 1000 L)
+  const liters = volume * 1000;
+  if (liters >= 1) {
+    return `${liters.toFixed(liters >= 10 ? 0 : 1)} L`;
+  }
+  // < 1 L → show in cm³
+  return `${(volume * 1_000_000).toFixed(0)} cm³`;
+}
+
+// 75% → "75%". Handles null/undefined gracefully.
+export function formatPercent(value: number | null | undefined, digits = 0): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  return `${value.toFixed(digits)}%`;
 }

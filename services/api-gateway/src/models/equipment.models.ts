@@ -1,4 +1,8 @@
 import mongoose, { Schema, Document } from 'mongoose';
+import {
+  WAREHOUSE_DIMENSION_UNITS,
+  WarehouseDimensionUnit,
+} from './warehouse.models';
 
 // Suspension status types — surfaced separately from `isDisabled` so we can
 // represent why a unit is out of rotation (maintenance, repair, lost, etc.).
@@ -8,6 +12,17 @@ export type EquipmentSuspensionStatus =
   | 'lost'
   | 'reserved'
   | 'other';
+
+// Optional physical dimensions for an equipment item. Used by the warehouse
+// occupancy calculations — when all three lengths (and a unit) are present
+// the helper in `warehouseCapacity.service.ts` can compute the volume each
+// unit consumes inside its storage place.
+export interface IEquipmentDimensions {
+  length?: number;
+  width?: number;
+  height?: number;
+  unit: WarehouseDimensionUnit;
+}
 
 // Interface for TypeScript
 export interface IEquipment extends Document {
@@ -25,7 +40,13 @@ export interface IEquipment extends Document {
   contactPerson?: string;
   manualLink?: string;
   imageUrl?: string;
-  
+
+  // Optional physical size. When fully populated, drives the volume-based
+  // occupancy math on each storage place / warehouse. Items without a full
+  // dimension set contribute 0 volume (capacity reporting just shows them
+  // as "size unknown" until the user fills the values in).
+  dimensions?: IEquipmentDimensions;
+
   // Structured storage location. `warehouseId` (plus optional
   // `storagePlaceId`) is the new canonical reference; the legacy
   // `storage { row, shelf, cell }` strings are kept for backward
@@ -220,7 +241,21 @@ const equipmentSchema = new Schema<IEquipment>({
   contactPerson: String,
   manualLink: String,
   imageUrl: String,
-  
+
+  // Optional per-item physical dimensions. All fields are optional so
+  // legacy equipment keeps working unchanged; only items with the full
+  // length/width/height set contribute to capacity occupancy math.
+  dimensions: {
+    length: { type: Number, min: 0 },
+    width: { type: Number, min: 0 },
+    height: { type: Number, min: 0 },
+    unit: {
+      type: String,
+      enum: WAREHOUSE_DIMENSION_UNITS,
+      default: 'meters',
+    },
+  },
+
   // Structured storage location (see IEquipment for the rationale —
   // warehouseId/storagePlaceId is the new canonical pair, the embedded
   // `storage` strings are kept for legacy reads).

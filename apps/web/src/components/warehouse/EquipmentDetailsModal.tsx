@@ -628,6 +628,23 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
               )}
             </Descriptions.Item>
 
+            {equipment?.dimensions &&
+              (equipment.dimensions.length != null ||
+                equipment.dimensions.width != null ||
+                equipment.dimensions.height != null) && (
+                <Descriptions.Item label="מידות פיזיות" span={2}>
+                  {(() => {
+                    const d = equipment.dimensions;
+                    const parts = [
+                      d.length != null && `אורך ${d.length}`,
+                      d.width != null && `רוחב ${d.width}`,
+                      d.height != null && `גובה ${d.height}`,
+                    ].filter(Boolean);
+                    return `${parts.join(' × ')} ${d.unit || 'meters'}`;
+                  })()}
+                </Descriptions.Item>
+              )}
+
             {/* Additional Details */}
             {equipment?.price && (
               <Descriptions.Item label="מחיר">

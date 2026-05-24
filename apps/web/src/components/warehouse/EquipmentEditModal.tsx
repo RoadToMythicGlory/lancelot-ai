@@ -12,6 +12,8 @@ import {
   Space,
   Upload,
   Switch,
+  Row,
+  Col,
 } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { useMutation } from '@apollo/client';
@@ -21,6 +23,7 @@ import type { UploadFile } from 'antd/es/upload';
 import dayjs from 'dayjs';
 import WarehouseLocationPicker from './WarehouseLocationPicker';
 import { useEquipmentCategories } from '../../hooks/useEquipmentCategories';
+import { WAREHOUSE_DIMENSION_UNIT_OPTIONS } from '../../graphql/warehouse-queries';
 
 interface EquipmentLike {
   id: string;
@@ -35,6 +38,12 @@ interface EquipmentLike {
   manualLink?: string | null;
   imageUrl?: string | null;
   storage?: { row?: string | null; shelf?: string | null; cell?: string | null } | null;
+  dimensions?: {
+    length?: number | null;
+    width?: number | null;
+    height?: number | null;
+    unit?: string | null;
+  } | null;
   warehouseId?: string | null;
   storagePlaceId?: string | null;
   warehouse?: { id: string; name: string } | null;
@@ -114,6 +123,12 @@ const EquipmentEditModal: React.FC<EquipmentEditModalProps> = ({
       quantityTotal: equipment.quantityTotal ?? 1,
       isQuantityBased: !!equipment.isQuantityBased,
       isSharedEngineeringEquipment: !!equipment.isSharedEngineeringEquipment,
+      dimensions: {
+        length: equipment.dimensions?.length ?? undefined,
+        width: equipment.dimensions?.width ?? undefined,
+        height: equipment.dimensions?.height ?? undefined,
+        unit: equipment.dimensions?.unit || 'centimeters',
+      },
     });
     if (equipment.imageUrl) {
       setFileList([
@@ -163,6 +178,20 @@ const EquipmentEditModal: React.FC<EquipmentEditModalProps> = ({
         quantityTotal: values.quantityTotal || 1,
         isQuantityBased: values.isQuantityBased ?? false,
         isSharedEngineeringEquipment: values.isSharedEngineeringEquipment ?? false,
+        dimensions: (() => {
+          const d = values.dimensions || {};
+          const hasAny =
+            (d.length !== undefined && d.length !== null) ||
+            (d.width !== undefined && d.width !== null) ||
+            (d.height !== undefined && d.height !== null);
+          if (!hasAny) return null;
+          return {
+            length: d.length ?? null,
+            width: d.width ?? null,
+            height: d.height ?? null,
+            unit: d.unit || 'centimeters',
+          };
+        })(),
       };
 
       await updateEquipment({ variables: { id: equipment.id, input } });
@@ -321,6 +350,38 @@ const EquipmentEditModal: React.FC<EquipmentEditModalProps> = ({
                       )}
                     </Upload>
                   </Form.Item>
+
+                  <div>
+                    <div style={{ marginBottom: 8, fontWeight: 500 }}>
+                      מידות פיזיות (אופציונלי)
+                    </div>
+                    <div style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>
+                      מידות הפריט נחוצות לחישוב תפוסת המחסן והתראות "כמעט מלא".
+                      ניתן להשאיר ריק עבור פריטים שאינם תופסים מקום משמעותי.
+                    </div>
+                    <Row gutter={8}>
+                      <Col span={6}>
+                        <Form.Item name={['dimensions', 'length']} label="אורך">
+                          <InputNumber min={0} style={{ width: '100%' }} placeholder="0" />
+                        </Form.Item>
+                      </Col>
+                      <Col span={6}>
+                        <Form.Item name={['dimensions', 'width']} label="רוחב">
+                          <InputNumber min={0} style={{ width: '100%' }} placeholder="0" />
+                        </Form.Item>
+                      </Col>
+                      <Col span={6}>
+                        <Form.Item name={['dimensions', 'height']} label="גובה">
+                          <InputNumber min={0} style={{ width: '100%' }} placeholder="0" />
+                        </Form.Item>
+                      </Col>
+                      <Col span={6}>
+                        <Form.Item name={['dimensions', 'unit']} label="יחידה">
+                          <Select options={WAREHOUSE_DIMENSION_UNIT_OPTIONS} />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                  </div>
                 </Space>
               ),
             },

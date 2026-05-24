@@ -248,22 +248,19 @@ export function getDimensionUnitLabel(unit: string): string {
 }
 
 // All backend occupancy snapshots are reported in cubic meters (the
-// `unit` field on the response is `"meters"`). Format the magnitude
-// with a nicer unit so a 0.0035 m³ shelf doesn't render as "0.00 m³".
+// `unit` field on the response is `"meters"`). Render in m³ across the
+// board — warehouses don't speak liters. Tiny sub‑m³ values fall back
+// to cm³ so a 0.0035 m³ shelf still shows useful detail instead of
+// "0.00 m³".
 export function formatCubicMeters(volume: number | null | undefined): string {
   if (volume === null || volume === undefined || !Number.isFinite(volume)) {
     return '—';
   }
-  if (volume >= 1) {
-    return `${volume.toFixed(volume >= 10 ? 1 : 2)} m³`;
-  }
-  // < 1 m³ → show in liters (1 m³ = 1000 L)
-  const liters = volume * 1000;
-  if (liters >= 1) {
-    return `${liters.toFixed(liters >= 10 ? 0 : 1)} L`;
-  }
-  // < 1 L → show in cm³
-  return `${(volume * 1_000_000).toFixed(0)} cm³`;
+  if (volume >= 100) return `${volume.toFixed(0)} m³`;
+  if (volume >= 10) return `${volume.toFixed(1)} m³`;
+  if (volume >= 0.01) return `${volume.toFixed(2)} m³`;
+  // Below ~0.01 m³ the m³ representation rounds to noise; show cm³.
+  return `${Math.round(volume * 1_000_000).toLocaleString('he-IL')} cm³`;
 }
 
 // 75% → "75%". Handles null/undefined gracefully.

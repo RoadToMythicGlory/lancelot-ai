@@ -5,6 +5,7 @@ import { Equipment } from '../models/equipment.models';
 import { Warehouse } from '../models/warehouse.models';
 import {
   computeWarehouseOccupancy,
+  MIN_OCCUPIED_VOLUME_FOR_ALERT_M3,
   type StoragePlaceOccupancy,
   type WarehouseOccupancy,
 } from './warehouseCapacity.service';
@@ -188,16 +189,6 @@ async function checkStaleEquipment() {
 const CAPACITY_RESOURCE = 'warehouse_capacity';
 
 /**
- * Absolute minimum occupied volume (in m³) before a "near full" alert is
- * allowed to fire. A single small item on a tiny shelf can be at 100% of
- * the shelf's capacity yet still represent a negligible amount of actual
- * material — alerting on those cases just trains people to ignore the
- * inbox. 0.05 m³ ≈ 50 L (roughly a large carry-on suitcase) is the floor
- * below which "near full" stops being useful.
- */
-const MIN_OCCUPIED_VOLUME_FOR_ALERT_M3 = 0.05;
-
-/**
  * Round the utilization down to the nearest 10% step (capped at 100).
  * We bake that bucket into the de-dup `resourceId` so the same
  * "near-full" condition only alerts once until either:
@@ -211,10 +202,12 @@ function capacityBucket(percent: number): number {
 }
 
 /**
- * Returns true when the location's near-full / over-capacity signal is
- * backed by a meaningful amount of physical volume. Tiny absolute
- * volumes (a single battery on a battery-sized shelf) shouldn't trigger
- * inbox notifications even though their percentage is 100%.
+ * Returns true when the location's near-full / over-capacity signal
+ * should produce an inbox notification. The volume floor is also baked
+ * into `computeStoragePlaceOccupancy` / `computeWarehouseOccupancy` so
+ * `isNearFull` / `isOverCapacity` already account for it — the redundant
+ * check here is defense-in-depth in case those flags are ever computed
+ * elsewhere.
  */
 function isAlertWorthy(occ: WarehouseOccupancy | StoragePlaceOccupancy): boolean {
   if (!occ.isNearFull && !occ.isOverCapacity) return false;

@@ -642,6 +642,20 @@ async function aggregateSharedEngineering(
     const eventAssignment = latestActiveEventByEquipment.get(eqId);
     const staffAssignment = latestActiveStaffByEquipment.get(eqId);
 
+    // Truly-special equipment states that should keep their own `kind` rather
+    // than be forced into the "warehouse" bucket below. Everything else (incl.
+    // `available`, `assigned`, anything we don't recognise, and missing
+    // values) is treated as "presumed in the warehouse" when no active
+    // assignment is on file.
+    const specialStatuses = new Set([
+      'maintenance',
+      'broken',
+      'lost',
+      'retired',
+      'damaged',
+    ]);
+    const isSpecialStatus = specialStatuses.has((e.status || '').toLowerCase());
+
     let location: DeviceLocation;
     if (eventAssignment) {
       const broadcastId = eventAssignment.eventId?.toString?.() || '';
@@ -682,14 +696,34 @@ async function aggregateSharedEngineering(
           : null,
         assignedByName: staffAssignment.assignedByName || null,
       };
+    } else if (isSpecialStatus) {
+      // Equipment is intentionally out-of-rotation (maintenance, broken,
+      // lost, retired, damaged). We can't say it's "in the warehouse" with
+      // a straight face, so surface `unknown` and let partner dashboards
+      // render the underlying `status` field for the operator.
+      location = { kind: 'unknown' };
     } else {
+      // No active assignment AND the equipment isn't in a special state →
+      // by definition it is back in the warehouse. We surface
+      // `kind: 'warehouse'` even when the equipment record has no
+      // `warehouseId` / `storagePlaceId` saved on it (a very common case for
+      // items that have never been pinned to a specific shelf). Operators
+      // can still tell what's missing by the null fields.
       const loc = resolveEquipmentLocation(e);
-      if (loc.warehouseId || loc.currentLocation) {
-        location = { kind: 'warehouse', ...loc };
-      } else {
-        location = { kind: 'unknown' };
-      }
+      location = { kind: 'warehouse', ...loc };
     }
+
+    // Derive the public `status` from the resolved location rather than
+    // trusting the denormalized `equipment.status`, which can lag behind
+    // assignment changes (partial returns, multi-unit items, historical
+    // migrations, etc.). The denormalized field is only respected when it
+    // signals a special out-of-rotation state.
+    const derivedStatus =
+      eventAssignment || staffAssignment
+        ? 'assigned'
+        : isSpecialStatus
+          ? (e.status as string)
+          : 'available';
 
     const contact: DeviceContact = {
       primary: e.contactPerson || null,
@@ -717,7 +751,7 @@ async function aggregateSharedEngineering(
       imageUrl: e.imageUrl || null,
       manualLink: e.manualLink || null,
 
-      status: e.status || 'available',
+      status: derivedStatus,
       suspensionStatus: e.suspensionStatus || null,
       condition: e.condition || null,
       isDisabled: !!e.isDisabled,

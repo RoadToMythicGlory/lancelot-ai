@@ -351,6 +351,11 @@ components:
 
     LocationUnknown:
       type: object
+      description: |
+        Returned only when the equipment is intentionally out of rotation
+        (status of `maintenance`, `broken`, `lost`, `retired`, or
+        `damaged`). A returned-to-warehouse item is reported as
+        `LocationWarehouse` with nullable fields, never as `LocationUnknown`.
       required: [kind]
       properties:
         kind: { type: string, enum: [unknown] }

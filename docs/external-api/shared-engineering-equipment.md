@@ -133,8 +133,20 @@ in-app "ציוד הנדסה שיתופי" tab shows, plus optional BLE live posi
 
 The `location.kind` discriminator tells the dashboard whether the device
 is currently in a warehouse (`warehouse`), checked out to an event
-(`event`), checked out to a staff member (`staff`), or has no resolvable
-location (`unknown`).
+(`event`), or checked out to a staff member (`staff`).
+
+The fourth value, `unknown`, is reserved for items that are intentionally
+out of rotation — `status` of `maintenance`, `broken`, `lost`, `retired`,
+or `damaged`. **A returned item never has `kind: 'unknown'`**: even when
+its warehouse / storage place have never been pinned (so `warehouseId`,
+`storagePlaceId`, `currentLocation` are all `null`), the discriminator
+will still be `warehouse`. In other words, `kind === 'warehouse'` means
+"presumed in our possession", not "we have a precise shelf for it".
+
+The top-level `status` is likewise derived from the active assignment
+state, not the denormalized `equipment.status` field — so a fully
+returned item always reports `status: 'available'` even if a stale write
+left the legacy field saying otherwise.
 
 ### `GET /shared-engineering-equipment/snapshot`
 

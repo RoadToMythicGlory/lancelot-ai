@@ -177,23 +177,61 @@ export function sanitizeRequest(req: Request, res: Response, next: NextFunction)
 }
 
 /**
- * API key validation middleware (for external services)
+ * API key validation middleware (for external services).
+ *
+ * Reads `X-API-Key` from the request headers and compares it against the
+ * comma-separated list in `VALID_API_KEYS` using a constant-time compare
+ * (so the response time can't be used as an oracle to leak which prefix is
+ * close to a valid key). On success, exposes:
+ *   - `req.apiKeyId`   — short, stable identifier (first 8 chars of a SHA-256
+ *                         hash of the key) safe to log / use as a rate-limit
+ *                         bucket key. Never reveals the secret.
+ *   - `req.apiKeyValue` — the raw key value (only consumed by middleware
+ *                         further down the chain that needs to forward it,
+ *                         e.g. webhook signing).
  */
 export function validateApiKey(req: Request, res: Response, next: NextFunction): any {
-  const apiKey = req.headers['x-api-key'];
-  
-  if (!apiKey) {
+  const headerValue = req.headers['x-api-key'];
+  const apiKey = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+
+  if (!apiKey || typeof apiKey !== 'string') {
     return res.status(401).json({ error: 'API key required' });
   }
-  
-  // In production, validate against stored API keys
-  // For now, we'll use a simple check
-  const validApiKeys = process.env.VALID_API_KEYS?.split(',') || [];
-  
-  if (!validApiKeys.includes(apiKey as string)) {
+
+  const validApiKeys = (process.env.VALID_API_KEYS || '')
+    .split(',')
+    .map((k) => k.trim())
+    .filter(Boolean);
+
+  if (validApiKeys.length === 0) {
+    return res.status(503).json({
+      error: 'API not configured',
+      message: 'No API keys are configured on the server. Set VALID_API_KEYS.',
+    });
+  }
+
+  const incomingBuf = Buffer.from(apiKey);
+  let matched = false;
+  for (const candidate of validApiKeys) {
+    const candidateBuf = Buffer.from(candidate);
+    if (candidateBuf.length !== incomingBuf.length) continue;
+    if (crypto.timingSafeEqual(candidateBuf, incomingBuf)) {
+      matched = true;
+      break;
+    }
+  }
+
+  if (!matched) {
     return res.status(401).json({ error: 'Invalid API key' });
   }
-  
+
+  // Derive a non-secret, stable identifier for logging / rate-limit keying.
+  // Using the first 8 chars of a SHA-256 hash is enough to disambiguate
+  // between a handful of keys without exposing the secret in logs.
+  const apiKeyId = crypto.createHash('sha256').update(apiKey).digest('hex').slice(0, 8);
+  (req as any).apiKeyId = apiKeyId;
+  (req as any).apiKeyValue = apiKey;
+
   next();
 }
 

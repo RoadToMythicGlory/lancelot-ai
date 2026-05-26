@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "ts-node src/index.ts",
     "start:dev": "ts-node src/index.ts",
-    "build": "tsc && node -e \"const fs=require('fs');const path=require('path');const src='src/schema';const out='dist/schema';fs.mkdirSync(out,{recursive:true});for(const f of fs.readdirSync(src)){if(f.endsWith('.graphql')){fs.copyFileSync(path.join(src,f),path.join(out,f));}}\"",
+    "build": "tsc && node -e \"const fs=require('fs');const path=require('path');const src='src/schema';const out='dist/schema';fs.mkdirSync(out,{recursive:true});for(const f of fs.readdirSync(src)){if(f.endsWith('.graphql')){fs.copyFileSync(path.join(src,f),path.join(out,f));}}const oapiSrc='openapi';const oapiOut='dist/openapi';if(fs.existsSync(oapiSrc)){fs.mkdirSync(oapiOut,{recursive:true});for(const f of fs.readdirSync(oapiSrc)){fs.copyFileSync(path.join(oapiSrc,f),path.join(oapiOut,f));}}\"",
     "start": "NODE_ENV=production node server.js",
     "start:dist": "node dist/index.js",
     "test": "jest",

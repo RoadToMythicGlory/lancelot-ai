@@ -3,6 +3,7 @@ import { Equipment, EquipmentHistory } from '../models/equipment.models';
 import { InternalEquipmentAssignment, IInternalEquipmentAssignment } from '../models/internalEquipmentAssignment.models';
 import { requireAuth, requirePermission } from '../middleware/auth';
 import { Permission } from '../rbac';
+import { emitExternalEvent } from '../services/webhookDelivery.service';
 import mongoose from 'mongoose';
 import { ObjectId } from 'mongodb';
 
@@ -201,6 +202,10 @@ export const internalAssignmentsResolvers = {
         date: now,
       });
 
+      if (equipment.isSharedEngineeringEquipment) {
+        emitExternalEvent('equipment.assigned', { equipmentId: equipment._id.toString() });
+      }
+
       return mapAssignmentToGql(assignment);
     },
 
@@ -256,6 +261,10 @@ export const internalAssignmentsResolvers = {
         notes: `הוחזר מ-${assignment.assignedToName}` + (notes ? ` — ${notes}` : ''),
         date: now,
       });
+
+      if (equipment.isSharedEngineeringEquipment) {
+        emitExternalEvent('equipment.returned', { equipmentId: equipment._id.toString() });
+      }
 
       return mapAssignmentToGql(assignment);
     },
@@ -363,6 +372,18 @@ export const internalAssignmentsResolvers = {
         notes: `הועבר מ-${source.assignedToName} ל-${assignedToName}` + (input.notes ? ` — ${input.notes}` : ''),
         date: now,
       });
+
+      // Transfer = ownership change. We send a fresh `equipment.assigned`
+      // event so partners that key off "current holder" see the new one;
+      // the device row payload reflects the latest active assignment.
+      try {
+        const eq = await Equipment.findById(source.equipmentId).select({ isSharedEngineeringEquipment: 1 }).lean().exec();
+        if (eq?.isSharedEngineeringEquipment) {
+          emitExternalEvent('equipment.assigned', { equipmentId: source.equipmentId.toString() });
+        }
+      } catch {
+        /* best-effort */
+      }
 
       return mapAssignmentToGql(newAssignment);
     },

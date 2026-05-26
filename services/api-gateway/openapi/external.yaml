@@ -1,0 +1,458 @@
+openapi: 3.1.0
+info:
+  title: Lancelot External API — Shared Engineering Equipment
+  version: 1.0.0
+  description: |
+    Read-only REST API for partner dashboards consuming Lancelot's
+    "ציוד הנדסה שיתופי" (shared engineering equipment) data.
+
+    Authentication is by API key in the `X-API-Key` header. Keys are
+    configured server-side via the `VALID_API_KEYS` environment variable.
+
+    All endpoints (except `/healthz` and `/openapi.yaml`) are rate-limited
+    per API key (default 120 requests/minute).
+
+    Real-time updates can be delivered via outbound webhooks — see the
+    "Webhooks" section in `docs/external-api/shared-engineering-equipment.md`.
+  contact:
+    name: Lancelot Platform Team
+servers:
+  - url: https://api.lanceloterp.io/api/v1/external
+    description: Production
+  - url: http://localhost:4000/api/v1/external
+    description: Local development
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /healthz:
+    get:
+      summary: Liveness ping
+      description: No auth required. Use this from an uptime monitor.
+      security: []
+      tags: [Operations]
+      responses:
+        '200':
+          description: Service alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  service: { type: string, example: lancelot-external-api }
+                  version: { type: string, example: v1 }
+                  timestamp: { type: string, format: date-time }
+
+  /openapi.yaml:
+    get:
+      summary: Download this OpenAPI spec
+      security: []
+      tags: [Operations]
+      responses:
+        '200':
+          description: OpenAPI 3.1 YAML
+          content:
+            application/yaml:
+              schema:
+                type: string
+
+  /shared-engineering-equipment:
+    get:
+      summary: List shared engineering equipment
+      description: |
+        Paginated list of all equipment items flagged as
+        `isSharedEngineeringEquipment`. Each row includes the resolved
+        location (warehouse / event / staff), live BLE position when a
+        tracker is bound, and contact info.
+      tags: [Shared Engineering Equipment]
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [available, assigned, maintenance, broken]
+          description: Filter by equipment status
+        - in: query
+          name: category
+          schema: { type: string }
+          description: Filter by equipment category slug (e.g. `cameras`)
+        - in: query
+          name: assignedTo
+          schema:
+            type: string
+            enum: [event, staff, none]
+          description: Filter by current holder
+        - in: query
+          name: updatedSince
+          schema: { type: string, format: date-time }
+          description: Return only items updated at or after this timestamp
+        - in: query
+          name: cursor
+          schema: { type: string }
+          description: Pagination cursor (use `meta.nextCursor` from the previous response)
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+      responses:
+        '200':
+          description: List of devices
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Device' }
+                  meta: { $ref: '#/components/schemas/ListMeta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /shared-engineering-equipment/snapshot:
+    get:
+      summary: Full snapshot of all shared engineering equipment
+      description: |
+        Uncapped dump of every device row. Intended for partner dashboards'
+        initial load or nightly resync. Response is JSON; the gateway
+        gzips automatically when the client sends `Accept-Encoding: gzip`.
+      tags: [Shared Engineering Equipment]
+      responses:
+        '200':
+          description: Full snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Device' }
+                  meta:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      generatedAt: { type: string, format: date-time }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /shared-engineering-equipment/{id}:
+    get:
+      summary: Get one device by id
+      tags: [Shared Engineering Equipment]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Device row
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Device' }
+                  meta:
+                    type: object
+                    properties:
+                      generatedAt: { type: string, format: date-time }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /shared-engineering-equipment/{id}/history:
+    get:
+      summary: Get the assignment + status audit trail for one device
+      tags: [Shared Engineering Equipment]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+      responses:
+        '200':
+          description: History entries (most recent first)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/HistoryEntry' }
+                  meta:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      generatedAt: { type: string, format: date-time }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /webhooks/deliveries:
+    get:
+      summary: List recent webhook deliveries
+      description: |
+        Diagnostic endpoint — confirms whether outbound webhook events are
+        reaching the partner's URL.
+      tags: [Operations]
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [pending, retrying, success, failed, all]
+        - in: query
+          name: since
+          schema: { type: string, format: date-time }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+      responses:
+        '200':
+          description: List of deliveries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/WebhookDelivery' }
+                  meta:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      generatedAt: { type: string, format: date-time }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    Device:
+      type: object
+      required: [id, name, status]
+      properties:
+        id: { type: string, description: MongoDB ObjectId }
+        name: { type: string }
+        barcode: { type: [string, 'null'] }
+        category: { type: [string, 'null'], description: Slug (e.g. `cameras`) }
+        categoryLabelHe: { type: [string, 'null'], description: Hebrew display label }
+        brand: { type: [string, 'null'] }
+        equipmentModel: { type: [string, 'null'] }
+        imageUrl: { type: [string, 'null'] }
+        manualLink: { type: [string, 'null'] }
+
+        status:
+          type: string
+          enum: [available, assigned, maintenance, broken]
+        suspensionStatus:
+          type: [string, 'null']
+          enum: [under_maintenance, broken, lost, reserved, other, null]
+        condition:
+          type: [string, 'null']
+          enum: [new, good, fair, needs_repair, null]
+        isDisabled: { type: boolean }
+        disabledReason: { type: [string, 'null'] }
+
+        quantityTotal: { type: integer }
+        quantityAvailable: { type: integer }
+        quantityAssigned: { type: integer }
+        isQuantityBased: { type: boolean }
+        isSharedEngineeringEquipment: { type: boolean }
+
+        location:
+          oneOf:
+            - $ref: '#/components/schemas/LocationWarehouse'
+            - $ref: '#/components/schemas/LocationEvent'
+            - $ref: '#/components/schemas/LocationStaff'
+            - $ref: '#/components/schemas/LocationUnknown'
+          discriminator:
+            propertyName: kind
+
+        livePosition:
+          oneOf:
+            - $ref: '#/components/schemas/LivePosition'
+            - type: 'null'
+
+        contact:
+          type: object
+          properties:
+            primary: { type: [string, 'null'] }
+            currentHolderName: { type: [string, 'null'] }
+            currentHolderPhone: { type: [string, 'null'] }
+
+        warrantyExpiryDate: { type: [string, 'null'], format: date-time }
+        purchaseDate: { type: [string, 'null'], format: date-time }
+        priceIls: { type: [number, 'null'] }
+
+        assignmentHistoryCount: { type: integer }
+
+        lastUsedAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: [string, 'null'], format: date-time }
+        updatedAt: { type: [string, 'null'], format: date-time }
+
+        _links:
+          type: object
+          properties:
+            self: { type: string, format: uri }
+            history: { type: string, format: uri }
+            assignments: { type: string, format: uri }
+
+    LocationWarehouse:
+      type: object
+      required: [kind]
+      properties:
+        kind: { type: string, enum: [warehouse] }
+        warehouseId: { type: [string, 'null'] }
+        warehouseName: { type: [string, 'null'] }
+        storagePlaceId: { type: [string, 'null'] }
+        storagePlaceName: { type: [string, 'null'] }
+        storagePlaceCode: { type: [string, 'null'] }
+        currentLocation: { type: [string, 'null'] }
+
+    LocationEvent:
+      type: object
+      required: [kind, assignmentId, broadcastEventId]
+      properties:
+        kind: { type: string, enum: [event] }
+        assignmentId: { type: string }
+        broadcastEventId: { type: string }
+        broadcastEventTitle: { type: [string, 'null'] }
+        broadcastEventStart: { type: [string, 'null'], format: date-time }
+        broadcastEventEnd: { type: [string, 'null'], format: date-time }
+        broadcastEventVenue: { type: [string, 'null'] }
+        broadcastEventLocation: { type: [string, 'null'] }
+        mcrEventId: { type: [string, 'null'] }
+        assignedAt: { type: [string, 'null'], format: date-time }
+        assignedByName: { type: [string, 'null'] }
+
+    LocationStaff:
+      type: object
+      required: [kind, assignmentId, assignedToName]
+      properties:
+        kind: { type: string, enum: [staff] }
+        assignmentId: { type: string }
+        assignedToType: { type: string, enum: [internal, external] }
+        assignedToUserId: { type: [string, 'null'] }
+        assignedToName: { type: string }
+        assignedToPhone: { type: [string, 'null'] }
+        assignedAt: { type: [string, 'null'], format: date-time }
+        assignedByName: { type: [string, 'null'] }
+
+    LocationUnknown:
+      type: object
+      required: [kind]
+      properties:
+        kind: { type: string, enum: [unknown] }
+
+    LivePosition:
+      type: object
+      properties:
+        kind: { type: string, enum: [indoor, outdoor, stale] }
+        siteId: { type: [string, 'null'] }
+        gatewayId: { type: [string, 'null'] }
+        gatewayName: { type: [string, 'null'] }
+        zoneName: { type: [string, 'null'] }
+        x: { type: [number, 'null'], description: Indoor x (site coords, meters) }
+        y: { type: [number, 'null'], description: Indoor y (site coords, meters) }
+        lat: { type: [number, 'null'] }
+        lng: { type: [number, 'null'] }
+        rssi: { type: [number, 'null'] }
+        batteryPct: { type: [number, 'null'] }
+        confidence: { type: [number, 'null'], minimum: 0, maximum: 1 }
+        computedAt: { type: [string, 'null'], format: date-time }
+
+    HistoryEntry:
+      type: object
+      properties:
+        id: { type: string }
+        date: { type: [string, 'null'], format: date-time }
+        action:
+          type: string
+          enum:
+            - assigned
+            - returned
+            - transferred
+            - maintenance
+            - status_change
+            - quantity_adjusted
+            - disabled
+            - enabled
+            - set_assigned
+            - set_returned
+            - item_replaced
+            - item_missing
+        quantity: { type: [integer, 'null'] }
+        performedBy: { type: [string, 'null'] }
+        performedByName: { type: [string, 'null'] }
+        notes: { type: [string, 'null'] }
+        previousStatus: { type: [string, 'null'] }
+        newStatus: { type: [string, 'null'] }
+        previousLocation: { type: [string, 'null'] }
+        newLocation: { type: [string, 'null'] }
+        eventId: { type: [string, 'null'] }
+        eventName: { type: [string, 'null'] }
+
+    WebhookDelivery:
+      type: object
+      properties:
+        deliveryId: { type: string, format: uuid }
+        event:
+          type: string
+          enum:
+            - equipment.created
+            - equipment.updated
+            - equipment.deleted
+            - equipment.assigned
+            - equipment.returned
+            - equipment.location.changed
+        status:
+          type: string
+          enum: [pending, retrying, success, failed]
+        attempts: { type: integer }
+        responseStatus: { type: [integer, 'null'] }
+        error: { type: [string, 'null'] }
+        deliveredAt: { type: [string, 'null'], format: date-time }
+        nextRetryAt: { type: [string, 'null'], format: date-time }
+        durationMs: { type: [integer, 'null'] }
+        createdAt: { type: [string, 'null'], format: date-time }
+
+    ListMeta:
+      type: object
+      properties:
+        nextCursor: { type: [string, 'null'] }
+        total: { type: integer }
+        generatedAt: { type: string, format: date-time }
+
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+        message: { type: string }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid API key
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: Quota exceeded for this API key
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }

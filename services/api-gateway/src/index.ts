@@ -36,6 +36,8 @@ import { startScheduler, stopScheduler } from './services/jobScheduler';
 import { metrics } from './services/metrics';
 import { warehouseRoutes } from './routes/warehouseRoutes';
 import { trackingRoutes } from './routes/trackingRoutes';
+import { externalApiRoutes } from './routes/externalApiRoutes';
+import { startWebhookRetryWorker, stopWebhookRetryWorker } from './services/webhookDelivery.service';
 import { equipmentSetsResolvers } from './resolvers/equipmentSets';
 import { equipmentCategoryResolvers } from './resolvers/equipmentCategory';
 import { internalAssignmentsResolvers } from './resolvers/internalAssignments';
@@ -372,7 +374,12 @@ async function startServer() {
 
     // BLE tracking ingest routes
     app.use('/api/tracking', trackingRoutes);
-  
+
+    // Public read-only REST API for external partner dashboards (shared
+    // engineering equipment, webhook delivery status). Authenticated via
+    // `X-API-Key` and rate-limited per-key inside the router itself.
+    app.use('/api/v1/external', externalApiRoutes);
+
     // Create HTTP server
     const httpServer = createServer(app);
 
@@ -526,7 +533,12 @@ async function startServer() {
         // Start BLE tracker MQTT ingest
         startTrackerIngest();
         console.log(`📡 BLE tracker ingest service started`);
-        
+
+        // Start outbound webhook retry worker for the external partner API
+        // (no-op when EXTERNAL_WEBHOOK_ENABLED is not "true").
+        startWebhookRetryWorker();
+        console.log(`🪝 External webhook delivery worker started`);
+
         resolve();
       });
     });
@@ -535,6 +547,7 @@ async function startServer() {
     process.on('SIGTERM', async () => {
       console.log('SIGTERM signal received: closing HTTP server');
       stopTrackerIngest();
+      stopWebhookRetryWorker();
       stopScheduler();
       await server.stop();
       await closeMongoDB();

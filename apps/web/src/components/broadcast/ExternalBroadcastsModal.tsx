@@ -1,15 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { Modal, Form, Select, Button, Space, Card, Row, Col, Tag, Table, Divider, InputNumber } from 'antd';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Modal, Form, Select, Button, Space, Card, Row, Col, Tag, Table, Divider, InputNumber, Input } from 'antd';
 import { 
   ToolOutlined, 
   TeamOutlined,
   VideoCameraOutlined,
   AudioOutlined,
   UserOutlined,
-  GlobalOutlined
+  GlobalOutlined,
+  SearchOutlined
 } from '@ant-design/icons';
 import { useQuery, useMutation } from '@apollo/client';
-import { GET_WAREHOUSE_EQUIPMENT, GET_EMPLOYEES_BY_DEPARTMENT, GET_DEPARTMENTS, GET_BROADCAST_EVENT } from '../../graphql/queries';
+import { GET_WAREHOUSE_EQUIPMENT_FOR_PICKER, GET_EMPLOYEES_BY_DEPARTMENT, GET_DEPARTMENTS, GET_BROADCAST_EVENT } from '../../graphql/queries';
 import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA } from '../../graphql/mutations';
 import DynamicDepartmentJobsPanel, { AssignmentJob } from '../assignments/DynamicDepartmentJobsPanel';
 import { useEquipmentCategories } from '../../hooks/useEquipmentCategories';
@@ -36,6 +37,7 @@ interface Equipment {
   name: string;
   category: string;
   brand: string;
+  barcode?: string | null;
   quantityAvailable: number;
 }
 
@@ -65,6 +67,7 @@ const ExternalBroadcastsModal: React.FC<ExternalBroadcastsModalProps> = ({ visib
   const [selectedEquipment, setSelectedEquipment] = useState<Array<{ id: string; quantity: number }>>([]);
   const [departmentIds, setDepartmentIds] = useState<Record<string, string>>({});
   const [dynamicJobs, setDynamicJobs] = useState<AssignmentJob[]>([]);
+  const [equipmentSearch, setEquipmentSearch] = useState('');
   // Category filters for the equipment table come from the canonical catalog
   // — replacing the previously-hardcoded English values (camera/audio/...) which
   // didn't actually match the slugs the backend stores (cameras/sound/...).
@@ -91,9 +94,44 @@ const ExternalBroadcastsModal: React.FC<ExternalBroadcastsModalProps> = ({ visib
     }
   });
 
-  // Query for equipment
-  const { data: equipmentData } = useQuery(GET_WAREHOUSE_EQUIPMENT);
-  const equipment: Equipment[] = equipmentData?.warehouseEquipment || [];
+  // Full active equipment catalog (up to 5,000 rows). The previous
+  // `warehouseEquipment` query is hard-capped at 500 server-side and
+  // defaulted to 200 here, which silently truncated the picker for a
+  // catalog of ~4,000+ items. The picker projection ships only the
+  // fields we render, so the payload stays small even at the higher cap.
+  const { data: equipmentData, loading: equipmentLoading } = useQuery(
+    GET_WAREHOUSE_EQUIPMENT_FOR_PICKER,
+    {
+      skip: !visible,
+      fetchPolicy: 'cache-first',
+    },
+  );
+  const equipment: Equipment[] = useMemo(() => {
+    const rows: any[] = equipmentData?.warehouseEquipmentForPicker || [];
+    return rows
+      .filter((r) => !r?.isDisabled)
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        category: r.category ?? '',
+        brand: r.brand ?? '',
+        barcode: r.barcode ?? null,
+        quantityAvailable: typeof r.quantityAvailable === 'number' ? r.quantityAvailable : 0,
+      }));
+  }, [equipmentData]);
+
+  const filteredEquipment: Equipment[] = useMemo(() => {
+    const term = equipmentSearch.trim().toLowerCase();
+    if (!term) return equipment;
+    return equipment.filter((e) => {
+      return (
+        e.name?.toLowerCase().includes(term) ||
+        e.brand?.toLowerCase().includes(term) ||
+        e.category?.toLowerCase().includes(term) ||
+        (e.barcode ? e.barcode.toLowerCase().includes(term) : false)
+      );
+    });
+  }, [equipment, equipmentSearch]);
 
   // Query for all departments to get IDs
   const { data: departmentsData } = useQuery(GET_DEPARTMENTS, {
@@ -120,6 +158,10 @@ const ExternalBroadcastsModal: React.FC<ExternalBroadcastsModalProps> = ({ visib
   // Load existing data when modal opens
   useEffect(() => {
     if (visible) {
+      // Reset the equipment search filter so it doesn't bleed across
+      // events when the same modal instance is reused.
+      setEquipmentSearch('');
+
       // First try to use the event data passed as prop
       let metadata = event?.metadata || {};
       
@@ -534,16 +576,35 @@ const ExternalBroadcastsModal: React.FC<ExternalBroadcastsModalProps> = ({ visib
 
         {/* Equipment Selection */}
         <div className="mb-6">
-          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <ToolOutlined />
-            ציוד נדרש
-          </h3>
+          <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+            <h3 className="text-lg font-semibold flex items-center gap-2 m-0">
+              <ToolOutlined />
+              ציוד נדרש
+              <span className="text-sm text-gray-500 font-normal">
+                ({filteredEquipment.length.toLocaleString('he-IL')} / {equipment.length.toLocaleString('he-IL')})
+              </span>
+            </h3>
+            <Input
+              allowClear
+              placeholder="חיפוש ציוד לפי שם, מותג, קטגוריה או ברקוד"
+              prefix={<SearchOutlined />}
+              value={equipmentSearch}
+              onChange={(e) => setEquipmentSearch(e.target.value)}
+              style={{ maxWidth: 360 }}
+            />
+          </div>
           <Table
             columns={equipmentColumns}
-            dataSource={equipment}
+            dataSource={filteredEquipment}
             rowKey="id"
             size="small"
-            pagination={{ pageSize: 10 }}
+            loading={equipmentLoading}
+            pagination={{
+              pageSize: 10,
+              showSizeChanger: true,
+              pageSizeOptions: ['10', '20', '50', '100'],
+              showTotal: (total) => `סה"כ ${total.toLocaleString('he-IL')} פריטים`,
+            }}
           />
         </div>
 

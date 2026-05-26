@@ -240,7 +240,10 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
         address: editingWarehouse.address ?? undefined,
         isActive: editingWarehouse.isActive,
         capacityAlertThresholdPercent:
-          editingWarehouse.capacityAlertThresholdPercent ?? 75,
+          editingWarehouse.capacityAlertThresholdPercent &&
+          editingWarehouse.capacityAlertThresholdPercent > 0
+            ? editingWarehouse.capacityAlertThresholdPercent
+            : 75,
         dimensions: {
           length: editingWarehouse.dimensions?.length ?? undefined,
           width: editingWarehouse.dimensions?.width ?? undefined,
@@ -318,7 +321,10 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
         notes: editingPlace.notes ?? undefined,
         isActive: editingPlace.isActive,
         capacityAlertThresholdPercent:
-          editingPlace.capacityAlertThresholdPercent ?? undefined,
+          editingPlace.capacityAlertThresholdPercent &&
+          editingPlace.capacityAlertThresholdPercent > 0
+            ? editingPlace.capacityAlertThresholdPercent
+            : undefined,
         dimensions: {
           length: editingPlace.dimensions?.length ?? undefined,
           width: editingPlace.dimensions?.width ?? undefined,
@@ -905,10 +911,10 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
           <Form.Item
             name="capacityAlertThresholdPercent"
             label="סף התראת תפוסה (%)"
-            tooltip="כשמקום אחסון מגיע לאחוז זה מהקיבולת — תישלח התראה. ניתן לדרוס לכל מקום אחסון בנפרד."
+            tooltip="כשמקום אחסון מגיע לאחוז זה מהקיבולת — תישלח התראה. ניתן לדרוס לכל מקום אחסון בנפרד. מינימום 1%."
             initialValue={75}
           >
-            <InputNumber min={0} max={100} style={{ width: '100%' }} addonAfter="%" />
+            <InputNumber min={1} max={100} style={{ width: '100%' }} addonAfter="%" />
           </Form.Item>
 
           <Form.Item
@@ -986,9 +992,9 @@ const WarehouseManagement: React.FC<WarehouseManagementProps> = ({ canManage = f
           <Form.Item
             name="capacityAlertThresholdPercent"
             label="סף התראת תפוסה למקום זה (%)"
-            tooltip="אם ריק — ישתמשו בסף ברירת המחדל של המחסן (75%)."
+            tooltip="אם ריק — ישתמשו בסף ברירת המחדל של המחסן (75%). מינימום 1%."
           >
-            <InputNumber min={0} max={100} style={{ width: '100%' }} addonAfter="%" placeholder="ברירת המחדל של המחסן" />
+            <InputNumber min={1} max={100} style={{ width: '100%' }} addonAfter="%" placeholder="ברירת המחדל של המחסן" />
           </Form.Item>
 
           <Form.Item

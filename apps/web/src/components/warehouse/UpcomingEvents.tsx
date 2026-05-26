@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { Card, List, DatePicker, Button, Space, Tag, Row, Col, Spin, Empty, Typography, Divider, Timeline, Segmented, Modal, Input, App } from 'antd';
+import React, { useState, useMemo } from 'react';
+import { Card, List, DatePicker, Button, Space, Tag, Row, Col, Spin, Empty, Typography, Divider, Timeline, Segmented, Modal, Input, App, Alert } from 'antd';
 import {
   CalendarOutlined,
   ClockCircleOutlined,
@@ -133,6 +133,14 @@ const UpcomingEvents: React.FC<UpcomingEventsProps> = ({ onEventClick }) => {
   const [isWarehouseModalVisible, setIsWarehouseModalVisible] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importSearch, setImportSearch] = useState('');
+  // Default the import dialog to a broad planner window (~3 weeks back, 3
+  // months ahead). The previous version reused the day/week range from
+  // the main view, which made the list look empty whenever the
+  // currently-selected day had no planner events left to pull in.
+  const [importRange, setImportRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>(() => [
+    dayjs().subtract(21, 'day').startOf('day'),
+    dayjs().add(90, 'day').endOf('day'),
+  ]);
   const { hasPermission } = useAuth();
   const canViewBroadcasts = hasPermission(Permission.BROADCAST_VIEW);
   const canManageWarehouse = hasPermission(Permission.WAREHOUSE_MANAGE);
@@ -161,22 +169,61 @@ const UpcomingEvents: React.FC<UpcomingEventsProps> = ({ onEventClick }) => {
     [allEvents],
   );
 
+  // Dedicated, wider query for the "import event" picker. This is fired
+  // only while the modal is open so the main view's date scope (a single
+  // day or week) doesn't constrain what an admin can pull in. The
+  // resolver caps at 500 rows; if the user picks a window that returns
+  // exactly that, we surface a hint so they can narrow it.
+  const IMPORT_QUERY_LIMIT = 500;
+  const {
+    data: importEventsData,
+    loading: importEventsLoading,
+    refetch: refetchImportEvents,
+  } = useQuery(GET_BROADCAST_EVENTS, {
+    variables: {
+      startDate: importRange[0].startOf('day').toISOString(),
+      endDate: importRange[1].endOf('day').toISOString(),
+    },
+    skip: !canViewBroadcasts || !importModalOpen,
+    fetchPolicy: 'cache-and-network',
+  });
+  const importPoolEvents: BroadcastEvent[] = importEventsData?.broadcastEvents || [];
+
   const importCandidates = useMemo(() => {
     const term = importSearch.trim().toLowerCase();
-    return allEvents
+    return importPoolEvents
       .filter((e) => !hasWarehouseInterest(e))
       .filter((e) => {
         if (!term) return true;
-        const title = `${(e as any).hebrewTitle || ''} ${e.title || ''}`.toLowerCase();
-        return title.includes(term);
+        const haystack = [
+          (e as any).hebrewTitle || '',
+          e.title || '',
+          e.eventNumber || '',
+          e.channel || '',
+          e.location || '',
+          e.venue || '',
+          e.homeTeam || '',
+          e.awayTeam || '',
+          e.sport || '',
+          e.league || '',
+        ]
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(term);
       })
-      .slice(0, 50);
-  }, [allEvents, importSearch]);
+      .sort((a, b) => dayjs(a.startTime).valueOf() - dayjs(b.startTime).valueOf())
+      .slice(0, 100);
+  }, [importPoolEvents, importSearch]);
+
+  const importPoolHitCap = importPoolEvents.length >= IMPORT_QUERY_LIMIT;
 
   const [importEvent, { loading: importing }] = useMutation(UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA, {
     onCompleted: () => {
       message.success('האירוע נוסף לרשימת המחסן');
       refetch();
+      // Refresh the import pool too so the just-imported event drops out
+      // of the candidate list without forcing the admin to close & reopen.
+      refetchImportEvents();
     },
     onError: (err) => {
       message.error(err.message || 'הוספת האירוע נכשלה');
@@ -614,6 +661,13 @@ const UpcomingEvents: React.FC<UpcomingEventsProps> = ({ onEventClick }) => {
               icon={<ImportOutlined />}
               onClick={() => {
                 setImportSearch('');
+                // Reset to the default broad window every time the modal
+                // is opened so previous narrow ranges don't silently hide
+                // events on the next import session.
+                setImportRange([
+                  dayjs().subtract(21, 'day').startOf('day'),
+                  dayjs().add(90, 'day').endOf('day'),
+                ]);
                 setImportModalOpen(true);
               }}
             >
@@ -664,56 +718,101 @@ const UpcomingEvents: React.FC<UpcomingEventsProps> = ({ onEventClick }) => {
 
       {/* Import-from-planner modal: lets a warehouse admin pull any
           planner event into the warehouse view even if no equipment was
-          requested for it yet. */}
+          requested for it yet. The picker is decoupled from the main
+          view's day/week scope so admins can reach the entire planner
+          window via the embedded RangePicker. */}
       <Modal
         open={importModalOpen}
         title="ייבוא אירוע מהתכנונית"
         onCancel={() => setImportModalOpen(false)}
         footer={null}
-        width={640}
+        width={720}
       >
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
-          <Input.Search
-            placeholder="חיפוש לפי שם אירוע"
-            allowClear
-            value={importSearch}
-            onChange={(e) => setImportSearch(e.target.value)}
-          />
+          <Row gutter={8} align="middle" wrap>
+            <Col flex="auto">
+              <Input.Search
+                placeholder="חיפוש לפי שם, מספר אירוע, ערוץ, מתחם או קבוצות"
+                allowClear
+                value={importSearch}
+                onChange={(e) => setImportSearch(e.target.value)}
+              />
+            </Col>
+            <Col>
+              <DatePicker.RangePicker
+                value={importRange}
+                allowClear={false}
+                format="DD/MM/YYYY"
+                onChange={(range) => {
+                  if (range && range[0] && range[1]) {
+                    setImportRange([range[0], range[1]]);
+                  }
+                }}
+              />
+            </Col>
+          </Row>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            הרשימה מציגה אירועים מהתכנונית בטווח התאריכים הנוכחי שאינם מופיעים עדיין במחסן (לא בוקש להם ציוד).
+            הרשימה מציגה אירועים מהתכנונית שעוד אינם במחסן (לא בוקש להם ציוד), בטווח שנבחר למעלה — לא רק היום/השבוע הנוכחי.
           </Text>
-          {importCandidates.length === 0 ? (
+          {importPoolHitCap && (
+            <Alert
+              type="warning"
+              showIcon
+              message="הוחזרו 500 אירועים — ייתכן שיש עוד מחוץ לטווח שמוצג"
+              description="הצטמצמו את טווח התאריכים או השתמשו בחיפוש כדי לאתר את האירוע הספציפי."
+            />
+          )}
+          {importEventsLoading ? (
+            <div style={{ textAlign: 'center', padding: 24 }}>
+              <Spin />
+            </div>
+          ) : importCandidates.length === 0 ? (
             <Empty description="אין אירועים נוספים זמינים לייבוא בטווח התאריכים שנבחר" />
           ) : (
-            <List
-              size="small"
-              bordered
-              dataSource={importCandidates}
-              renderItem={(ev) => (
-                <List.Item
-                  actions={[
-                    <Button
-                      key="import"
-                      type="link"
-                      icon={<ImportOutlined />}
-                      loading={importing}
-                      onClick={() => handleImportEvent(ev)}
-                    >
-                      ייבא
-                    </Button>,
-                  ]}
-                >
-                  <div>
-                    <div style={{ fontWeight: 500 }}>
-                      {(ev as any).hebrewTitle || ev.title}
+            <>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {`מוצגים ${importCandidates.length} אירועים${
+                  importCandidates.length >= 100 ? ' (חתוך ל-100 הראשונים — צמצמו את הטווח או חפשו)' : ''
+                }`}
+              </Text>
+              <List
+                size="small"
+                bordered
+                style={{ maxHeight: 420, overflowY: 'auto' }}
+                dataSource={importCandidates}
+                renderItem={(ev) => (
+                  <List.Item
+                    actions={[
+                      <Button
+                        key="import"
+                        type="link"
+                        icon={<ImportOutlined />}
+                        loading={importing}
+                        onClick={() => handleImportEvent(ev)}
+                      >
+                        ייבא
+                      </Button>,
+                    ]}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 500 }}>
+                        {(ev as any).hebrewTitle || ev.title}
+                        {ev.eventNumber && (
+                          <Text type="secondary" style={{ fontSize: 12, marginInlineStart: 8 }}>
+                            #{ev.eventNumber}
+                          </Text>
+                        )}
+                      </div>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {dayjs(ev.startTime).format('DD/MM/YYYY HH:mm')} • {ev.channel || '—'}
+                        {ev.location ? ` • ${ev.location}` : ''}
+                        {ev.homeTeam && ev.awayTeam ? ` • ${ev.homeTeam}–${ev.awayTeam}` : ''}
+                      </Text>
                     </div>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      {dayjs(ev.startTime).format('DD/MM/YYYY HH:mm')} • {ev.channel || '—'}
-                    </Text>
-                  </div>
-                </List.Item>
-              )}
-            />
+                  </List.Item>
+                )}
+              />
+            </>
           )}
         </Space>
       </Modal>

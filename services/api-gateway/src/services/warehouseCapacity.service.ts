@@ -39,6 +39,18 @@ const METERS_PER_UNIT: Record<WarehouseDimensionUnit, number> = {
 
 const REPORT_UNIT: WarehouseDimensionUnit = 'meters';
 
+/**
+ * Absolute minimum occupied volume (in m³) before a location is allowed
+ * to be flagged `isNearFull` / `isOverCapacity`. Below this, the
+ * percentage is meaningless noise (e.g. a single battery on a
+ * battery-sized shelf is 100% of the shelf's volume but ~0% of any real
+ * warehouse load). 0.05 m³ ≈ 50 L ≈ a large carry-on suitcase.
+ *
+ * Exported so the notification scheduler and any other consumer can
+ * stay in sync with the UI's flagging rules.
+ */
+export const MIN_OCCUPIED_VOLUME_FOR_ALERT_M3 = 0.05;
+
 function toMetersFactor(unit: WarehouseDimensionUnit | string | undefined | null): number {
   const key = (unit || 'meters') as WarehouseDimensionUnit;
   return METERS_PER_UNIT[key] ?? METERS_PER_UNIT.meters;
@@ -113,14 +125,18 @@ export interface WarehouseOccupancy {
   unit: WarehouseDimensionUnit;
 }
 
+// 0 means "alert at any occupancy" which is never what anyone wants —
+// it just produces nonstop noise. Treat thresholds <= 0 (and anything
+// out of range / non-finite) as "not configured" so the fallback
+// chain (place → warehouse → system default 75%) kicks in.
 function effectiveThreshold(
   placeThreshold: number | undefined | null,
   warehouseThreshold: number | undefined | null,
 ): number {
   const place = Number(placeThreshold);
-  if (Number.isFinite(place) && place >= 0 && place <= 100) return place;
+  if (Number.isFinite(place) && place > 0 && place <= 100) return place;
   const wh = Number(warehouseThreshold);
-  if (Number.isFinite(wh) && wh >= 0 && wh <= 100) return wh;
+  if (Number.isFinite(wh) && wh > 0 && wh <= 100) return wh;
   return DEFAULT_CAPACITY_ALERT_THRESHOLD_PERCENT;
 }
 
@@ -161,8 +177,13 @@ export function computeStoragePlaceOccupancy(
   if (capacityVolume !== null && capacityVolume > 0) {
     availableVolume = Math.max(0, capacityVolume - occupiedVolume);
     utilizationPercent = (occupiedVolume / capacityVolume) * 100;
-    isOverCapacity = occupiedVolume > capacityVolume;
-    isNearFull = utilizationPercent >= thresholdPercent;
+    // Absolute volume floor: tiny absolute footprints never count as
+    // "near full" / "over capacity" no matter what their percentage
+    // says. Keeps a battery-sized shelf with one battery quiet.
+    if (occupiedVolume >= MIN_OCCUPIED_VOLUME_FOR_ALERT_M3) {
+      isOverCapacity = occupiedVolume > capacityVolume;
+      isNearFull = utilizationPercent >= thresholdPercent;
+    }
   }
 
   return {
@@ -257,8 +278,10 @@ export function computeWarehouseOccupancy(
   if (capacitySum !== null && capacitySum > 0) {
     availableVolume = Math.max(0, capacitySum - occupiedSum);
     utilizationPercent = (occupiedSum / capacitySum) * 100;
-    isOverCapacity = occupiedSum > capacitySum;
-    isNearFull = utilizationPercent >= thresholdPercent;
+    if (occupiedSum >= MIN_OCCUPIED_VOLUME_FOR_ALERT_M3) {
+      isOverCapacity = occupiedSum > capacitySum;
+      isNearFull = utilizationPercent >= thresholdPercent;
+    }
   }
 
   return {

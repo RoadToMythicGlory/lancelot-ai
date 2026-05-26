@@ -50,13 +50,15 @@ function normalizePlaceType(type?: string | null): WarehouseStoragePlaceType {
   return 'other';
 }
 
-// Clamp a 0-100 threshold input. Treat anything out of range or
-// non-finite as "no override" so the warehouse default kicks in.
+// Clamp a 1-100 threshold input. Treat anything out of range,
+// non-finite, or <= 0 as "no override" so the warehouse default kicks
+// in. 0 (or negatives) would mean "alert at any occupancy" which only
+// produces noise, so we never persist them.
 function normalizeThresholdPercent(value: unknown): number | undefined {
   if (value === null || value === undefined) return undefined;
   const num = Number(value);
   if (!Number.isFinite(num)) return undefined;
-  if (num < 0 || num > 100) return undefined;
+  if (num <= 0 || num > 100) return undefined;
   return num;
 }
 

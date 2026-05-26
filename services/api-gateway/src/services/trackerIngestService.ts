@@ -9,6 +9,8 @@ import {
   TrackerLatestPosition,
   ITrackerGateway,
 } from '../models/tracking.models';
+import { Equipment } from '../models/equipment.models';
+import { emitExternalEvent } from './webhookDelivery.service';
 
 const logger = createLogger('tracker-ingest');
 
@@ -20,6 +22,15 @@ let client: MqttClient | null = null;
 const gatewayCache = new Map<string, ITrackerGateway>();
 const GATEWAY_CACHE_TTL_MS = 60_000;
 const gatewayCacheTimestamps = new Map<string, number>();
+
+// Debounce outbound `equipment.location.changed` webhooks per tag. BLE
+// gateways can emit multiple readings per second; partners only need one
+// "the tag moved" notification per WEBHOOK_LOCATION_DEBOUNCE_MS at most.
+const WEBHOOK_LOCATION_DEBOUNCE_MS = parseInt(
+  process.env.EXTERNAL_WEBHOOK_LOCATION_DEBOUNCE_MS || '60000',
+  10,
+);
+const lastLocationWebhookByTagId = new Map<string, number>();
 
 async function resolveGateway(gatewayKey: string): Promise<ITrackerGateway | null> {
   const now = Date.now();
@@ -182,6 +193,31 @@ export async function processIngestPayload(
       pubsub.publish(TRACKER_POSITION_UPDATED, {
         trackerPositionUpdated: enrichedPosition,
       });
+
+      // External webhook fan-out — only for tags bound to shared engineering
+      // equipment, and rate-limited per tag so we don't flood partners.
+      if (tag.equipmentId) {
+        const tagIdStr = tag._id.toString();
+        const last = lastLocationWebhookByTagId.get(tagIdStr) || 0;
+        if (Date.now() - last >= WEBHOOK_LOCATION_DEBOUNCE_MS) {
+          lastLocationWebhookByTagId.set(tagIdStr, Date.now());
+          Equipment.findById(tag.equipmentId)
+            .select({ isSharedEngineeringEquipment: 1 })
+            .lean()
+            .then((eq: any) => {
+              if (eq?.isSharedEngineeringEquipment) {
+                emitExternalEvent('equipment.location.changed', {
+                  equipmentId: tag.equipmentId!.toString(),
+                });
+              }
+            })
+            .catch((err) => {
+              logger.debug('Failed to check shared engineering flag for webhook', {
+                err: String(err),
+              });
+            });
+        }
+      }
     }
 
     processed++;

@@ -40,15 +40,14 @@ import {
 } from '../models/mcrDailyCheck';
 import MCRExchangeGroup, { IMCRExchangeGroup } from '../models/mcrExchangeGroup';
 import { BroadcastEvent } from '../models/broadcast.models';
-import { Equipment, EquipmentAssignment } from '../models/equipment.models';
-import { InternalEquipmentAssignment } from '../models/internalEquipmentAssignment.models';
-import { Warehouse } from '../models/warehouse.models';
+import { EquipmentAssignment } from '../models/equipment.models';
 import { pubsub } from '../utils/pubsub';
 import { requireAuth, requirePermission, withAuth } from '../middleware/auth';
 import { Permission } from '../rbac';
 import { parseMcrDocument } from '../services/mcrDocumentParser';
 import { logMcrAction } from '../services/mcr.service';
 import { ensureShadowMcrEventForBroadcast } from '../services/mcrShadowEvent';
+import { getMcrSharedEngineeringSnapshot } from '../services/sharedEngineeringExport.service';
 
 // Subscription topics
 const MCR_EVENT_CREATED = 'MCR_EVENT_CREATED';
@@ -431,6 +430,10 @@ const resolvers = {
     //   1. Broadcast event assignments (joined back to their MCR shadow
     //      event via `broadcastEventId` so MCR sees the linked shadow).
     //   2. Internal staff assignments (no event target).
+    //
+    // Implementation lives in `sharedEngineeringExport.service` so the
+    // external REST API + outbound webhooks return byte-identical data;
+    // both surfaces share the same aggregator and can never drift.
     mcrSharedEngineeringEquipment: withAuth(async (_: any, args: any, context: any) => {
       // The same endpoint backs both the MCR "ציוד הנדסה שיתופי" tab and the
       // warehouse-side mirror tab, so either permission grants access.
@@ -442,239 +445,9 @@ const resolvers = {
       }
 
       const requestedStatus = typeof args.status === 'string' ? args.status : 'active';
-      const includeAll = requestedStatus === 'all';
-
-      // Step 1: find all equipment that is flagged. Selecting just the
-      // fields we need keeps this responsive even with 4k+ items. The
-      // warehouse/storage-place ids are pulled too so the warehouse page
-      // can show the elaborated "במחסן ראשי – מדף 4" location label.
-      const flaggedEquipment = await Equipment.find({ isSharedEngineeringEquipment: true })
-        .select({
-          _id: 1,
-          name: 1,
-          barcode: 1,
-          category: 1,
-          warehouseId: 1,
-          storagePlaceId: 1,
-          currentLocation: 1,
-        })
-        .lean()
-        .exec();
-
-      if (flaggedEquipment.length === 0) {
-        return { eventAssignments: [], staffAssignments: [], availableEquipment: [] };
-      }
-
-      const equipmentIds = flaggedEquipment.map((e) => e._id);
-      const equipmentById = new Map<string, any>();
-      for (const e of flaggedEquipment) {
-        equipmentById.set(e._id.toString(), e);
-      }
-
-      // Hydrate warehouse + storage place names so we can include them on
-      // both the per-event assignments (where they describe the item's
-      // home base) and the available-in-warehouse rows.
-      const warehouseIdsSet = new Set<string>();
-      for (const e of flaggedEquipment) {
-        if (e.warehouseId) warehouseIdsSet.add(e.warehouseId.toString());
-      }
-      const warehouseDocs = warehouseIdsSet.size > 0
-        ? await Warehouse.find({ _id: { $in: Array.from(warehouseIdsSet) } })
-            .select({ _id: 1, name: 1, storagePlaces: 1 })
-            .lean()
-            .exec()
-        : [];
-      const warehouseById = new Map<string, any>();
-      const storagePlaceById = new Map<string, { warehouseId: string; name: string; code?: string | null }>();
-      for (const w of warehouseDocs) {
-        warehouseById.set(w._id.toString(), w);
-        for (const sp of (w.storagePlaces || [])) {
-          storagePlaceById.set(sp._id.toString(), {
-            warehouseId: w._id.toString(),
-            name: sp.name,
-            code: (sp as any).code ?? null,
-          });
-        }
-      }
-
-      const resolveEquipmentLocation = (eq: any) => {
-        const warehouseId = eq?.warehouseId ? eq.warehouseId.toString() : null;
-        const storagePlaceId = eq?.storagePlaceId ? eq.storagePlaceId.toString() : null;
-        const warehouse = warehouseId ? warehouseById.get(warehouseId) : null;
-        const storagePlace = storagePlaceId ? storagePlaceById.get(storagePlaceId) : null;
-        return {
-          warehouseId: warehouse?._id?.toString?.() || warehouseId,
-          warehouseName: warehouse?.name || null,
-          storagePlaceId: storagePlace ? storagePlaceId : null,
-          storagePlaceName: storagePlace?.name || null,
-          storagePlaceCode: storagePlace?.code || null,
-          currentLocation: eq?.currentLocation || null,
-        };
-      };
-
-      // Step 2: pull both assignment types in parallel.
-      const eventAssignmentFilter: any = { equipmentId: { $in: equipmentIds } };
-      const staffAssignmentFilter: any = { equipmentId: { $in: equipmentIds } };
-      if (!includeAll) {
-        eventAssignmentFilter.status = requestedStatus;
-        staffAssignmentFilter.status = requestedStatus;
-      }
-
-      const [eventAssignments, staffAssignments] = await Promise.all([
-        EquipmentAssignment.find(eventAssignmentFilter)
-          .sort({ assignedAt: -1 })
-          .limit(1000)
-          .lean()
-          .exec(),
-        InternalEquipmentAssignment.find(staffAssignmentFilter)
-          .sort({ assignedAt: -1 })
-          .limit(1000)
-          .lean()
-          .exec(),
-      ]);
-
-      // Step 3: hydrate the linked broadcast events and MCR shadow events
-      // referenced by the event assignments.
-      const broadcastIds = Array.from(
-        new Set(
-          eventAssignments
-            .map((a: any) => a.eventId?.toString?.())
-            .filter(Boolean),
-        ),
-      ).map((id) => new mongoose.Types.ObjectId(id));
-
-      const [broadcastEvents, shadowEvents] = await Promise.all([
-        broadcastIds.length > 0
-          ? BroadcastEvent.find({ _id: { $in: broadcastIds } })
-              .select({
-                _id: 1,
-                title: 1,
-                hebrewTitle: 1,
-                startTime: 1,
-                endTime: 1,
-                venue: 1,
-                location: 1,
-              })
-              .lean()
-              .exec()
-          : Promise.resolve([] as any[]),
-        broadcastIds.length > 0
-          ? MCREvent.find({ broadcastEventId: { $in: broadcastIds } })
-              .select({ _id: 1, title: 1, start: 1, end: 1, broadcastEventId: 1 })
-              .lean()
-              .exec()
-          : Promise.resolve([] as any[]),
-      ]);
-
-      const broadcastById = new Map<string, any>();
-      for (const b of broadcastEvents) {
-        broadcastById.set(b._id.toString(), b);
-      }
-      const shadowByBroadcast = new Map<string, any>();
-      for (const s of shadowEvents) {
-        if (s.broadcastEventId) {
-          shadowByBroadcast.set(s.broadcastEventId.toString(), s);
-        }
-      }
-
-      const mappedEventAssignments = eventAssignments.map((a: any) => {
-        const equipment = equipmentById.get(a.equipmentId?.toString?.() || '');
-        const broadcastId = a.eventId?.toString?.() || '';
-        const broadcast = broadcastById.get(broadcastId);
-        const shadow = shadowByBroadcast.get(broadcastId);
-        return {
-          assignmentId: a._id.toString(),
-          equipmentId: equipment?._id?.toString?.() || a.equipmentId?.toString?.() || '',
-          equipmentName: equipment?.name || a.eventName || 'ציוד',
-          barcode: equipment?.barcode || null,
-          category: equipment?.category || null,
-          quantity: a.quantityAssigned ?? 1,
-          status: a.status || 'active',
-          assignedAt: a.assignedAt ? new Date(a.assignedAt) : null,
-          returnedAt: a.returnedAt ? new Date(a.returnedAt) : null,
-          assignedByName: a.assignedByName || null,
-          notes: a.notes || null,
-          broadcastEventId: broadcastId,
-          broadcastEventTitle:
-            broadcast?.hebrewTitle || broadcast?.title || a.eventName || null,
-          broadcastEventStart: broadcast?.startTime
-            ? new Date(broadcast.startTime)
-            : null,
-          broadcastEventEnd: broadcast?.endTime
-            ? new Date(broadcast.endTime)
-            : null,
-          broadcastEventVenue: broadcast?.venue || null,
-          broadcastEventLocation: broadcast?.location || null,
-          mcrEventId: shadow?._id?.toString?.() || null,
-          mcrEventTitle: shadow?.title || null,
-          mcrEventStart: shadow?.start ? new Date(shadow.start) : null,
-          mcrEventEnd: shadow?.end ? new Date(shadow.end) : null,
-        };
-      });
-
-      const mappedStaffAssignments = staffAssignments.map((a: any) => {
-        const equipment = equipmentById.get(a.equipmentId?.toString?.() || '');
-        return {
-          assignmentId: a._id.toString(),
-          equipmentId: equipment?._id?.toString?.() || a.equipmentId?.toString?.() || '',
-          equipmentName: equipment?.name || 'ציוד',
-          barcode: equipment?.barcode || null,
-          category: equipment?.category || null,
-          quantity: a.quantityAssigned ?? 1,
-          status: a.status || 'active',
-          assignedToType: a.assignedToType || 'internal',
-          assignedToUserId: a.assignedToUserId ? a.assignedToUserId.toString() : null,
-          assignedToName: a.assignedToName || '',
-          assignedToPhone: a.assignedToPhone || null,
-          assignedAt: a.assignedAt ? new Date(a.assignedAt) : null,
-          assignedByName: a.assignedByName || null,
-          returnedAt: a.returnedAt ? new Date(a.returnedAt) : null,
-          notes: a.notes || null,
-        };
-      });
-
-      const activeEventEquipmentIds = new Set(
-        eventAssignments
-          .filter((a: any) => (a.status || 'active') === 'active')
-          .map((a: any) => a.equipmentId?.toString?.())
-          .filter(Boolean),
-      );
-      const activeStaffEquipmentIds = new Set(
-        staffAssignments
-          .filter((a: any) => (a.status || 'active') === 'active')
-          .map((a: any) => a.equipmentId?.toString?.())
-          .filter(Boolean),
-      );
-
-      const availableEquipment = flaggedEquipment
-        .filter((e: any) => {
-          const id = e._id.toString();
-          return !activeEventEquipmentIds.has(id) && !activeStaffEquipmentIds.has(id);
-        })
-        .map((e: any) => {
-          const loc = resolveEquipmentLocation(e);
-          return {
-            equipmentId: e._id.toString(),
-            equipmentName: e.name || 'ציוד',
-            barcode: e.barcode || null,
-            category: e.category || null,
-            quantity: 1,
-            status: 'warehouse',
-            warehouseId: loc.warehouseId,
-            warehouseName: loc.warehouseName,
-            storagePlaceId: loc.storagePlaceId,
-            storagePlaceName: loc.storagePlaceName,
-            storagePlaceCode: loc.storagePlaceCode,
-            currentLocation: loc.currentLocation,
-          };
-        });
-
-      return {
-        eventAssignments: mappedEventAssignments,
-        staffAssignments: mappedStaffAssignments,
-        availableEquipment,
-      };
+      return getMcrSharedEngineeringSnapshot(requestedStatus);
     }),
+
   },
 
   Mutation: {

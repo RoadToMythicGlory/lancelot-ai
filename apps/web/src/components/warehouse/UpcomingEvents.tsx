@@ -103,14 +103,24 @@ function hasWarehouseInterest(event: any): boolean {
   // External Broadcasts is the primary entry point for "we need equipment
   // for this event". Any non-empty equipmentList (item-based) or
   // equipmentRequests (legacy category-based) means the warehouse is on
-  // the hook to fulfill it, so the event must appear in this widget.
+  // the hook to fulfill it, so the event must appear in this widget —
+  // *unless* the broadcast team explicitly marked the event as "not for
+  // us" (the legacy "לא עבורנו" button on the External Broadcasts page
+  // and modal). The merge in `updateBroadcastEventDepartmentData` keeps
+  // the previous equipmentList in place when only `notApplicable: true`
+  // is sent, so we have to gate on the flag explicitly to avoid the
+  // warehouse upcoming list showing events the broadcast team has
+  // already declined to staff.
   const eb = departments?.externalBroadcasts;
   if (eb) {
     const cd = eb.customData || {};
-    if (hasArrayWithLength(cd.equipmentList)) return true;
-    if (hasArrayWithLength(cd.equipmentRequests)) return true;
-    if (hasArrayWithLength(eb.equipmentList)) return true;
-    if (hasArrayWithLength(eb.equipmentRequests)) return true;
+    const notApplicable = eb.notApplicable === true || cd.notApplicable === true;
+    if (!notApplicable) {
+      if (hasArrayWithLength(cd.equipmentList)) return true;
+      if (hasArrayWithLength(cd.equipmentRequests)) return true;
+      if (hasArrayWithLength(eb.equipmentList)) return true;
+      if (hasArrayWithLength(eb.equipmentRequests)) return true;
+    }
   }
 
   // Legacy fallback (older events stored data directly under metadata.warehouseData)
@@ -126,7 +136,13 @@ function hasWarehouseInterest(event: any): boolean {
 
 const UpcomingEvents: React.FC<UpcomingEventsProps> = ({ onEventClick }) => {
   const { message } = App.useApp();
-  const [viewMode, setViewMode] = useState<'day' | 'week'>('day');
+  // Default to "all" — this is the view warehouse staff actually want
+  // when they ask "what does the warehouse owe right now?". The previous
+  // default of "today" silently hid every event whose only warehouse
+  // signal was an equipment request entered on the External Broadcasts
+  // page for a future date. Day/week pagination is still available for
+  // operators who want to focus on a specific shift.
+  const [viewMode, setViewMode] = useState<'all' | 'day' | 'week'>('all');
   const [selectedDate, setSelectedDate] = useState(dayjs());
   const [selectedWeek, setSelectedWeek] = useState(dayjs());
   const [selectedEvent, setSelectedEvent] = useState<BroadcastEvent | null>(null);
@@ -145,20 +161,47 @@ const UpcomingEvents: React.FC<UpcomingEventsProps> = ({ onEventClick }) => {
   const canViewBroadcasts = hasPermission(Permission.BROADCAST_VIEW);
   const canManageWarehouse = hasPermission(Permission.WAREHOUSE_MANAGE);
 
+  // Query window: when the user picks a specific day/week we use that
+  // exact range. The "all" mode pulls a wide retro+forward window so any
+  // event with warehouse interest surfaces, regardless of which specific
+  // day the operator was last looking at. The window deliberately
+  // includes a few weeks of history so equipment requested last week
+  // (but still on the warehouse's plate) doesn't fall off the radar.
+  const ALL_LOOKBACK_DAYS = 14;
+  const ALL_LOOKAHEAD_DAYS = 90;
+
+  const queryRange = useMemo(() => {
+    if (viewMode === 'day') {
+      return {
+        startDate: selectedDate.startOf('day').toISOString(),
+        endDate: selectedDate.endOf('day').toISOString(),
+      };
+    }
+    if (viewMode === 'week') {
+      return {
+        startDate: selectedWeek.startOf('week').toISOString(),
+        endDate: selectedWeek.endOf('week').toISOString(),
+      };
+    }
+    return {
+      startDate: dayjs().subtract(ALL_LOOKBACK_DAYS, 'day').startOf('day').toISOString(),
+      endDate: dayjs().add(ALL_LOOKAHEAD_DAYS, 'day').endOf('day').toISOString(),
+    };
+  }, [viewMode, selectedDate, selectedWeek]);
+
   // Query for broadcast events. Skipped if the user lacks BROADCAST_VIEW
   // so the resolver doesn't throw an "Missing permission" 500 when this
   // widget is rendered defensively (e.g. embedded on a page they can
   // otherwise see).
+  // `cache-and-network` so newly-saved equipment requests from the
+  // External Broadcasts page (separate Apollo query) propagate into this
+  // warehouse view as soon as the underlying entity changes — without
+  // forcing a full page reload.
   const { data, loading, error, refetch } = useQuery(GET_BROADCAST_EVENTS, {
-    variables: {
-      startDate: viewMode === 'day' 
-        ? selectedDate.startOf('day').toISOString()
-        : selectedWeek.startOf('week').toISOString(),
-      endDate: viewMode === 'day'
-        ? selectedDate.endOf('day').toISOString()
-        : selectedWeek.endOf('week').toISOString()
-    },
+    variables: queryRange,
     skip: !canViewBroadcasts,
+    fetchPolicy: 'cache-and-network',
+    nextFetchPolicy: 'cache-first',
   });
 
   const allEvents: BroadcastEvent[] = data?.broadcastEvents || [];
@@ -403,6 +446,97 @@ const UpcomingEvents: React.FC<UpcomingEventsProps> = ({ onEventClick }) => {
     </Card>
   );
 
+  // "All active" view — every event the warehouse is on the hook for
+  // within the wider lookback/lookahead window, grouped by day. This is
+  // the default view because warehouse staff typically want the full
+  // picture, not just today's slice. Events still on the equipment list
+  // but already in the past are shown collapsed under a separate header
+  // so the operator notices stale requests.
+  const renderAllView = () => {
+    const now = dayjs();
+    const upcoming = [...events]
+      .filter((e) => dayjs(e.endTime || e.startTime).isAfter(now.startOf('day')))
+      .sort((a, b) => dayjs(a.startTime).valueOf() - dayjs(b.startTime).valueOf());
+    const past = [...events]
+      .filter((e) => dayjs(e.endTime || e.startTime).isBefore(now.startOf('day')))
+      .sort((a, b) => dayjs(b.startTime).valueOf() - dayjs(a.startTime).valueOf());
+
+    const grouped: Record<string, BroadcastEvent[]> = {};
+    upcoming.forEach((ev) => {
+      const key = dayjs(ev.startTime).format('YYYY-MM-DD');
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(ev);
+    });
+    const dayKeys = Object.keys(grouped).sort();
+
+    return (
+      <div>
+        <div className="flex flex-wrap gap-2 items-center mb-4">
+          <Tag color="blue">
+            {events.length.toLocaleString('he-IL')} אירועים פעילים
+          </Tag>
+          <Tag color="default">
+            חלון: {dayjs().subtract(ALL_LOOKBACK_DAYS, 'day').format('DD/MM')} – {dayjs().add(ALL_LOOKAHEAD_DAYS, 'day').format('DD/MM/YYYY')}
+          </Tag>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            כל האירועים שהמחסן אחראי עליהם — בוקש להם ציוד או יובאו ידנית — ללא הגבלה ליום ספציפי.
+          </Text>
+        </div>
+
+        {loading && events.length === 0 ? (
+          <div className="text-center py-12">
+            <Spin size="large" />
+          </div>
+        ) : events.length === 0 ? (
+          <Empty
+            description="אין אירועים פעילים. ניתן לייבא אירוע מהתכנונית או לבקש ציוד דרך עמוד שידורי חוץ."
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          />
+        ) : (
+          <div>
+            {dayKeys.map((dayKey) => {
+              const day = dayjs(dayKey);
+              const isToday = day.isSame(dayjs(), 'day');
+              return (
+                <Card
+                  key={dayKey}
+                  size="small"
+                  className={`mb-4 ${isToday ? 'border-blue-400' : ''}`}
+                  title={
+                    <div className={`text-base ${isToday ? 'font-bold text-blue-600' : ''}`}>
+                      {day.format('dddd, DD בMMMM YYYY')}
+                      {isToday && <Tag color="blue" className="mr-2">היום</Tag>}
+                    </div>
+                  }
+                >
+                  {grouped[dayKey].map((event) => renderEventCard(event))}
+                </Card>
+              );
+            })}
+
+            {past.length > 0 && (
+              <Card
+                size="small"
+                className="mb-4"
+                title={
+                  <Space>
+                    <ClockCircleOutlined />
+                    <span>אירועים שכבר עברו ועדיין פעילים במחסן ({past.length})</span>
+                  </Space>
+                }
+              >
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  ציוד שלא הוחזר עדיין או בקשות שטרם נסגרו.
+                </Text>
+                <div className="mt-3">{past.map((event) => renderEventCard(event))}</div>
+              </Card>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderDayView = () => (
     <div>
       <div className="flex justify-between items-center mb-6">
@@ -439,8 +573,15 @@ const UpcomingEvents: React.FC<UpcomingEventsProps> = ({ onEventClick }) => {
           <Spin size="large" />
         </div>
       ) : events.length === 0 ? (
-        <Empty 
-          description="אין אירועים מתוכננים ליום זה"
+        <Empty
+          description={
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <span>אין אירועים מתוכננים ליום זה</span>
+              <Button type="link" size="small" onClick={() => setViewMode('all')}>
+                הצג את כל האירועים הפעילים
+              </Button>
+            </Space>
+          }
           image={Empty.PRESENTED_IMAGE_SIMPLE}
         />
       ) : (
@@ -614,7 +755,16 @@ const UpcomingEvents: React.FC<UpcomingEventsProps> = ({ onEventClick }) => {
     const rangeChip =
       viewMode === 'day'
         ? `יום: ${selectedDate.format('DD/MM/YYYY')}`
-        : `שבוע: ${selectedWeek.startOf('week').format('DD/MM/YYYY')} – ${selectedWeek.endOf('week').format('DD/MM/YYYY')}`;
+        : viewMode === 'week'
+        ? `שבוע: ${selectedWeek.startOf('week').format('DD/MM/YYYY')} – ${selectedWeek.endOf('week').format('DD/MM/YYYY')}`
+        : `כל הפעילים: ${dayjs().subtract(ALL_LOOKBACK_DAYS, 'day').format('DD/MM/YYYY')} – ${dayjs().add(ALL_LOOKAHEAD_DAYS, 'day').format('DD/MM/YYYY')}`;
+
+    const viewLabel =
+      viewMode === 'day'
+        ? 'תצוגה יומית'
+        : viewMode === 'week'
+        ? 'תצוגה שבועית'
+        : 'כל האירועים הפעילים';
 
     const liveCount = events.filter((e) => e.live).length;
 
@@ -623,7 +773,7 @@ const UpcomingEvents: React.FC<UpcomingEventsProps> = ({ onEventClick }) => {
       subtitle: 'אירועי שידור שלמחסן יש בהם עניין (בוקש להם ציוד או יובאו ידנית).',
       filenameStem: 'מחסן-אירועים',
       origin: 'מחסן · אירועים קרובים',
-      metaChips: [rangeChip, viewMode === 'day' ? 'תצוגה יומית' : 'תצוגה שבועית'],
+      metaChips: [rangeChip, viewLabel],
       summary: [
         { label: 'סה״כ אירועים', value: events.length, accent: 'events' },
         { label: 'שידורים חיים', value: liveCount, accent: 'requests' },
@@ -674,13 +824,20 @@ const UpcomingEvents: React.FC<UpcomingEventsProps> = ({ onEventClick }) => {
               ייבוא אירוע מהתכנונית
             </Button>
           )}
-          <Button type="primary" onClick={handleToday}>
-            היום
-          </Button>
+          {viewMode !== 'all' && (
+            <Button type="primary" onClick={handleToday}>
+              היום
+            </Button>
+          )}
           <Segmented
             value={viewMode}
-            onChange={(value) => setViewMode(value as 'day' | 'week')}
+            onChange={(value) => setViewMode(value as 'all' | 'day' | 'week')}
             options={[
+              {
+                label: 'כל האירועים הפעילים',
+                value: 'all',
+                icon: <ClockCircleOutlined />,
+              },
               {
                 label: 'תצוגה יומית',
                 value: 'day',
@@ -704,7 +861,11 @@ const UpcomingEvents: React.FC<UpcomingEventsProps> = ({ onEventClick }) => {
         </div>
       )}
 
-      {viewMode === 'day' ? renderDayView() : renderWeekView()}
+      {viewMode === 'all'
+        ? renderAllView()
+        : viewMode === 'day'
+        ? renderDayView()
+        : renderWeekView()}
 
       {/* Warehouse Modal */}
       {selectedEvent && (

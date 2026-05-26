@@ -14,6 +14,7 @@ import {
   detachShadowMcrEventOnBroadcastDelete,
 } from '../services/mcrShadowEvent';
 import { syncSharedEngineeringSnapshotForEvent } from '../services/sharedEngineeringSnapshot';
+import { emitExternalEvent } from '../services/webhookDelivery.service';
 import {
   computeWarehouseOccupancy,
   mapDimensionsToGraphQL,
@@ -1648,6 +1649,10 @@ export const broadcastResolvers = {
         const savedEquipment = await equipment.save();
         console.log('✅ Successfully created equipment:', savedEquipment.id);
 
+        if (savedEquipment.isSharedEngineeringEquipment) {
+          emitExternalEvent('equipment.created', { equipmentId: savedEquipment._id.toString() });
+        }
+
         const warehouseCache = await loadWarehousesForEquipment([savedEquipment]);
 
         // Map to GraphQL format
@@ -1812,6 +1817,10 @@ export const broadcastResolvers = {
 
         console.log('✅ Successfully updated equipment:', id);
 
+        if (updatedEquipment.isSharedEngineeringEquipment) {
+          emitExternalEvent('equipment.updated', { equipmentId: updatedEquipment._id.toString() });
+        }
+
         const warehouseCache = await loadWarehousesForEquipment([updatedEquipment]);
 
         // Map to GraphQL format
@@ -1867,6 +1876,21 @@ export const broadcastResolvers = {
         }
         
         console.log('✅ Successfully deleted equipment:', id);
+
+        // Emit a delete event with a tombstone payload — the lookup-by-id
+        // path would fail because the row is gone, so we provide the
+        // minimal identifying data the partner needs to remove it locally.
+        if (deletedEquipment.isSharedEngineeringEquipment) {
+          emitExternalEvent('equipment.deleted', {
+            data: {
+              id: deletedEquipment._id.toString(),
+              barcode: deletedEquipment.barcode || null,
+              name: deletedEquipment.name || null,
+              deletedAt: new Date().toISOString(),
+            },
+          });
+        }
+
         return true;
       } catch (error) {
         console.error('❌ Error deleting equipment:', error);
@@ -2028,6 +2052,10 @@ export const broadcastResolvers = {
           successfulReturnedKeys.add(equipment._id.toString());
           if (equipment.barcode) successfulReturnedKeys.add(equipment.barcode);
           successfulReturnedKeys.add(requestedId);
+
+          if (equipment.isSharedEngineeringEquipment) {
+            emitExternalEvent('equipment.returned', { equipmentId: equipment._id.toString() });
+          }
 
           if (result.equipment) {
             updatedEquipment.push({
@@ -2502,6 +2530,17 @@ export const broadcastResolvers = {
           throw new Error('Allocation succeeded but assignment record could not be loaded');
         }
 
+        // Notify partner dashboards if this equipment is flagged as shared
+        // engineering. Best-effort — never blocks the response.
+        try {
+          const eq = await Equipment.findById(saved.equipmentId).select({ isSharedEngineeringEquipment: 1 }).lean().exec();
+          if (eq?.isSharedEngineeringEquipment) {
+            emitExternalEvent('equipment.assigned', { equipmentId: saved.equipmentId.toString() });
+          }
+        } catch (err) {
+          log.warn('Failed to emit equipment.assigned webhook', { err: String(err) });
+        }
+
         return {
           id: saved._id.toString(),
           equipmentId: saved.equipmentId.toString(),
@@ -2553,6 +2592,19 @@ export const broadcastResolvers = {
 
         // Stamp lastUsedAt on the equipment
         await Equipment.findByIdAndUpdate(saved.equipmentId, { $set: { lastUsedAt: new Date() } }).exec();
+
+        // If this update marks the assignment returned/completed, notify
+        // external dashboards. Quietly skipped for non-shared equipment.
+        if (saved.status === 'completed' || saved.status === 'cancelled') {
+          try {
+            const eq = await Equipment.findById(saved.equipmentId).select({ isSharedEngineeringEquipment: 1 }).lean().exec();
+            if (eq?.isSharedEngineeringEquipment) {
+              emitExternalEvent('equipment.returned', { equipmentId: saved.equipmentId.toString() });
+            }
+          } catch (err) {
+            log.warn('Failed to emit equipment.returned webhook', { err: String(err) });
+          }
+        }
         
         return {
           id: saved._id.toString(),
@@ -2817,6 +2869,10 @@ export const broadcastResolvers = {
         
         await equipment.save();
 
+        if (equipment.isSharedEngineeringEquipment) {
+          emitExternalEvent('equipment.updated', { equipmentId: equipment._id.toString() });
+        }
+
         // Create history entry
         const history = new EquipmentHistory({
           equipmentId: equipment._id,
@@ -2881,6 +2937,10 @@ export const broadcastResolvers = {
         equipment.status = equipment.quantityAvailable > 0 ? 'available' : 'assigned';
         
         await equipment.save();
+
+        if (equipment.isSharedEngineeringEquipment) {
+          emitExternalEvent('equipment.updated', { equipmentId: equipment._id.toString() });
+        }
 
         // Create history entry — the optional `notes` is the warehouse-user
         // explanation for why the equipment is back in service (e.g. "תוקן",

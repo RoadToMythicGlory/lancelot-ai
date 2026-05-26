@@ -75,6 +75,7 @@ router.get('/healthz', (_req: Request, res: Response) => {
 // OpenAPI spec — public so partners can download it without an API key.
 router.get('/openapi.yaml', (_req: Request, res: Response) => {
   const candidates = [
+    path.join(__dirname, '..', 'openapi', 'external.yaml'),
     path.join(__dirname, '..', '..', 'openapi', 'external.yaml'),
     path.join(__dirname, '..', '..', '..', 'openapi', 'external.yaml'),
     path.join(process.cwd(), 'services', 'api-gateway', 'openapi', 'external.yaml'),

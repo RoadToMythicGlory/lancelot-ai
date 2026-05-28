@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  Lancelot service watchdog (v3)
+#  Lancelot service watchdog (v4)
 #
 #  Runs every minute via cron. Performs in order:
 #
-#   0. Anti-toolkit IOC sweep  — NEW.
+#   0. Anti-toolkit IOC sweep.
 #      Hunts for the TOKET / gsocket / irqbalance-helper / .config dropper
 #      footprint from /home/lancjvis/report.txt. If anything matches:
 #        - SIGTERM/SIGKILL any matching process,
@@ -12,7 +12,9 @@
 #        - strip the dropper line from ~/.bashrc and shell-startup files,
 #        - strip the "__sp" cron entry,
 #        - write a one-shot alert into ~/lancelot-ai/deploy-logs/security-alert-<TS>.log
-#          so the next interactive login surfaces it.
+#          so the next interactive login surfaces it,
+#        - push a Telegram notification via ./lancelot-telegram-alert.sh
+#          (rate-limited to one message per 5 minutes by default).
 #      This is the first thing the watchdog does so the attacker's window of
 #      operation can never exceed one cron tick (~60 seconds).
 #
@@ -189,6 +191,8 @@ sweep_toolkit() {
       printf '  killed processes: %d\n' "$killed"
       printf '  removed items:    %d\n' "$removed"
       printf '\nFull detail: %s\n' "$SECURITY_LOG"
+      printf '\nRecent sweep log:\n'
+      tail -40 "$SECURITY_LOG" 2>/dev/null | sed 's/^/  /'
       printf '\nRecommended response:\n'
       printf '  1. Inspect %s\n' "$SECURITY_LOG"
       printf '  2. Re-rotate cPanel password + audit ~/.ssh/authorized_keys\n'
@@ -196,6 +200,17 @@ sweep_toolkit() {
       printf '     still leaking and rotate Mongo + JWT + GitHub deploy key.\n'
     } > "$alert"
     log "ANTI-TOOLKIT alert raised: killed=$killed removed=$removed alert=$alert"
+
+    # Push to Telegram. The helper exits 1 silently when the operator hasn't
+    # configured an env file yet, so this is safe to ship before they create
+    # ~/.config/lancelot/telegram-alert.env.
+    local tg_helper="$APP_ROOT/lancelot-telegram-alert.sh"
+    if [ -x "$tg_helper" ]; then
+      local subject="Lancelot re-infection blocked (killed=$killed removed=$removed)"
+      local recent
+      recent=$(tail -20 "$SECURITY_LOG" 2>/dev/null || true)
+      "$tg_helper" "$subject" "$recent" >> "$LOG_FILE" 2>&1 || true
+    fi
   fi
 }
 

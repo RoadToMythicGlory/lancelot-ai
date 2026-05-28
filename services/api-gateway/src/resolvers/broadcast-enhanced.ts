@@ -886,131 +886,20 @@ export const enhancedBroadcastResolvers = {
         // Extract the department-specific data and custom data
         const departmentData = data[department] || {};
         const customData = data.customData || {};
-        
-        // Handle warehouse equipment synchronization
-        if (department === 'warehouse' && data.warehouse?.assignedItems) {
-          console.log('🔄 Syncing equipment status for warehouse assignment...');
-          
-          // Get previously assigned items
-          const previousAssignedItems = departments.warehouse?.assignedItems || [];
-          const previousEquipmentIds = previousAssignedItems.map((item: any) => item.equipmentId);
-          const newEquipmentIds = data.warehouse.assignedItems.map((item: any) => item.equipmentId);
-          
-          // Find newly assigned equipment (in new list but not in previous)
-          const newlyAssigned = newEquipmentIds.filter((id: string) => !previousEquipmentIds.includes(id));
-          
-          // Find unassigned equipment (in previous list but not in new)
-          const unassigned = previousEquipmentIds.filter((id: string) => !newEquipmentIds.includes(id));
-          
-          // Update status for newly assigned equipment
-          for (const equipmentId of newlyAssigned) {
-            const equipment = await Equipment.findById(equipmentId).exec();
-            if (equipment) {
-              console.log(`📦 Assigning equipment: ${equipment.name} (${equipment.barcode})`);
-              
-              // Update quantities
-              if (equipment.quantityAvailable > 0) {
-                equipment.quantityAvailable -= 1;
-                equipment.quantityAssigned += 1;
-                
-                // Update status if no more available
-                if (equipment.quantityAvailable === 0) {
-                  equipment.status = 'assigned';
-                }
-                
-                await equipment.save();
-                console.log(`   Updated: Available=${equipment.quantityAvailable}, Assigned=${equipment.quantityAssigned}, Status=${equipment.status}`);
-                
-                // Find the assigned item details
-                const assignedItem = data.warehouse.assignedItems.find((item: any) => item.equipmentId === equipmentId);
-                
-                // Create equipment assignment record
-                const assignment = new EquipmentAssignment({
-                  equipmentId: equipment._id,
-                  eventId: existingEvent._id,
-                  eventName: existingEvent.title,
-                  startDate: existingEvent.startTime,
-                  endDate: existingEvent.endTime,
-                  location: existingEvent.location || existingEvent.venue,
-                  status: 'active',
-                  quantityAssigned: assignedItem?.quantity || 1,
-                  assignedBy: data.customData?.updatedBy || 'system',
-                  assignedByName: data.customData?.updatedByName || 'System',
-                  notes: assignedItem?.notes
-                });
-                await assignment.save();
-                
-                // Create history record
-                const historyRecord = new EquipmentHistory({
-                  equipmentId: equipment._id,
-                  eventId: existingEvent._id,
-                  eventName: existingEvent.title,
-                  date: new Date(),
-                  action: 'assigned',
-                  quantity: assignedItem?.quantity || 1,
-                  performedBy: data.customData?.updatedBy || 'system',
-                  performedByName: data.customData?.updatedByName || 'System',
-                  notes: assignedItem?.notes
-                });
-                await historyRecord.save();
-              } else {
-                console.warn(`⚠️ Equipment ${equipment.name} has no available quantity`);
-              }
-            }
-          }
-          
-          // Update status for unassigned equipment
-          for (const equipmentId of unassigned) {
-            const equipment = await Equipment.findById(equipmentId).exec();
-            if (equipment) {
-              console.log(`📦 Unassigning equipment: ${equipment.name} (${equipment.barcode})`);
-              
-              // Update quantities
-              if (equipment.quantityAssigned > 0) {
-                equipment.quantityAssigned -= 1;
-                equipment.quantityAvailable += 1;
-                
-                // Update status if all returned
-                if (equipment.quantityAssigned === 0) {
-                  equipment.status = 'available';
-                }
-                
-                await equipment.save();
-                console.log(`   Updated: Available=${equipment.quantityAvailable}, Assigned=${equipment.quantityAssigned}, Status=${equipment.status}`);
-                
-                // Find and update the assignment record
-                const assignment = await EquipmentAssignment.findOne({
-                  equipmentId: equipment._id,
-                  eventId: existingEvent._id,
-                  status: 'active'
-                }).exec();
-                
-                if (assignment) {
-                  assignment.status = 'completed';
-                  assignment.returnedAt = new Date();
-                  assignment.returnedBy = data.customData?.updatedBy || 'system';
-                  assignment.returnedByName = data.customData?.updatedByName || 'System';
-                  await assignment.save();
-                }
-                
-                // Create history record for return
-                const historyRecord = new EquipmentHistory({
-                  equipmentId: equipment._id,
-                  eventId: existingEvent._id,
-                  eventName: existingEvent.title,
-                  date: new Date(),
-                  action: 'returned',
-                  quantity: 1,
-                  performedBy: data.customData?.updatedBy || 'system',
-                  performedByName: data.customData?.updatedByName || 'System',
-                  notes: 'Equipment returned from event'
-                });
-                await historyRecord.save();
-              }
-            }
-          }
-        }
-        
+
+        // NOTE: The warehouse branch of this resolver used to ALSO mutate
+        // `Equipment.quantityAvailable`/`quantityAssigned` and create
+        // `EquipmentAssignment` documents inline whenever `data.warehouse.assignedItems`
+        // changed. That ran in addition to the modal's own
+        // `createEquipmentAssignment` -> `allocateEquipment` call (which already
+        // does an atomic `$inc`) and the modal's `updateWarehouseEquipmentQuantity`
+        // call, producing 2-3× over-counts on every scan and leaving orphan
+        // `quantityAssigned` units after a return.
+        //
+        // The single source of truth for stock is now:
+        //   createEquipmentAssignment / updateEquipmentAssignment / returnEquipmentFromEvent
+        // This resolver only persists event metadata.
+
         // Merge department data with custom data
         departments[department] = {
           ...departments[department],

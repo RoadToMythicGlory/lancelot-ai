@@ -1392,130 +1392,19 @@ export const broadcastResolvers = {
           departmentData = { ...data.closedCaptions, ...data.customData };
         } else if (data.warehouse) {
           departmentData = { ...data.warehouse, ...data.customData };
-          
-          // Sync equipment status when warehouse assigns equipment
-          if (data.warehouse.assignedItems && Array.isArray(data.warehouse.assignedItems)) {
-            console.log('🔄 Syncing equipment status for warehouse assignment...');
-            
-            // Get previously assigned items
-            const previousAssignedItems = metadata.departments.warehouse?.assignedItems || [];
-            const previousEquipmentIds = previousAssignedItems.map((item: any) => item.equipmentId);
-            const newEquipmentIds = data.warehouse.assignedItems.map((item: any) => item.equipmentId);
-            
-            // Find newly assigned equipment (in new list but not in previous)
-            const newlyAssigned = newEquipmentIds.filter((id: string) => !previousEquipmentIds.includes(id));
-            
-            // Find unassigned equipment (in previous list but not in new)
-            const unassigned = previousEquipmentIds.filter((id: string) => !newEquipmentIds.includes(id));
-            
-                      // Update status for newly assigned equipment
-          for (const equipmentId of newlyAssigned) {
-            const equipment = await Equipment.findById(equipmentId).exec();
-            if (equipment) {
-              console.log(`📦 Assigning equipment: ${equipment.name} (${equipment.barcode})`);
-              
-              // Update quantities
-              if (equipment.quantityAvailable > 0) {
-                equipment.quantityAvailable -= 1;
-                equipment.quantityAssigned += 1;
-                
-                // Update status if no more available
-                if (equipment.quantityAvailable === 0) {
-                  equipment.status = 'assigned';
-                }
-                
-                await equipment.save();
-                console.log(`   Updated: Available=${equipment.quantityAvailable}, Assigned=${equipment.quantityAssigned}, Status=${equipment.status}`);
-                
-                // Find the assigned item details
-                const assignedItem = data.warehouse.assignedItems.find((item: any) => item.equipmentId === equipmentId);
-                
-                // Create equipment assignment record
-                const assignment = new EquipmentAssignment({
-                  equipmentId: equipment._id,
-                  eventId: event._id,
-                  eventName: event.title,
-                  startDate: event.startTime,
-                  endDate: event.endTime,
-                  location: event.location || event.venue,
-                  status: 'active',
-                  quantityAssigned: assignedItem?.quantity || 1,
-                  assignedBy: data.customData?.updatedBy || 'system',
-                  assignedByName: data.customData?.updatedByName || 'System',
-                  notes: assignedItem?.notes
-                });
-                await assignment.save();
-                
-                // Create history record
-                const historyRecord = new EquipmentHistory({
-                  equipmentId: equipment._id,
-                  eventId: event._id,
-                  eventName: event.title,
-                  date: new Date(),
-                  action: 'assigned',
-                  quantity: assignedItem?.quantity || 1,
-                  performedBy: data.customData?.updatedBy || 'system',
-                  performedByName: data.customData?.updatedByName || 'System',
-                  notes: assignedItem?.notes
-                });
-                await historyRecord.save();
-              } else {
-                console.warn(`⚠️ Equipment ${equipment.name} has no available quantity`);
-              }
-            }
-          }
-            
-                      // Update status for unassigned equipment
-          for (const equipmentId of unassigned) {
-            const equipment = await Equipment.findById(equipmentId).exec();
-            if (equipment) {
-              console.log(`📦 Unassigning equipment: ${equipment.name} (${equipment.barcode})`);
-              
-              // Update quantities
-              if (equipment.quantityAssigned > 0) {
-                equipment.quantityAssigned -= 1;
-                equipment.quantityAvailable += 1;
-                
-                // Update status if all returned
-                if (equipment.quantityAssigned === 0) {
-                  equipment.status = 'available';
-                }
-                
-                await equipment.save();
-                console.log(`   Updated: Available=${equipment.quantityAvailable}, Assigned=${equipment.quantityAssigned}, Status=${equipment.status}`);
-                
-                // Find and update the assignment record
-                const assignment = await EquipmentAssignment.findOne({
-                  equipmentId: equipment._id,
-                  eventId: event._id,
-                  status: 'active'
-                }).exec();
-                
-                if (assignment) {
-                  assignment.status = 'completed';
-                  assignment.returnedAt = new Date();
-                  assignment.returnedBy = data.customData?.updatedBy || 'system';
-                  assignment.returnedByName = data.customData?.updatedByName || 'System';
-                  await assignment.save();
-                }
-                
-                // Create history record for return
-                const historyRecord = new EquipmentHistory({
-                  equipmentId: equipment._id,
-                  eventId: event._id,
-                  eventName: event.title,
-                  date: new Date(),
-                  action: 'returned',
-                  quantity: 1,
-                  performedBy: data.customData?.updatedBy || 'system',
-                  performedByName: data.customData?.updatedByName || 'System',
-                  notes: 'Equipment returned from event'
-                });
-                await historyRecord.save();
-              }
-            }
-          }
-          }
+
+          // NOTE: The warehouse branch of this resolver used to ALSO mutate
+          // `Equipment.quantityAvailable`/`quantityAssigned` and create
+          // `EquipmentAssignment` documents inline whenever `data.warehouse.assignedItems`
+          // changed. That ran in addition to the modal's own
+          // `createEquipmentAssignment` -> `allocateEquipment` call (which already
+          // does an atomic `$inc`) and the modal's `updateWarehouseEquipmentQuantity`
+          // call, producing 2-3× over-counts on every scan and leaving orphan
+          // `quantityAssigned` units after a return.
+          //
+          // The single source of truth for stock is now:
+          //   createEquipmentAssignment / updateEquipmentAssignment / returnEquipmentFromEvent
+          // This resolver only persists event metadata.
         } else if (data.rundown) {
           departmentData = { ...data.rundown, ...data.customData };
         } else if (data.data) {
@@ -1934,48 +1823,69 @@ export const broadcastResolvers = {
         // event metadata — we clean them out instead of failing the request.
         let staleReferenceCleanups = 0;
 
-        // Check whether an equipment id / barcode is still referenced anywhere
-        // in the event metadata the UI uses to populate the return modal. We
-        // use this to distinguish a legitimate failure (the operator asked to
-        // return something the system has no record of) from a stale-metadata
-        // orphan (the item is only "assigned" inside the event document and
-        // can be safely scrubbed).
-        const isReferencedInEventMetadata = (
-          eq: { _id: any; barcode?: string | null },
-          alsoCheck: string,
-        ): boolean => {
-          const eqId = eq._id?.toString?.() ?? String(eq._id);
-          const barcode = eq.barcode || '';
-          const candidates = new Set<string>([eqId, alsoCheck]);
-          if (barcode) candidates.add(barcode);
+        // Self-heal helper for stuck `quantityAssigned` counters.
+        //
+        // Background: a previous version of this codebase had three different
+        // code paths all incrementing `quantityAssigned` for the same scan
+        // (updateBroadcastEventDepartmentData inline block + createEquipmentAssignment
+        // -> allocateEquipment + updateWarehouseEquipmentQuantity). That left
+        // documents with `quantityAssigned > sum(active assignments)` and only
+        // ONE return could ever match. Every subsequent return reported
+        // `no_active_assignment` and the counter never came back to zero —
+        // the warehouse permanently saw the item as "still assigned".
+        //
+        // The fix above removed the duplicate increment paths, but pre-existing
+        // documents in the wild can still be in that broken state. When the
+        // hardened service tells us there's no active assignment to claim, we
+        // recompute the canonical `quantityAssigned` from the sum of active
+        // `EquipmentAssignment` documents and patch the Equipment doc to match.
+        // No assignment exists for this event → recompute is safe; the only
+        // possible adjustment is *down*, never up.
+        const reconcileEquipmentCountersFromActiveAssignments = async (
+          equipmentObjectId: mongoose.Types.ObjectId,
+        ): Promise<{ adjusted: boolean; newAssigned: number; newAvailable: number; newStatus: string } | null> => {
+          const eq = await Equipment.findById(equipmentObjectId).exec();
+          if (!eq) return null;
 
-          const matchesItem = (item: any): boolean => {
-            if (!item) return false;
-            const id = item.equipmentId || item.id;
-            const bc = item.barcode;
-            return (
-              (typeof id === 'string' && candidates.has(id)) ||
-              (typeof bc === 'string' && candidates.has(bc))
-            );
-          };
+          // Sum quantityAssigned across all still-active assignments globally
+          // for this equipment. We use a global sum (not just this event)
+          // because `quantityAssigned` is itself a global counter — it should
+          // always equal the total active outstanding across all events.
+          const agg = await EquipmentAssignment.aggregate([
+            { $match: { equipmentId: equipmentObjectId, status: 'active' } },
+            { $group: { _id: null, total: { $sum: '$quantityAssigned' } } },
+          ]).exec();
+          const actualAssigned = Math.max(0, agg?.[0]?.total ?? 0);
 
-          const eventDoc = event as any;
-
-          if (Array.isArray(eventDoc.equipment_list)) {
-            if (eventDoc.equipment_list.some((v: any) => typeof v === 'string' && candidates.has(v))) {
-              return true;
-            }
+          if (eq.quantityAssigned === actualAssigned) {
+            return { adjusted: false, newAssigned: eq.quantityAssigned, newAvailable: eq.quantityAvailable, newStatus: eq.status };
           }
 
-          const lists: any[][] = [
-            eventDoc?.metadata?.departments?.warehouse?.assignedItems,
-            eventDoc?.metadata?.departments?.warehouse?.customData?.assignedItems,
-            eventDoc?.metadata?.warehouseData?.assignedItems,
-            eventDoc?.metadata?.warehouseData?.customData?.assignedItems,
-            eventDoc?.metadata?.departments?.externalBroadcasts?.equipmentList,
-            eventDoc?.metadata?.departments?.externalBroadcasts?.customData?.equipmentList,
-          ];
-          return lists.some((arr) => Array.isArray(arr) && arr.some(matchesItem));
+          const newAvailable = Math.max(0, eq.quantityTotal - actualAssigned);
+          const newStatus = actualAssigned === 0 ? 'available' : (newAvailable === 0 ? 'assigned' : eq.status);
+
+          await Equipment.updateOne(
+            { _id: equipmentObjectId },
+            {
+              $set: {
+                quantityAssigned: actualAssigned,
+                quantityAvailable: newAvailable,
+                status: newStatus,
+                lastUsedAt: new Date(),
+              },
+            },
+          ).exec();
+
+          log.warn('Reconciled stuck equipment counters from active assignments', {
+            equipmentId: equipmentObjectId.toString(),
+            previousAssigned: eq.quantityAssigned,
+            actualAssigned,
+            previousAvailable: eq.quantityAvailable,
+            newAvailable,
+            quantityTotal: eq.quantityTotal,
+          });
+
+          return { adjusted: true, newAssigned: actualAssigned, newAvailable, newStatus };
         };
 
         for (const requestedId of equipmentIds) {
@@ -2003,22 +1913,30 @@ export const broadcastResolvers = {
           });
 
           if (!result.success) {
-            // Stale-metadata recovery: the equipment has no active assignment
-            // for this event, but the event document still references it.
-            // The UI builds its returnable list by merging metadata refs with
-            // active assignments, so without this branch the operator would
-            // be permanently stuck — every retry would produce "1 failed"
-            // and the orphan reference would never go away. Treat this as a
-            // metadata cleanup so the existing pruning code below removes
-            // the dangling reference.
-            if (
-              result.reason === 'no_active_assignment' &&
-              isReferencedInEventMetadata(equipment, requestedId)
-            ) {
+            // No active assignment to claim: this happens both for legitimate
+            // stale-metadata orphans (event doc still references something the
+            // warehouse already cleaned up) AND for documents stuck with an
+            // inflated `quantityAssigned` counter left over from the old
+            // multi-path-increment bug. Either way the right thing to do is
+            // reconcile the equipment counters against the actual sum of
+            // active assignments and let the existing metadata-prune logic
+            // below scrub any dangling references from the event document.
+            //
+            // The previous gated path (`isReferencedInEventMetadata`) made the
+            // operator permanently stuck once event metadata was pruned by a
+            // partially-successful return, because every retry hit
+            // `no_active_assignment` with no metadata ref left and the orphan
+            // counter never came back to zero. We no longer gate on metadata.
+            if (result.reason === 'no_active_assignment') {
+              const reconciled = await reconcileEquipmentCountersFromActiveAssignments(
+                equipment._id as mongoose.Types.ObjectId,
+              );
+
               log.info('Cleaning up stale equipment reference (no active assignment)', {
                 equipmentId: equipment._id.toString(),
                 barcode: equipment.barcode,
                 eventId: (event._id as mongoose.Types.ObjectId).toString(),
+                reconciled: reconciled?.adjusted ?? false,
               });
 
               successfulReturnedKeys.add(equipment._id.toString());
@@ -2028,9 +1946,9 @@ export const broadcastResolvers = {
 
               updatedEquipment.push({
                 id: equipment._id.toString(),
-                status: equipment.status,
-                quantityAvailable: equipment.quantityAvailable,
-                quantityAssigned: equipment.quantityAssigned,
+                status: reconciled?.newStatus ?? equipment.status,
+                quantityAvailable: reconciled?.newAvailable ?? equipment.quantityAvailable,
+                quantityAssigned: reconciled?.newAssigned ?? equipment.quantityAssigned,
               });
               continue;
             }

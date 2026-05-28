@@ -419,6 +419,16 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
               });
             }
           } else {
+            // `createEquipmentAssignment` goes through `allocateEquipment`
+            // which already decrements `quantityAvailable` and increments
+            // `quantityAssigned` atomically. The redundant
+            // `updateEquipmentQuantity` call that used to live here would
+            // bump the counter a SECOND time (and combined with the inline
+            // sync that used to run inside `updateBroadcastEventDepartmentData`
+            // tripled it). Returns could only ever undo one of those bumps
+            // per call, leaving orphan `quantityAssigned > 0` units behind
+            // every event. Do not add it back without first stripping the
+            // increment from `allocateEquipment`.
             await createEquipmentAssignment({
               variables: {
                 input: {
@@ -430,13 +440,6 @@ const WarehouseModal: React.FC<WarehouseModalProps> = ({ visible, event, onClose
                   scheduledPickupAt: event.startTime,
                   scheduledReturnAt: event.endTime
                 }
-              }
-            });
-            
-            await updateEquipmentQuantity({
-              variables: {
-                id: equipmentId,
-                quantityChange: items.length
               }
             });
           }

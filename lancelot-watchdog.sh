@@ -1,8 +1,20 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  Lancelot service watchdog (v2)
+#  Lancelot service watchdog (v3)
 #
 #  Runs every minute via cron. Performs in order:
+#
+#   0. Anti-toolkit IOC sweep  — NEW.
+#      Hunts for the TOKET / gsocket / irqbalance-helper / .config dropper
+#      footprint from /home/lancjvis/report.txt. If anything matches:
+#        - SIGTERM/SIGKILL any matching process,
+#        - rm the malware files,
+#        - strip the dropper line from ~/.bashrc and shell-startup files,
+#        - strip the "__sp" cron entry,
+#        - write a one-shot alert into ~/lancelot-ai/deploy-logs/security-alert-<TS>.log
+#          so the next interactive login surfaces it.
+#      This is the first thing the watchdog does so the attacker's window of
+#      operation can never exceed one cron tick (~60 seconds).
 #
 #   1. Self-heal Passenger nodevenv  — CloudLinux periodically prunes the
 #      ~/nodevenv/<app>/22/bin/{activate,node} symlinks after package
@@ -36,6 +48,7 @@ API_ROOT=$APP_ROOT/services/api-gateway
 LOG_DIR=$APP_ROOT/deploy-logs
 LOCK_DIR=/tmp/lancelot-watchdog.lock
 LOG_FILE=$LOG_DIR/watchdog.log
+SECURITY_LOG=$LOG_DIR/anti-toolkit.log
 CLOUDLINUX_SELECTOR=/usr/sbin/cloudlinux-selector
 NODE_VERSION=22.22.2
 
@@ -48,6 +61,145 @@ trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 log() {
   printf '[%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*" >> "$LOG_FILE"
 }
+
+sec_log() {
+  printf '[%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*" >> "$SECURITY_LOG"
+}
+
+# ===========================================================================
+# Phase 0 — anti-toolkit IOC sweep
+# ===========================================================================
+#
+# Canonical IOC list, derived from /home/lancjvis/report.txt (the May 22
+# incident report). Anything appearing in this list is malware by definition
+# in this account — there is no legitimate reason for these paths to exist
+# under $HOME on a production CloudLinux box.
+TOOLKIT_FILES=(
+  "$USER_HOME/.local/lib/.config"
+  "$USER_HOME/.local/lib/.ts"
+  "$USER_HOME/.local/sbin/blitz"
+  "$USER_HOME/.local/sbin/terminate"
+  "$USER_HOME/.local/sbin/terminate-engine"
+  "$USER_HOME/.local/sbin/terminate-helper"
+  "$USER_HOME/.local/sbin/terminate-runner"
+  "$USER_HOME/.local/sbin/gs-mount"
+  "$USER_HOME/.local/sbin/gs-sftp"
+  "$USER_HOME/.local/sbin/gs_funcs"
+  "$USER_HOME/.local/sbin/toket_dso.so.0"
+  "$USER_HOME/.local/sbin/toket_uchroot_dso.so.0"
+  "$USER_HOME/.local/bin/irqbalance-helper"
+  "$USER_HOME/.local/bin/terminate"
+)
+TOOLKIT_DIRS=(
+  "$USER_HOME/.local/config/irqbalance-helper"
+)
+# Glob patterns covering future variants of the same toolkit. Conservative —
+# only matches under .local/{bin,sbin} so it can't ever delete user data.
+TOOLKIT_GLOBS=(
+  "$USER_HOME/.local/sbin/toket_*.so*"
+  "$USER_HOME/.local/sbin/gs-*"
+  "$USER_HOME/.local/sbin/terminate-*"
+  "$USER_HOME/.local/bin/terminate-*"
+  "$USER_HOME/.local/bin/irqbalance-helper*"
+)
+# /tmp dropper lockfiles / state.
+TMP_GLOBS=(
+  "/tmp/.config-*"
+  "/tmp/.ts"
+)
+
+# Regex pattern matched against `ps -fu lancjvis` to identify live malware.
+# Anchored on absolute paths or distinctive binary names so it can't trip on
+# normal user processes (`node dist/main.js`, etc.).
+PROC_PATTERN='irqbalance-helper|terminate-(engine|helper|runner)|/blitz( |$)|gs-mount|gs-sftp|toket_|\.local/lib/\.config|\.local/(bin|sbin)/terminate( |$)'
+
+sweep_toolkit() {
+  local removed=0
+  local killed=0
+  local pids
+  pids=$(ps -fu "$USER_NAME" 2>/dev/null | grep -E "$PROC_PATTERN" | grep -v grep | awk '{print $2}')
+  if [ -n "$pids" ]; then
+    sec_log "killing malware pids: $(echo $pids | tr '\n' ' ')"
+    kill -TERM $pids 2>/dev/null || true
+    sleep 1
+    kill -KILL $pids 2>/dev/null || true
+    killed=$(echo "$pids" | wc -w)
+  fi
+
+  for f in "${TOOLKIT_FILES[@]}"; do
+    if [ -e "$f" ] || [ -L "$f" ]; then
+      rm -f "$f" 2>/dev/null && { sec_log "removed file: $f"; removed=$((removed+1)); }
+    fi
+  done
+  for d in "${TOOLKIT_DIRS[@]}"; do
+    if [ -d "$d" ]; then
+      rm -rf "$d" 2>/dev/null && { sec_log "removed dir:  $d"; removed=$((removed+1)); }
+    fi
+  done
+  for pat in "${TOOLKIT_GLOBS[@]}"; do
+    # shellcheck disable=SC2086
+    for f in $pat; do
+      if [ -e "$f" ] || [ -L "$f" ]; then
+        rm -f "$f" 2>/dev/null && { sec_log "removed glob: $f"; removed=$((removed+1)); }
+      fi
+    done
+  done
+  for pat in "${TMP_GLOBS[@]}"; do
+    # shellcheck disable=SC2086
+    for f in $pat; do
+      if [ -e "$f" ]; then
+        rm -f "$f" 2>/dev/null && { sec_log "removed /tmp: $f"; removed=$((removed+1)); }
+      fi
+    done
+  done
+
+  # Strip the .config invocation line from shell-startup files.
+  local rc
+  for rc in "$USER_HOME/.bashrc" "$USER_HOME/.bash_profile" "$USER_HOME/.profile" "$USER_HOME/.bash_login"; do
+    [ -f "$rc" ] || continue
+    if grep -qE '\.local/lib/\.config' "$rc" 2>/dev/null; then
+      cp "$rc" "$rc.before-watchdog-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
+      # Drop any line that mentions the dropper path.
+      sed -i.bak '/\.local\/lib\/\.config/d' "$rc"
+      rm -f "$rc.bak" 2>/dev/null || true
+      sec_log "scrubbed dropper line from $rc"
+      removed=$((removed+1))
+    fi
+  done
+
+  # Strip the malicious crontab line if it reappears.
+  if crontab -l 2>/dev/null | grep -qE '__sp|\.local/lib/\.config'; then
+    local backup="/tmp/cron.before.watchdog.$(date +%Y%m%d-%H%M%S)"
+    crontab -l > "$backup" 2>/dev/null || true
+    local cleaned
+    cleaned=$(crontab -l 2>/dev/null | grep -vE '__sp|\.local/lib/\.config' || true)
+    if [ -n "$cleaned" ]; then
+      printf '%s\n' "$cleaned" | crontab -
+    else
+      printf '' | crontab -
+    fi
+    sec_log "scrubbed __sp cron entry (backup at $backup)"
+    removed=$((removed+1))
+  fi
+
+  if [ "$removed" -gt 0 ] || [ "$killed" -gt 0 ]; then
+    local alert="$LOG_DIR/security-alert-$(date +%Y%m%d-%H%M%S).log"
+    {
+      printf 'Lancelot anti-toolkit watchdog tripped at %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+      printf '  killed processes: %d\n' "$killed"
+      printf '  removed items:    %d\n' "$removed"
+      printf '\nFull detail: %s\n' "$SECURITY_LOG"
+      printf '\nRecommended response:\n'
+      printf '  1. Inspect %s\n' "$SECURITY_LOG"
+      printf '  2. Re-rotate cPanel password + audit ~/.ssh/authorized_keys\n'
+      printf '  3. If this is the second alert in 30 days, assume credentials are\n'
+      printf '     still leaking and rotate Mongo + JWT + GitHub deploy key.\n'
+    } > "$alert"
+    log "ANTI-TOOLKIT alert raised: killed=$killed removed=$removed alert=$alert"
+  fi
+}
+
+sweep_toolkit
 
 # ---------------------------------------------------------------------------
 # ensure_venv  $app_rel  $startup  $passenger_log
@@ -231,6 +383,16 @@ import sys
 p = Path(sys.argv[1])
 if p.stat().st_size > 1048576:
     lines = p.read_text(errors='replace').splitlines()[-1000:]
+    p.write_text('\n'.join(lines) + '\n')
+PY
+fi
+if [ -f "$SECURITY_LOG" ]; then
+  python3 - "$SECURITY_LOG" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+if p.stat().st_size > 1048576:
+    lines = p.read_text(errors='replace').splitlines()[-2000:]
     p.write_text('\n'.join(lines) + '\n')
 PY
 fi

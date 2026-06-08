@@ -17,7 +17,7 @@ import dayjs from 'dayjs';
 import isoWeek from 'dayjs/plugin/isoWeek';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
-import { useQuery, useMutation } from '@apollo/client';
+import { useApolloClient, useQuery, useMutation } from '@apollo/client';
 import { GET_BROADCAST_EVENTS, GET_EMPLOYEES_BY_DEPARTMENT, GET_DEPARTMENTS, GET_EXTERNAL_BROADCAST_PRESETS, GET_VENUES, GET_WAREHOUSE_EQUIPMENT_FOR_PICKER } from '@/graphql/queries';
 import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA, CREATE_EXTERNAL_BROADCAST_PRESET, UPDATE_EXTERNAL_BROADCAST_PRESET, DELETE_EXTERNAL_BROADCAST_PRESET } from '@/graphql/mutations';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
@@ -27,6 +27,7 @@ import DynamicDepartmentJobsPanel, { AssignmentJob } from '@/components/assignme
 import VenuesManager from '@/components/externalBroadcasts/VenuesManager';
 import { useEquipmentCategories } from '@/hooks/useEquipmentCategories';
 import { resolveEquipmentLines, SubstitutionInput } from '@/utils/equipmentSubstitution';
+import { ensureAvailabilityOk } from '@/components/shifts/availabilityWarning';
 
 dayjs.extend(isoWeek);
 dayjs.extend(utc);
@@ -197,7 +198,8 @@ const statusLabels: Record<DataStatus, string> = {
 // ─── Main Component ───────────────────────────────────────
 
 const ExternalBroadcastsPage: React.FC = () => {
-  const { message: messageApi } = App.useApp();
+  const { message: messageApi, modal } = App.useApp();
+  const apolloClient = useApolloClient();
   const { hasPermission } = useAuth();
   const canManageBroadcasts = hasPermission(Permission.BROADCAST_MANAGE);
 
@@ -681,6 +683,31 @@ const ExternalBroadcastsPage: React.FC = () => {
         purpose: it.purpose || undefined,
         audioConfig: it.audioConfig || undefined,
       }));
+
+      // Preflight: warn the operator if any selected internal user has
+      // marked themselves unavailable for the event's time window. Both
+      // `productionCrew` and `dynamicJobs` are considered. Custom names
+      // entered via `isCustom` are skipped automatically because they
+      // have no `userId`.
+      const internalUserIds: string[] = [
+        ...productionCrew
+          .map((c) => c.userId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+        ...dynamicJobs
+          .map((j) => j.userId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+      ];
+      if (internalUserIds.length > 0) {
+        const ok = await ensureAvailabilityOk(apolloClient, modal, {
+          userIds: internalUserIds,
+          startTime: selectedEvent.startTime || null,
+          endTime: selectedEvent.endTime || null,
+        });
+        if (!ok) {
+          setSaving(false);
+          return;
+        }
+      }
 
       await updateDepartmentData({
         variables: {

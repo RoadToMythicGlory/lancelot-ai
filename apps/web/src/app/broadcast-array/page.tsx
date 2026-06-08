@@ -16,7 +16,8 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQuery } from '@apollo/client';
+import { useApolloClient, useMutation, useQuery } from '@apollo/client';
+import { ensureAvailabilityOk } from '@/components/shifts/availabilityWarning';
 import {
   App,
   Button,
@@ -318,7 +319,8 @@ const RoleCellSelect: React.FC<RoleCellSelectProps> = ({
 // ---------------------------------------------------------------------------
 
 function BroadcastArrayPageInner() {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
+  const apolloClient = useApolloClient();
   const { hasPermission } = useAuth();
   const canWrite = hasPermission(Permission.BROADCAST_ARRAY_MANAGE);
 
@@ -550,6 +552,23 @@ function BroadcastArrayPageInner() {
           });
         }
       }
+    }
+
+    // Preflight: warn the operator if any of the internal users they're
+    // about to save have marked themselves unavailable for the event's
+    // time window. External (custom-name) crew members are skipped
+    // automatically because they have no `userId`.
+    const internalUserIds = crewAssignments
+      .map((a) => a.userId)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0);
+    if (internalUserIds.length > 0) {
+      const event = events.find((e) => e.id === row.eventId);
+      const ok = await ensureAvailabilityOk(apolloClient, modal, {
+        userIds: internalUserIds,
+        startTime: event?.startTime || row.date?.toISOString() || null,
+        endTime: event?.endTime || null,
+      });
+      if (!ok) return;
     }
 
     try {

@@ -5,6 +5,10 @@ import { expandMCRDepartments } from '../utils/departments';
 import { requireAuth, requirePermission } from '../middleware/auth';
 import { Permission } from '../rbac';
 import { validateVacationRequest } from '../services/shift.service';
+import {
+  sendShiftAssignmentsWhatsApp,
+  normalizeWhatsAppPhone,
+} from '../services/whatsapp.service';
 
 // Department roles configuration - defines number of roles per department
 const DEPARTMENT_ROLES: { [key: string]: number } = {
@@ -63,6 +67,53 @@ function checkAdminPermission(context: any) {
 
 function checkAuthentication(context: any) {
   requireAuth(context);
+}
+
+// Audit record for one WhatsApp delivery attempt. Persists to the existing
+// `notifications` collection so dispatches are traceable from the same place
+// as the rest of the platform's notification history.
+async function writeWhatsAppAudit(
+  db: any,
+  entry: {
+    userId: string;
+    phone: string | null;
+    status: 'sent' | 'skipped' | 'failed';
+    messageId?: string;
+    error?: string;
+    departmentId: string;
+    departmentName: string;
+    startDate: string;
+    endDate: string;
+    shiftCount: number;
+    sentBy: string;
+    dispatchedAt: Date;
+  },
+) {
+  try {
+    await db.collection('notifications').insertOne({
+      type: 'shift',
+      channel: 'whatsapp',
+      title: 'שיגור שיבוצים בוואטסאפ',
+      message: `שיגור שיבוצים למחלקת ${entry.departmentName} (${entry.startDate} - ${entry.endDate})`,
+      recipientId: entry.userId,
+      recipientPhone: entry.phone,
+      status: entry.status,
+      providerMessageId: entry.messageId,
+      error: entry.error,
+      metadata: {
+        departmentId: entry.departmentId,
+        departmentName: entry.departmentName,
+        startDate: entry.startDate,
+        endDate: entry.endDate,
+        shiftCount: entry.shiftCount,
+      },
+      sentBy: entry.sentBy,
+      sentAt: entry.dispatchedAt,
+      createdAt: entry.dispatchedAt,
+    });
+  } catch (err) {
+    console.error('Failed to write WhatsApp audit record', err);
+  }
 }
 
 /**
@@ -463,6 +514,155 @@ export const shiftsResolvers = {
         ...constraint,
         id: constraint._id?.toString() || constraint.id
       };
+    },
+
+    // Preflight check used by the shift / Broadcast Array / External
+    // Broadcasts assignment flows: returns the subset of `userIds` whose
+    // saved `availability_constraints` for the relevant slot is
+    // `unavailable`. The frontend uses the result to prompt the
+    // scheduler before saving the assignment.
+    checkAssignmentAvailabilityConflicts: async (
+      _: any,
+      args: { input: { userIds: string[]; startTime?: string; endTime?: string; shiftType?: string; departmentId?: string } },
+      context: any,
+    ) => {
+      checkAuthentication(context);
+      const input = args.input || ({} as any);
+      const userIds: string[] = Array.isArray(input.userIds)
+        ? input.userIds.filter((id) => typeof id === 'string' && id.length > 0)
+        : [];
+      if (userIds.length === 0) return [];
+
+      const db = await getDB();
+
+      // Decide which (weekStartDate, dayOfWeek, shiftType) slots we
+      // should match against. For the shift path we get the date and
+      // optional `shiftType` directly. For the broadcast path we map
+      // the start/end window onto the department's enabled shift types
+      // (or the platform defaults when no config is present).
+      type Slot = { weekStart: Date; dayOfWeek: number; shiftType: string };
+      const slots: Slot[] = [];
+
+      const referenceDate = input.startTime ? new Date(input.startTime) : null;
+      if (!referenceDate || Number.isNaN(referenceDate.getTime())) {
+        return [];
+      }
+
+      const weekStart = getWeekStartDate(referenceDate);
+      const dayOfWeek = referenceDate.getDay();
+
+      if (input.shiftType) {
+        slots.push({ weekStart, dayOfWeek, shiftType: input.shiftType });
+      } else {
+        // Default Hebrew shift slots (also the fallback used by
+        // AvailabilityConstraints.tsx when no department config is set).
+        const DEFAULT_SLOTS: Array<{ type: string; start: string; end: string }> = [
+          { type: 'morning', start: '07:00', end: '15:00' },
+          { type: 'afternoon', start: '15:00', end: '23:00' },
+          { type: 'night', start: '23:00', end: '07:00' },
+        ];
+
+        let shiftTypes = DEFAULT_SLOTS;
+        if (input.departmentId) {
+          try {
+            const cfg = await db
+              .collection('department_shift_configs')
+              .findOne({ departmentId: input.departmentId });
+            const configured = (cfg?.shiftTypes || [])
+              .filter((st: any) => st?.enabled !== false && st?.defaultStartTime && st?.defaultEndTime)
+              .map((st: any) => ({
+                type: String(st.type),
+                start: String(st.defaultStartTime),
+                end: String(st.defaultEndTime),
+              }));
+            if (configured.length > 0) shiftTypes = configured;
+          } catch (err) {
+            // Fall back to defaults on lookup failure.
+          }
+        }
+
+        const startMinutes = referenceDate.getHours() * 60 + referenceDate.getMinutes();
+        const end = input.endTime ? new Date(input.endTime) : null;
+        const endMinutes =
+          end && !Number.isNaN(end.getTime())
+            ? end.getHours() * 60 + end.getMinutes() + (end.getDate() !== referenceDate.getDate() ? 24 * 60 : 0)
+            : startMinutes + 60;
+
+        const toMinutes = (hhmm: string): number => {
+          const [h, m] = hhmm.split(':').map((p) => Number(p) || 0);
+          return h * 60 + m;
+        };
+
+        for (const slot of shiftTypes) {
+          let slotStart = toMinutes(slot.start);
+          let slotEnd = toMinutes(slot.end);
+          // Overnight slot (e.g. 23:00-07:00): extend the end past midnight.
+          if (slotEnd <= slotStart) slotEnd += 24 * 60;
+
+          const overlaps = startMinutes < slotEnd && endMinutes > slotStart;
+          if (overlaps) {
+            slots.push({ weekStart, dayOfWeek, shiftType: slot.type });
+          }
+        }
+      }
+
+      if (slots.length === 0) return [];
+
+      // Pull every constraint document for these users that lands in
+      // the same week. We filter the granular slot match in memory to
+      // keep the Mongo query simple and index-friendly.
+      const constraints = await db
+        .collection('availability_constraints')
+        .find({
+          userId: { $in: userIds },
+          weekStartDate: weekStart,
+        })
+        .toArray();
+
+      const slotKeys = new Set(slots.map((s) => `${s.dayOfWeek}|${s.shiftType}`));
+
+      const conflicts: any[] = [];
+      for (const doc of constraints) {
+        const items: any[] = Array.isArray(doc.constraints) ? doc.constraints : [];
+        for (const item of items) {
+          if (item?.availability !== 'unavailable') continue;
+          const key = `${item.dayOfWeek}|${item.shiftType}`;
+          if (!slotKeys.has(key)) continue;
+          conflicts.push({
+            userId: String(doc.userId),
+            dayOfWeek: Number(item.dayOfWeek),
+            shiftType: String(item.shiftType),
+            availability: 'unavailable',
+            weekStartDate: weekStart.toISOString(),
+          });
+        }
+      }
+
+      if (conflicts.length === 0) return [];
+
+      // Hydrate display names so the UI can show a meaningful message
+      // without a second round-trip.
+      const objectIds: ObjectId[] = [];
+      for (const id of new Set(conflicts.map((c) => c.userId))) {
+        if (ObjectId.isValid(id)) objectIds.push(new ObjectId(id));
+      }
+      const users = objectIds.length
+        ? await db.collection('users').find({ _id: { $in: objectIds } }).toArray()
+        : [];
+      const nameByUserId = new Map<string, string>();
+      for (const u of users) {
+        const label =
+          u.displayName ||
+          [u.firstName, u.lastName].filter(Boolean).join(' ').trim() ||
+          u.email ||
+          u._id.toString();
+        nameByUserId.set(u._id.toString(), label);
+      }
+
+      return conflicts.map((c) => ({
+        ...c,
+        userName: nameByUserId.get(c.userId) || null,
+      }));
     },
 
     // Employee Settings queries
@@ -2691,7 +2891,226 @@ export const shiftsResolvers = {
         notificationId: result.insertedId.toString()
       };
     },
-    
+
+    // Dispatch the week's shift assignments to every active employee of a
+    // department over WhatsApp. Used by the "שגר שיבוצים" admin action.
+    dispatchDepartmentShiftAssignments: async (_: any, args: any, context: any) => {
+      checkAuthentication(context);
+      const departmentId: string = args.input.departmentId;
+      const startDate: string = args.input.startDate;
+      const endDate: string = args.input.endDate;
+
+      if (!departmentId) throw new Error('departmentId is required');
+      if (!startDate || !endDate) throw new Error('startDate and endDate are required');
+
+      // Permission gate: SHIFTS_MANAGE for this department (mirrors the assign page).
+      const actor = requireAuth(context);
+      if (!actor.hasForDept(Permission.SHIFTS_MANAGE, departmentId)) {
+        throw new Error(`Missing permission: SHIFTS_MANAGE for department ${departmentId}`);
+      }
+
+      const db = await getDB();
+
+      // Resolve department display name for the message body.
+      let departmentName = departmentId;
+      try {
+        const dept = ObjectId.isValid(departmentId)
+          ? await db.collection('departments').findOne({ _id: new ObjectId(departmentId) })
+          : await db.collection('departments').findOne({
+              $or: [{ code: departmentId }, { name: departmentId }],
+            });
+        if (dept) {
+          departmentName = dept.hebrewName || dept.name || dept.code || departmentId;
+        }
+      } catch {
+        // Fall back to departmentId for the body if the lookup fails.
+      }
+
+      // Active employees in the department. Supports both the legacy
+      // `department` string and the newer `departments[]` membership.
+      const expandedDepts = expandMCRDepartments([departmentId], { includeBaseMCR: true });
+      const employees = await db
+        .collection('users')
+        .find({
+          isActive: { $ne: false },
+          $or: [
+            { department: { $in: expandedDepts } },
+            { 'departments.departmentName': { $in: expandedDepts } },
+            { 'departments.departmentId': { $in: expandedDepts } },
+          ],
+        })
+        .toArray();
+
+      // Shifts assigned in the date range for this department.
+      const shifts = await db
+        .collection('shifts')
+        .find({
+          department: { $in: expandedDepts },
+          date: { $gte: new Date(startDate), $lte: new Date(endDate) },
+        })
+        .sort({ date: 1 })
+        .toArray();
+
+      // Index shifts by userId so we can compose per-employee bodies in O(N).
+      const shiftsByUserId = new Map<string, any[]>();
+      for (const shift of shifts) {
+        for (const worker of shift.assignedWorkers || []) {
+          const userId = String(worker.userId);
+          if (!shiftsByUserId.has(userId)) shiftsByUserId.set(userId, []);
+          shiftsByUserId.get(userId)!.push({
+            date: shift.date,
+            shiftType: shift.shiftType,
+            startTime: shift.startTime,
+            endTime: shift.endTime,
+            role: worker.role,
+            notes: shift.notes,
+          });
+        }
+      }
+
+      const dispatchedAt = new Date();
+      const results: Array<{
+        userId: string;
+        displayName: string;
+        phone: string | null;
+        status: 'sent' | 'skipped' | 'failed';
+        messageId?: string;
+        error?: string;
+        shiftCount: number;
+      }> = [];
+
+      let sentCount = 0;
+      let skippedCount = 0;
+      let failedCount = 0;
+
+      for (const employee of employees) {
+        const userId = employee._id.toString();
+        const displayName =
+          employee.displayName ||
+          `${employee.firstName || ''} ${employee.lastName || ''}`.trim() ||
+          employee.email ||
+          'עובד';
+        const employeeShifts = shiftsByUserId.get(userId) || [];
+
+        // Skip employees with no assignments in the range — there's nothing
+        // meaningful to deliver and it avoids wasting WhatsApp quota.
+        if (employeeShifts.length === 0) {
+          skippedCount += 1;
+          results.push({
+            userId,
+            displayName,
+            phone: null,
+            status: 'skipped',
+            error: 'No shifts assigned in this range',
+            shiftCount: 0,
+          });
+          continue;
+        }
+
+        const phone = normalizeWhatsAppPhone(employee.mobile || employee.phone);
+        if (!phone) {
+          skippedCount += 1;
+          results.push({
+            userId,
+            displayName,
+            phone: null,
+            status: 'skipped',
+            error: 'Missing or invalid phone number',
+            shiftCount: employeeShifts.length,
+          });
+          await writeWhatsAppAudit(db, {
+            userId,
+            phone: null,
+            status: 'skipped',
+            error: 'Missing or invalid phone number',
+            departmentId,
+            departmentName,
+            startDate,
+            endDate,
+            shiftCount: employeeShifts.length,
+            sentBy: context.user.userId,
+            dispatchedAt,
+          });
+          continue;
+        }
+
+        try {
+          const { messageId } = await sendShiftAssignmentsWhatsApp({
+            to: phone,
+            employeeName: displayName,
+            departmentName,
+            startDate,
+            endDate,
+            shifts: employeeShifts,
+          });
+          sentCount += 1;
+          results.push({
+            userId,
+            displayName,
+            phone,
+            status: 'sent',
+            messageId,
+            shiftCount: employeeShifts.length,
+          });
+          await writeWhatsAppAudit(db, {
+            userId,
+            phone,
+            status: 'sent',
+            messageId,
+            departmentId,
+            departmentName,
+            startDate,
+            endDate,
+            shiftCount: employeeShifts.length,
+            sentBy: context.user.userId,
+            dispatchedAt,
+          });
+        } catch (err: any) {
+          failedCount += 1;
+          const errorMessage = err?.message || 'Unknown error';
+          results.push({
+            userId,
+            displayName,
+            phone,
+            status: 'failed',
+            error: errorMessage,
+            shiftCount: employeeShifts.length,
+          });
+          await writeWhatsAppAudit(db, {
+            userId,
+            phone,
+            status: 'failed',
+            error: errorMessage,
+            departmentId,
+            departmentName,
+            startDate,
+            endDate,
+            shiftCount: employeeShifts.length,
+            sentBy: context.user.userId,
+            dispatchedAt,
+          });
+        }
+      }
+
+      const totalEmployees = employees.length;
+      const summary =
+        totalEmployees === 0
+          ? 'לא נמצאו עובדים פעילים במחלקה'
+          : `נשלחו ${sentCount} מתוך ${totalEmployees}` +
+            (skippedCount ? `, דולגו ${skippedCount}` : '') +
+            (failedCount ? `, נכשלו ${failedCount}` : '');
+
+      return {
+        success: failedCount === 0,
+        message: summary,
+        totalEmployees,
+        sentCount,
+        skippedCount,
+        failedCount,
+        results,
+      };
+    },
+
     // Generate report
     generateShiftReport: async (_: any, args: any, context: any) => {
       checkAuthentication(context);

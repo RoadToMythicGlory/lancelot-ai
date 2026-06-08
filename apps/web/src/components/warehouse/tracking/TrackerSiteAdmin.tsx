@@ -190,7 +190,7 @@ const TrackerSiteAdmin: React.FC = () => {
         title={
           <Space>
             <EnvironmentOutlined />
-            אתרים (מחסנים / סטודיות)
+            אתרים (מחסנים / סטודיו)
           </Space>
         }
         extra={

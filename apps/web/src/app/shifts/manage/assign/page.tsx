@@ -10,6 +10,7 @@ import {
   ChevronLeftIcon,
   SparklesIcon,
   CalendarIcon,
+  PaperAirplaneIcon,
 } from '@heroicons/react/24/outline';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { Permission } from '@/rbac';
@@ -17,6 +18,7 @@ import { LABELS, HEBREW_WEEKDAYS_SHORT } from '@/components/shifts/i18n';
 import DepartmentPicker from '@/components/shifts/DepartmentPicker';
 import AiSuggestionsModal from '@/components/shifts/modals/AiSuggestionsModal';
 import AssignShiftModal from '@/components/shifts/modals/AssignShiftModal';
+import DispatchAssignmentsModal from '@/components/shifts/modals/DispatchAssignmentsModal';
 
 dayjs.locale('he');
 
@@ -79,10 +81,13 @@ export default function AssignShiftsPage() {
   const [weekOffset, setWeekOffset] = useState(0);
   const [aiOpen, setAiOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [dispatchOpen, setDispatchOpen] = useState(false);
   const [activeCell, setActiveCell] = useState<{
     shiftId: string | null;
     apl: { id: string; name: string };
     candidates: Array<{ id: string; displayName: string }>;
+    shiftDate: string | null;
+    shiftType: string | null;
   } | null>(null);
 
   const weekStart = dayjs().startOf('week').add(weekOffset, 'week');
@@ -153,6 +158,8 @@ export default function AssignShiftsPage() {
       shiftId: cell?.shift?.id || null,
       apl: { id: apl.id, name: apl.name },
       candidates,
+      shiftDate: date,
+      shiftType: cell?.shift?.shiftType || shiftTypeName,
     });
     setAssignOpen(true);
   }
@@ -185,6 +192,14 @@ export default function AssignShiftsPage() {
               disabled={!activeDeptId}
             >
               שיבוץ אוטומטי
+            </Button>
+            <Button
+              type="primary"
+              icon={<PaperAirplaneIcon className="h-4 w-4" />}
+              onClick={() => setDispatchOpen(true)}
+              disabled={!activeDeptId}
+            >
+              שגר שיבוצים
             </Button>
           </div>
         </div>
@@ -310,7 +325,18 @@ export default function AssignShiftsPage() {
           shiftId={activeCell?.shiftId || null}
           apl={activeCell?.apl || null}
           candidates={activeCell?.candidates || []}
+          shiftDate={activeCell?.shiftDate || null}
+          shiftType={activeCell?.shiftType || null}
+          departmentId={activeDeptId || null}
           onAssigned={() => refetch()}
+        />
+
+        <DispatchAssignmentsModal
+          open={dispatchOpen}
+          onClose={() => setDispatchOpen(false)}
+          departmentId={activeDeptId}
+          startDate={weekStart.format('YYYY-MM-DD')}
+          endDate={weekEnd.format('YYYY-MM-DD')}
         />
       </div>
     </ProtectedRoute>

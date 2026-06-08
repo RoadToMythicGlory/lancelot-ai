@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Modal, Form, Select, Button, Space, Card, Row, Col, Tag, Table, Divider, InputNumber, Input } from 'antd';
+import { Modal, Form, Select, Button, Space, Card, Row, Col, Tag, Table, Divider, InputNumber, Input, App } from 'antd';
 import { 
   ToolOutlined, 
   TeamOutlined,
@@ -9,11 +9,12 @@ import {
   GlobalOutlined,
   SearchOutlined
 } from '@ant-design/icons';
-import { useQuery, useMutation } from '@apollo/client';
+import { useApolloClient, useQuery, useMutation } from '@apollo/client';
 import { GET_WAREHOUSE_EQUIPMENT_FOR_PICKER, GET_EMPLOYEES_BY_DEPARTMENT, GET_DEPARTMENTS, GET_BROADCAST_EVENT } from '../../graphql/queries';
 import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA } from '../../graphql/mutations';
 import DynamicDepartmentJobsPanel, { AssignmentJob } from '../assignments/DynamicDepartmentJobsPanel';
 import { useEquipmentCategories } from '../../hooks/useEquipmentCategories';
+import { ensureAvailabilityOk } from '../shifts/availabilityWarning';
 
 const { Option } = Select;
 
@@ -62,6 +63,8 @@ interface Employee {
 }
 
 const ExternalBroadcastsModal: React.FC<ExternalBroadcastsModalProps> = ({ visible, event, onClose, onDataSaved, canEdit = true }) => {
+  const { modal } = App.useApp();
+  const apolloClient = useApolloClient();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [selectedEquipment, setSelectedEquipment] = useState<Array<{ id: string; quantity: number }>>([]);
@@ -400,6 +403,30 @@ const ExternalBroadcastsModal: React.FC<ExternalBroadcastsModalProps> = ({ visib
       };
 
       // console.log('📤 External Broadcasts - Saving data:', departmentData);
+
+      // Preflight: warn the operator if any selected internal user has
+      // marked themselves unavailable for the event's time window. We
+      // pull ids from both the predefined `productionCrew` roles and
+      // the admin-configurable `dynamicJobs` list.
+      const internalUserIds: string[] = [
+        ...productionCrew
+          .map((c) => c.userId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+        ...dynamicJobs
+          .map((j) => j.userId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+      ];
+      if (internalUserIds.length > 0) {
+        const ok = await ensureAvailabilityOk(apolloClient, modal, {
+          userIds: internalUserIds,
+          startTime: (event as any)?.startTime || null,
+          endTime: (event as any)?.endTime || null,
+        });
+        if (!ok) {
+          setLoading(false);
+          return;
+        }
+      }
 
       // Call the mutation to save to MongoDB
       await updateDepartmentData({

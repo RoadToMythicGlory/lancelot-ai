@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Modal, Form, Input, Select, Row, Col, Button, Space, Divider, Alert, Spin, App } from 'antd';
-import { useMutation, useQuery } from '@apollo/client';
+import { useApolloClient, useMutation, useQuery } from '@apollo/client';
 import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA } from '../../graphql/mutations';
 import { GET_EMPLOYEES_BY_DEPARTMENT, GET_DEPARTMENTS, GET_BROADCAST_EVENT } from '../../graphql/queries';
 import dayjs from 'dayjs';
 import 'dayjs/locale/he';
 import DynamicDepartmentJobsPanel, { AssignmentJob } from '../assignments/DynamicDepartmentJobsPanel';
+import { ensureAvailabilityOk } from '../shifts/availabilityWarning';
 
 const { Option } = Select;
 
@@ -49,7 +50,8 @@ interface Employee {
 }
 
 const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, event, onClose, onSave, onDataSaved, canEdit = true }) => {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
+  const apolloClient = useApolloClient();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [dynamicJobs, setDynamicJobs] = useState<AssignmentJob[]>([]);
@@ -317,6 +319,33 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
       };
 
       console.log('📤 BroadcastArrayModal - Department data to save:', departmentData);
+
+      // Preflight: warn the operator if any selected internal user has
+      // marked themselves unavailable for the event's time window. We
+      // pull ids from both the legacy role lists and the dynamic jobs
+      // list. Custom/free-text people are ignored because they have no
+      // matching user record.
+      const internalUserIds: string[] = [
+        ...departmentData.broadcastArray.crewAssignments
+          .map((a) => a.userId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+        ...dynamicJobs
+          .map((j) => j.userId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+      ];
+      if (internalUserIds.length > 0) {
+        const fullEvent =
+          (existingData as any)?.broadcastEvent || (event as any) || {};
+        const ok = await ensureAvailabilityOk(apolloClient, modal, {
+          userIds: internalUserIds,
+          startTime: fullEvent?.startTime || (event as any)?.startTime || null,
+          endTime: fullEvent?.endTime || (event as any)?.endTime || null,
+        });
+        if (!ok) {
+          setLoading(false);
+          return;
+        }
+      }
 
       // Call the mutation to save to MongoDB
       const result = await updateDepartmentData({

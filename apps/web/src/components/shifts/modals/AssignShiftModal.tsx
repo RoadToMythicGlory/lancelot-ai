@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Modal, Select, Form, message } from 'antd';
-import { gql, useMutation } from '@apollo/client';
+import { Modal, Select, Form, message, App } from 'antd';
+import { gql, useMutation, useApolloClient } from '@apollo/client';
+import { ensureAvailabilityOk } from '../availabilityWarning';
 
 const ASSIGN_USER = gql`
   mutation AssignUserFromAplGrid($input: ShiftAssignmentInput!) {
@@ -23,6 +24,12 @@ interface AssignShiftModalProps {
   apl: { id: string; name: string } | null;
   /** Eligible employees for this APL. */
   candidates: Array<{ id: string; displayName: string }>;
+  /** ISO date of the shift, used for the availability preflight. */
+  shiftDate?: string | null;
+  /** Saved `shiftType` value (e.g. "morning"), used for the preflight. */
+  shiftType?: string | null;
+  /** Optional department id, used to resolve shift-type windows. */
+  departmentId?: string | null;
   onAssigned?: () => void;
 }
 
@@ -32,10 +39,15 @@ export default function AssignShiftModal({
   shiftId,
   apl,
   candidates,
+  shiftDate,
+  shiftType,
+  departmentId,
   onAssigned,
 }: AssignShiftModalProps) {
   const [form] = Form.useForm();
   const [assignUser, { loading }] = useMutation(ASSIGN_USER);
+  const apolloClient = useApolloClient();
+  const { modal } = App.useApp();
 
   useEffect(() => {
     if (!open) form.resetFields();
@@ -45,6 +57,15 @@ export default function AssignShiftModal({
     try {
       const values = await form.validateFields();
       if (!shiftId) return;
+
+      const ok = await ensureAvailabilityOk(apolloClient, modal, {
+        userIds: [values.userId],
+        startTime: shiftDate || null,
+        shiftType: shiftType || null,
+        departmentId: departmentId || null,
+      });
+      if (!ok) return;
+
       await assignUser({
         variables: {
           input: {

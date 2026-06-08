@@ -1528,6 +1528,14 @@ type Query {
   # Availability Constraints
   availabilityConstraints(weekStartDate: String!, userId: String): [AvailabilityConstraint!]!
   myAvailabilityConstraints(weekStartDate: String!): AvailabilityConstraint
+
+  # Preflight: given a list of users and a time window (or a single shift
+  # type), return any users who have marked themselves as "unavailable"
+  # in the matching slot. Used by the shift / Broadcast Array / External
+  # Broadcasts assignment flows to warn the scheduler before saving.
+  checkAssignmentAvailabilityConflicts(
+    input: AssignmentAvailabilityCheckInput!
+  ): [AssignmentAvailabilityConflict!]!
   
   # Employee Settings
   employeeSettings(userId: String!): EmployeeSettings
@@ -1712,6 +1720,7 @@ type Mutation {
   createSpecialRequest(input: SpecialRequestInput!): SpecialRequest!
   handleSpecialRequest(requestId: String!, approved: Boolean!, adminNotes: String): SpecialRequest!
   sendNotification(input: NotificationInput!): NotificationPayload!
+  dispatchDepartmentShiftAssignments(input: DispatchDepartmentShiftAssignmentsInput!): ShiftAssignmentDispatchPayload!
   generateShiftReport(input: ShiftReportInput!): ShiftReport!
   createEmployee(input: CreateEmployeeInput!): User!
   updateSpecialDays(input: SpecialDayInput!): SpecialDay!
@@ -2129,6 +2138,30 @@ input AvailabilityConstraintInput {
   constraints: [ConstraintItemInput!]!
 }
 
+# Input for `checkAssignmentAvailabilityConflicts`. Callers pass the
+# internal user ids they're about to assign together with the assignment
+# window. For a single classic shift, `shiftType` is enough — the date is
+# used to locate the week. For broadcast events, pass `startTime` and
+# `endTime` and the resolver will map the window to overlapping shift
+# slots itself using the relevant department config (or sensible
+# defaults).
+input AssignmentAvailabilityCheckInput {
+  userIds: [String!]!
+  startTime: String
+  endTime: String
+  shiftType: String
+  departmentId: String
+}
+
+type AssignmentAvailabilityConflict {
+  userId: String!
+  userName: String
+  dayOfWeek: Int!
+  shiftType: String!
+  availability: AvailabilityStatus!
+  weekStartDate: String!
+}
+
 input ConstraintItemInput {
   dayOfWeek: Int!
   shiftType: String!
@@ -2249,6 +2282,32 @@ input NotificationInput {
   type: String
   recipients: [String!]
   department: String
+}
+
+input DispatchDepartmentShiftAssignmentsInput {
+  departmentId: String!
+  startDate: String!
+  endDate: String!
+}
+
+type ShiftAssignmentDispatchPayload {
+  success: Boolean!
+  message: String!
+  totalEmployees: Int!
+  sentCount: Int!
+  skippedCount: Int!
+  failedCount: Int!
+  results: [ShiftAssignmentDispatchResult!]!
+}
+
+type ShiftAssignmentDispatchResult {
+  userId: String!
+  displayName: String!
+  phone: String
+  status: String!
+  messageId: String
+  error: String
+  shiftCount: Int!
 }
 
 # Report types

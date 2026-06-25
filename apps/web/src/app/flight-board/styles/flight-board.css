@@ -55,11 +55,28 @@
  * it. Multi-panel boards keep their grid columns; single-panel boards span
  * the entire screen. */
 .flight-board-page.is-kiosk .flight-board-grid {
-  height: 100vh;
+  flex: 1;
+  height: auto;
+  min-height: 0;
   margin: 0;
   padding: 0;
   gap: 4px;
   overflow: hidden;
+}
+
+.flight-board-page.is-kiosk .flight-board-logo-footer {
+  flex: 0 0 36px;
+  margin: 0;
+  padding: 4px 18px 7px;
+  background: #000;
+  opacity: 0.36;
+  pointer-events: none;
+  justify-content: flex-end;
+}
+
+.flight-board-page.is-kiosk .flight-board-footer-logo {
+  max-width: 145px;
+  max-height: 25px;
 }
 
 .flight-board-page.is-kiosk .flight-board-panel-cell {
@@ -258,6 +275,23 @@ body:has(.flight-board-page.is-kiosk) nav.app-topbar {
   display: flex;
   flex-direction: column;
   gap: clamp(12px, 1.2vw, 20px);
+}
+
+.flight-board-logo-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: clamp(2px, 0.4vw, 8px);
+  padding-bottom: clamp(4px, 0.5vw, 10px);
+  opacity: 0.5;
+}
+
+.flight-board-footer-logo {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 145px;
+  max-height: 44px;
 }
 
 /* ---------------- Header ---------------- */

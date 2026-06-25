@@ -83,6 +83,15 @@ function toFormConfigDoc(doc: any) {
           order: typeof c.order === 'number' ? c.order : i,
         }))
       : [],
+    roleScopes: Array.isArray(obj.roleScopes)
+      ? obj.roleScopes.map((r: any) => ({
+          departmentCode: r.departmentCode,
+          roleKey: r.roleKey,
+          roleLabel: r.roleLabel ?? null,
+          scope: r.scope || 'broadcastArray',
+        }))
+      : [],
+    specialRoles: Array.isArray(obj.specialRoles) ? obj.specialRoles : [],
     allowUserPresets: obj.allowUserPresets !== false,
     isActive: obj.isActive !== false,
     createdAt: obj.createdAt,
@@ -295,6 +304,23 @@ export const departmentManagementResolvers = {
         allowUserPresets: input.allowUserPresets !== false,
         isActive: input.isActive !== false,
       };
+      if (Array.isArray(input.roleScopes)) {
+        update.roleScopes = input.roleScopes
+          .filter((r: any) => r && r.departmentCode && r.roleKey)
+          .map((r: any) => ({
+            departmentCode: String(r.departmentCode).trim(),
+            roleKey: String(r.roleKey).trim(),
+            roleLabel: r.roleLabel ? String(r.roleLabel).trim() : undefined,
+            scope: ['broadcastArray', 'externalBroadcasts', 'both'].includes(r.scope)
+              ? r.scope
+              : 'broadcastArray',
+          }));
+      }
+      if (Array.isArray(input.specialRoles)) {
+        update.specialRoles = input.specialRoles
+          .map((s: any) => String(s || '').trim())
+          .filter((s: string) => s.length > 0);
+      }
       if (actorId && mongoose.isValidObjectId(actorId)) {
         update.updatedBy = new mongoose.Types.ObjectId(actorId);
       }

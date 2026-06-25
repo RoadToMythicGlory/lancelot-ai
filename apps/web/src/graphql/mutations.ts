@@ -112,7 +112,6 @@ export const UPDATE_BROADCAST_EVENT = gql`
       homeTeam
       awayTeam
       venue
-      production_crew
       equipment_list
       routingPreset
       reception_start_time
@@ -460,6 +459,8 @@ export const CREATE_EQUIPMENT = gql`
       }
       isQuantityBased
       isSharedEngineeringEquipment
+      nevionCameraCapacity
+      liveuInternalId
       createdAt
       updatedAt
     }
@@ -512,6 +513,8 @@ export const UPDATE_EQUIPMENT = gql`
       }
       isQuantityBased
       isSharedEngineeringEquipment
+      nevionCameraCapacity
+      liveuInternalId
       suspensionStatus
       updatedAt
     }
@@ -757,6 +760,159 @@ export const UPDATE_SHIFT = gql`
   }
 `;
 
+// External Broadcasts operational mutations — fault reports, NEVION
+// auto-request, LiveU email, and drag-reorder.
+export const CREATE_EQUIPMENT_FAULT_REPORT = gql`
+  mutation CreateEquipmentFaultReport($input: CreateEquipmentFaultReportInput!) {
+    createEquipmentFaultReport(input: $input) {
+      id
+      equipmentId
+      equipmentName
+      equipmentBarcode
+      eventId
+      description
+      severity
+      status
+      reportedAt
+      reportedByName
+    }
+  }
+`;
+
+export const UPDATE_EQUIPMENT_FAULT_REPORT = gql`
+  mutation UpdateEquipmentFaultReport($id: ID!, $input: UpdateEquipmentFaultReportInput!) {
+    updateEquipmentFaultReport(id: $id, input: $input) {
+      id
+      description
+      severity
+      status
+      resolvedAt
+      resolvedByName
+      resolutionNotes
+    }
+  }
+`;
+
+export const RESOLVE_EQUIPMENT_FAULT_REPORT = gql`
+  mutation ResolveEquipmentFaultReport($id: ID!, $resolutionNotes: String) {
+    resolveEquipmentFaultReport(id: $id, resolutionNotes: $resolutionNotes) {
+      id
+      status
+      resolvedAt
+      resolvedByName
+      resolutionNotes
+    }
+  }
+`;
+
+export const SEND_LIVEU_ACTIVATION_REQUEST = gql`
+  mutation SendLiveUActivationRequest($eventId: ID!, $recipient: String!, $kitEquipmentIds: [ID!]!, $extraNotes: String) {
+    sendLiveUActivationRequest(eventId: $eventId, recipient: $recipient, kitEquipmentIds: $kitEquipmentIds, extraNotes: $extraNotes) {
+      success
+      recipient
+      internalIds
+      emailSent
+      message
+    }
+  }
+`;
+
+export const AUTO_REQUEST_NEVION = gql`
+  mutation AutoRequestNevion($eventId: ID!, $requiredCameraCount: Int!) {
+    autoRequestNevion(eventId: $eventId, requiredCameraCount: $requiredCameraCount) {
+      unresolved
+      selectedEquipmentId
+      selectedEquipmentName
+      selectedCapacity
+      requiredCameraCount
+      message
+    }
+  }
+`;
+
+export const REORDER_EXTERNAL_BROADCAST_EVENTS = gql`
+  mutation ReorderExternalBroadcastEvents($date: DateTime!, $eventIds: [ID!]!) {
+    reorderExternalBroadcastEvents(date: $date, eventIds: $eventIds)
+  }
+`;
+
+export const IMPORT_BROADCAST_EVENTS_TO_EXTERNAL_BROADCASTS = gql`
+  mutation ImportBroadcastEventsToExternalBroadcasts($eventIds: [ID!]!) {
+    importBroadcastEventsToExternalBroadcasts(eventIds: $eventIds)
+  }
+`;
+
+export const UNIMPORT_BROADCAST_EVENTS_FROM_EXTERNAL_BROADCASTS = gql`
+  mutation UnimportBroadcastEventsFromExternalBroadcasts($eventIds: [ID!]!) {
+    unimportBroadcastEventsFromExternalBroadcasts(eventIds: $eventIds)
+  }
+`;
+
+const EXTERNAL_BROADCAST_DEVICE_FIELDS = `
+  id
+  name
+  category
+  barcode
+  quantityTotal
+  quantityAvailable
+  available
+  awaitingBarcode
+  isNevion
+  isLiveu
+  nevionCameraCapacity
+  liveuInternalId
+`;
+
+export const SET_NEVION_CAMERA_CAPACITY = gql`
+  mutation SetNevionCameraCapacity($equipmentId: ID!, $capacity: Int) {
+    setNevionCameraCapacity(equipmentId: $equipmentId, capacity: $capacity) {
+      ${EXTERNAL_BROADCAST_DEVICE_FIELDS}
+    }
+  }
+`;
+
+export const SET_LIVEU_INTERNAL_ID = gql`
+  mutation SetLiveuInternalId($equipmentId: ID!, $liveuInternalId: String) {
+    setLiveuInternalId(equipmentId: $equipmentId, liveuInternalId: $liveuInternalId) {
+      ${EXTERNAL_BROADCAST_DEVICE_FIELDS}
+    }
+  }
+`;
+
+export const REGISTER_LIVEU_DEVICE = gql`
+  mutation RegisterLiveuDevice($input: RegisterLiveuDeviceInput!) {
+    registerLiveuDevice(input: $input) {
+      ${EXTERNAL_BROADCAST_DEVICE_FIELDS}
+    }
+  }
+`;
+
+export const UPSERT_EXTERNAL_BROADCAST_REFERENCE = gql`
+  mutation UpsertExternalBroadcastReference($input: ExternalBroadcastReferenceInput!) {
+    upsertExternalBroadcastReference(input: $input) {
+      id
+      kind
+      name
+      description
+      broadcastTypeGroup
+      fiberCount
+      fiberPort
+      fiberPrice
+      returnFiber
+      setupTimeMinutes
+      calculationType
+      extra
+      isActive
+    }
+  }
+`;
+
+export const DELETE_EXTERNAL_BROADCAST_REFERENCE = gql`
+  mutation DeleteExternalBroadcastReference($id: ID!) {
+    deleteExternalBroadcastReference(id: $id)
+  }
+`;
+
 // External Broadcast Preset Mutations
 export const CREATE_EXTERNAL_BROADCAST_PRESET = gql`
   mutation CreateExternalBroadcastPreset($input: CreateExternalBroadcastPresetInput!) {
@@ -921,6 +1077,13 @@ export const UPSERT_ASSIGNMENT_FORM_CONFIG = gql`
         defaultCount
         order
       }
+      roleScopes {
+        departmentCode
+        roleKey
+        roleLabel
+        scope
+      }
+      specialRoles
     }
   }
 `;

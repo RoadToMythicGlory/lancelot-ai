@@ -53,6 +53,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import {
   GET_ASSIGNMENT_FORM_CONFIG,
   GET_BROADCAST_EVENTS,
+  GET_EXTERNAL_BROADCAST_REFERENCE,
   GET_USERS,
 } from '@/graphql/queries';
 import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA } from '@/graphql/mutations';
@@ -73,27 +74,11 @@ const customValue = (name: string) => `${CUSTOM_PREFIX}${name}`;
 const isCustomValue = (v: string) => v.startsWith(CUSTOM_PREFIX);
 const customNameOf = (v: string) => v.slice(CUSTOM_PREFIX.length);
 
-// Same location list as the BroadcastArrayModal — kept hard-coded so
-// the two stay in lock-step. Add new control rooms here AND in
-// `apps/web/src/components/broadcast/BroadcastArrayModal.tsx`.
-const LOCATION_OPTIONS = [
-  'קונטרול 1',
-  'קונטרול 2',
-  'קונטרול 3',
-  'קונטרול 4',
-  'קונטרול 5',
-  'קונטרול 6',
-  'קונטרול 7',
-  'קונטרול 8',
-  'יוניפייד 1',
-  'יוניפייד 2',
-  'יוניפייד 3',
-  'יוניפייד 4',
-  'יוניפייד 5',
-  'יוניפייד 6',
-  'רדיו',
-  'יעלה לווין בלבד',
-];
+// Control-room options are now fetched from the shared
+// `externalBroadcastReference` collection (kind: 'controlRoom'). The
+// same query is used by BroadcastArrayModal, External Broadcasts,
+// MCR, and reports — admins manage the list once in Settings →
+// "נתוני עזר → חדרי בקרה".
 
 // A resolved role/column rendered in the grid. Built either from the
 // server-side AssignmentFormConfig.columns[] (preferred) or from the
@@ -408,6 +393,19 @@ function BroadcastArrayPageInner() {
   });
 
   const allUsers: any[] = useMemo(() => usersData?.users || [], [usersData]);
+
+  // Shared control-rooms list (admins manage in Settings → נתוני עזר).
+  const { data: controlRoomsData } = useQuery(GET_EXTERNAL_BROADCAST_REFERENCE, {
+    variables: { kind: 'controlRoom', includeInactive: false },
+    fetchPolicy: 'cache-first',
+  });
+  const locationOptions: { value: string; label: string }[] = useMemo(
+    () =>
+      ((controlRoomsData?.externalBroadcastReference || []) as any[]).map(
+        (r) => ({ value: r.name, label: r.name }),
+      ),
+    [controlRoomsData],
+  );
 
   // Build a quick `{ userId -> Set(deptCode) }` index so per-column
   // filtering is cheap even with hundreds of users.
@@ -819,7 +817,7 @@ function BroadcastArrayPageInner() {
                 placeholder="מקום שידור"
                 value={locationFilter}
                 onChange={(v) => setLocationFilter(v as string[])}
-                options={LOCATION_OPTIONS.map((o) => ({ value: o, label: o }))}
+                options={locationOptions}
                 style={{ minWidth: 180 }}
                 maxTagCount="responsive"
               />
@@ -978,7 +976,7 @@ function BroadcastArrayPageInner() {
                         showSearch
                         optionFilterProp="label"
                         onChange={(v) => updateRow(row.eventId, { location: v || '' })}
-                        options={LOCATION_OPTIONS.map((o) => ({ value: o, label: o }))}
+                        options={locationOptions}
                         disabled={!canWrite}
                       />
                     </td>

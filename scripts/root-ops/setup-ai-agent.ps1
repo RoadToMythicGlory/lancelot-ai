@@ -51,8 +51,8 @@ LLM_PRIMARY_MODEL=aya-expanse:8b
 LLM_HEBREW_MODEL=aya-expanse:8b
 
 # MongoDB (same as main app)
-MONGODB_URL=mongodb://localhost:27017/broadcast
-MONGO_DATABASE=broadcast
+MONGODB_URL=mongodb://localhost:27017/lancelot
+MONGO_DATABASE=lancelot
 
 # Knowledge / RAG — index the local user manual markdown alongside DB help articles
 AI_KNOWLEDGE_DIR=../../docs/user-manual

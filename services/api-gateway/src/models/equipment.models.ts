@@ -90,7 +90,17 @@ export interface IEquipment extends Document {
   
   // BLE tracker binding (Minew E8 or compatible)
   trackerTagId?: mongoose.Types.ObjectId;
-  
+
+  // NEVION capability metadata. Populated only on NEVION matrix/IP-gateway
+  // units; used by the External Broadcasts auto-request rule to pick the
+  // smallest NEVION whose camera capacity is >= the required count.
+  nevionCameraCapacity?: number;
+
+  // LiveU internal/account ID — the operator-visible identifier LiveU
+  // exposes inside their own console. Distinct from `barcode` (the
+  // warehouse tracking identifier). Optional and only used for LIVEU kits.
+  liveuInternalId?: string;
+
   // Activity tracking — used by the "items unused over 2 weeks" notification
   // job. We refresh this whenever an equipment is assigned, returned, or
   // adjusted so we don't have to scan EquipmentHistory on every scheduler tick.
@@ -191,11 +201,17 @@ export const EQUIPMENT_SUSPENSION_STATUSES = {
 
 // MongoDB Schema
 const equipmentSchema = new Schema<IEquipment>({
-  barcode: { 
-    type: String, 
-    required: true, 
+  barcode: {
+    // Optional so External Broadcasts can register a LiveU kit before the
+    // warehouse assigns a tracking barcode. Items without a barcode are
+    // treated as unavailable everywhere (hidden from the equipment picker,
+    // quantityAvailable forced to 0) until the warehouse sets one.
+    // `sparse` keeps the unique index valid across multiple barcode-less rows.
+    type: String,
+    required: false,
     unique: true,
-    index: true 
+    sparse: true,
+    index: true,
   },
   name: { 
     type: String, 
@@ -325,7 +341,14 @@ const equipmentSchema = new Schema<IEquipment>({
   
   // BLE tracker binding
   trackerTagId: { type: Schema.Types.ObjectId, ref: 'TrackerTag', default: null },
-  
+
+  // NEVION capacity (camera count an individual NEVION unit can handle).
+  // Stored as a positive integer; unset for non-NEVION equipment.
+  nevionCameraCapacity: { type: Number, min: 0, default: null },
+
+  // LiveU's own internal kit identifier (not a barcode).
+  liveuInternalId: { type: String, default: null, trim: true },
+
   // Activity tracking — see IEquipment for usage. We default lastUsedAt to
   // the document's creation time so brand-new equipment isn't immediately
   // flagged as "stale" by the unused-equipment notification job.
@@ -348,6 +371,8 @@ equipmentSchema.index({ isSharedEngineeringEquipment: 1 });
 equipmentSchema.index({ lastUsedAt: 1 });
 equipmentSchema.index({ createdAt: -1 });
 equipmentSchema.index({ trackerTagId: 1 });
+equipmentSchema.index({ nevionCameraCapacity: 1 });
+equipmentSchema.index({ liveuInternalId: 1 });
 
 // Pre-save hook to ensure quantityAvailable is correct
 equipmentSchema.pre('save', function(next) {

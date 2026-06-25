@@ -399,7 +399,8 @@ function mapDocumentToResult(doc: any): any {
     stage: doc.stage,
     homeTeam: doc.homeTeam,
     awayTeam: doc.awayTeam,
-    productionCrew: doc.productionCrew || [],
+    // productionCrew removed — crew lives in
+    // metadata.departments.externalBroadcasts.customData.productionCrew.
     equipmentList: doc.equipmentList || [],
     filePath: doc.filePath,
     receptionStartTime: doc.receptionStartTime?.toISOString(),
@@ -428,8 +429,9 @@ function mapDocumentToResult(doc: any): any {
     departmentId: doc.departmentId,
     departmentData: doc.departmentData,
     
-    // Map snake_case fields to match frontend expectations
-    production_crew: doc.productionCrew || [],
+    // Map snake_case fields to match frontend expectations.
+    // `production_crew` was removed — crew now lives in
+    // `metadata.departments.externalBroadcasts.customData.productionCrew`.
     equipment_list: doc.equipmentList || [],
     file_path: doc.filePath,
     reception_start_time: doc.receptionStartTime?.toISOString(),
@@ -935,6 +937,24 @@ export const enhancedBroadcastResolvers = {
           await syncSharedEngineeringSnapshotForEvent(eventId).catch((err) =>
             console.error('Shared engineering snapshot sync (enhanced dept data) failed', err),
           );
+        }
+
+        // External Broadcasts operational change log. Records assignment
+        // status / control-checks / NEVION / LiveU / documents / finance /
+        // exclude transitions only. Crew + equipment list edits remain
+        // off the log to keep the audit feed signal-rich.
+        if (department === 'externalBroadcasts') {
+          const previousCustom = ((existingEvent.metadata as any)?.departments?.externalBroadcasts) || {};
+          const nextCustom = departments[department] || {};
+          // Lazy require to avoid pulling EquipmentFaultReport etc. when
+          // department data is being updated for unrelated departments.
+          const { logExternalBroadcastChange } = await import('./externalBroadcastsOps');
+          await logExternalBroadcastChange(
+            eventId,
+            previousCustom,
+            nextCustom,
+            { userId: (user as any)?.userId, displayName: (user as any)?.displayName },
+          ).catch(() => undefined);
         }
 
         const result = mapDocumentToResult(updatedEvent);

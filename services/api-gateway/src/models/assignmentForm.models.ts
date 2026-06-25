@@ -41,6 +41,21 @@ export interface IAssignmentFormColumn {
   order: number;
 }
 
+/**
+ * Cross-form role visibility entry. Primarily managed on the `broadcastArray`
+ * form, it maps a department role to where it should be shown:
+ *  - "broadcastArray": only in the Broadcast Array.
+ *  - "externalBroadcasts": only in External Broadcasts.
+ *  - "both": in both surfaces.
+ */
+export interface IAssignmentFormRoleScope {
+  departmentCode: string;
+  roleKey: string;
+  /** Display label captured at save time so renames don't break the map. */
+  roleLabel?: string;
+  scope: 'broadcastArray' | 'externalBroadcasts' | 'both';
+}
+
 export interface IAssignmentFormConfig extends Document {
   _id: mongoose.Types.ObjectId;
   /** Stable form key (e.g. "broadcastArray", "externalBroadcasts", "mcr"). */
@@ -53,6 +68,10 @@ export interface IAssignmentFormConfig extends Document {
   /** Column-based layout (broadcastArray form only). Empty for forms
    * that use the department-based layout. */
   columns: IAssignmentFormColumn[];
+  /** Cross-form role visibility map (primarily on broadcastArray). */
+  roleScopes: IAssignmentFormRoleScope[];
+  /** Free-text special/ad-hoc roles always surfaced (External Broadcasts). */
+  specialRoles: string[];
   /** Whether end-users can save shared presets on this form. */
   allowUserPresets: boolean;
   isActive: boolean;
@@ -86,6 +105,20 @@ const AssignmentFormColumnSchema = new Schema<IAssignmentFormColumn>(
   { _id: false },
 );
 
+const AssignmentFormRoleScopeSchema = new Schema<IAssignmentFormRoleScope>(
+  {
+    departmentCode: { type: String, required: true, trim: true },
+    roleKey: { type: String, required: true, trim: true },
+    roleLabel: { type: String, trim: true },
+    scope: {
+      type: String,
+      enum: ['broadcastArray', 'externalBroadcasts', 'both'],
+      default: 'broadcastArray',
+    },
+  },
+  { _id: false },
+);
+
 const AssignmentFormConfigSchema = new Schema<IAssignmentFormConfig>(
   {
     formKey: { type: String, required: true, unique: true, trim: true, index: true },
@@ -94,6 +127,8 @@ const AssignmentFormConfigSchema = new Schema<IAssignmentFormConfig>(
     description: { type: String },
     departments: { type: [AssignmentFormDepartmentSchema], default: [] },
     columns: { type: [AssignmentFormColumnSchema], default: [] },
+    roleScopes: { type: [AssignmentFormRoleScopeSchema], default: [] },
+    specialRoles: { type: [String], default: [] },
     allowUserPresets: { type: Boolean, default: true },
     isActive: { type: Boolean, default: true },
     updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },

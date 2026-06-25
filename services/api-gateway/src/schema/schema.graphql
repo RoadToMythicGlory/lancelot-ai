@@ -142,6 +142,21 @@ type AssignmentFormDepartmentDef {
   order: Int!
 }
 
+# Cross-form role visibility. Managed on the Broadcast Array form config,
+# this maps each department role to where it should appear:
+#   - "broadcastArray": only in the Broadcast Array.
+#   - "externalBroadcasts": only in External Broadcasts.
+#   - "both": in both surfaces.
+# External Broadcasts builds its per-event crew columns from every role
+# whose scope is "externalBroadcasts" or "both" (plus the form's free-text
+# specialRoles).
+type AssignmentFormRoleScopeDef {
+  departmentCode: String!
+  roleKey: String!
+  roleLabel: String
+  scope: String!
+}
+
 # Column-based layout used by the broadcastArray form. Each column
 # corresponds to a role column rendered in the Broadcast Array grid;
 # `hebrewLabel` doubles as the `role` value stored in
@@ -165,6 +180,12 @@ type AssignmentFormConfig {
   description: String
   departments: [AssignmentFormDepartmentDef!]!
   columns: [AssignmentFormColumnDef!]!
+  # Cross-form role visibility map (primarily managed on the broadcastArray
+  # form). Empty for forms that don't define it.
+  roleScopes: [AssignmentFormRoleScopeDef!]!
+  # Free-text special/ad-hoc roles that should always appear (used by
+  # External Broadcasts to surface one-off roles not tied to a department).
+  specialRoles: [String!]!
   allowUserPresets: Boolean!
   isActive: Boolean!
   createdAt: DateTime!
@@ -190,6 +211,13 @@ input AssignmentFormColumnDefInput {
   order: Int
 }
 
+input AssignmentFormRoleScopeDefInput {
+  departmentCode: String!
+  roleKey: String!
+  roleLabel: String
+  scope: String!
+}
+
 input UpsertAssignmentFormConfigInput {
   formKey: String!
   name: String!
@@ -197,6 +225,8 @@ input UpsertAssignmentFormConfigInput {
   description: String
   departments: [AssignmentFormDepartmentDefInput!]!
   columns: [AssignmentFormColumnDefInput!]
+  roleScopes: [AssignmentFormRoleScopeDefInput!]
+  specialRoles: [String!]
   allowUserPresets: Boolean
   isActive: Boolean
 }
@@ -349,7 +379,16 @@ type WarehouseEquipment {
   disabledBy: User
   disabledReason: String
   suspensionStatus: String
-  
+
+  # NEVION-specific capability — number of cameras a single NEVION unit
+  # can handle. Used by the External Broadcasts auto-request rule to pick
+  # the smallest NEVION whose capacity is >= the required camera count.
+  nevionCameraCapacity: Int
+
+  # LiveU console identifier (distinct from `barcode`). Optional and only
+  # populated for LIVEU kit equipment.
+  liveuInternalId: String
+
   # Activity tracking
   lastUsedAt: DateTime
   
@@ -378,12 +417,154 @@ type WarehouseEquipmentPickerItem {
   quantityAvailable: Int
   isQuantityBased: Boolean!
   isDisabled: Boolean!
+  nevionCameraCapacity: Int
+  liveuInternalId: String
 }
 
 type StorageLocation {
   row: String
   shelf: String
   cell: String
+}
+
+# A warehouse device surfaced in the External Broadcasts device-config
+# screen (NEVION units and LiveU kits). `available` is false while a kit is
+# still awaiting a warehouse barcode (newly registered by EB) or otherwise
+# out of stock.
+type ExternalBroadcastDevice {
+  id: ID!
+  name: String!
+  category: String
+  barcode: String
+  quantityTotal: Int
+  quantityAvailable: Int
+  available: Boolean!
+  awaitingBarcode: Boolean!
+  isNevion: Boolean!
+  isLiveu: Boolean!
+  nevionCameraCapacity: Int
+  liveuInternalId: String
+}
+
+input RegisterLiveuDeviceInput {
+  name: String!
+  liveuInternalId: String
+  # Optional free-text manufacturer / model passthrough.
+  company: String
+  equipmentModel: String
+}
+
+# ============================================================================
+# External Broadcasts operations
+# ============================================================================
+
+type EquipmentFaultReport {
+  id: ID!
+  equipmentId: ID!
+  equipmentName: String
+  equipmentBarcode: String
+  eventId: ID
+  eventName: String
+  description: String!
+  severity: String!
+  status: String!
+  reportedBy: String
+  reportedByName: String
+  reportedAt: DateTime!
+  resolvedBy: String
+  resolvedByName: String
+  resolvedAt: DateTime
+  resolutionNotes: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+input CreateEquipmentFaultReportInput {
+  equipmentId: ID!
+  eventId: ID
+  description: String!
+  severity: String
+}
+
+input UpdateEquipmentFaultReportInput {
+  description: String
+  severity: String
+  status: String
+}
+
+type ExternalBroadcastChangeLogEntry {
+  id: ID!
+  eventId: ID!
+  field: String!
+  previousValue: JSON
+  newValue: JSON
+  changedBy: String
+  changedByName: String
+  changedAt: DateTime!
+}
+
+type WorkerAssignmentRow {
+  eventId: ID!
+  eventTitle: String
+  startTime: DateTime
+  endTime: DateTime
+  league: String
+  channel: String
+  location: String
+  workerName: String!
+  roleLabel: String
+}
+
+type LiveUActivationResult {
+  success: Boolean!
+  recipient: String!
+  internalIds: [String!]!
+  emailSent: Boolean!
+  message: String
+}
+
+type NevionAutoRequestResult {
+  unresolved: Boolean!
+  selectedEquipmentId: ID
+  selectedEquipmentName: String
+  selectedCapacity: Int
+  requiredCameraCount: Int!
+  message: String
+}
+
+# Reference data — vehicles, trailers, control rooms, broadcast types.
+type ExternalBroadcastReference {
+  id: ID!
+  kind: String!
+  name: String!
+  description: String
+  broadcastTypeGroup: String
+  fiberCount: Int
+  fiberPort: String
+  fiberPrice: Float
+  returnFiber: String
+  setupTimeMinutes: Int
+  calculationType: String
+  extra: JSON
+  isActive: Boolean!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+input ExternalBroadcastReferenceInput {
+  id: ID
+  kind: String!
+  name: String!
+  description: String
+  broadcastTypeGroup: String
+  fiberCount: Int
+  fiberPort: String
+  fiberPrice: Float
+  returnFiber: String
+  setupTimeMinutes: Int
+  calculationType: String
+  extra: JSON
+  isActive: Boolean
 }
 
 # EquipmentCategory — the single source of truth for equipment categories.
@@ -614,11 +795,17 @@ input CreateEquipmentInput {
   quantityTotal: Int!
   isQuantityBased: Boolean
   isSharedEngineeringEquipment: Boolean
+  nevionCameraCapacity: Int
+  liveuInternalId: String
 }
 
 input UpdateEquipmentInput {
   name: String
   category: String
+  # Warehouse-assigned tracking barcode. Setting this on a kit that was
+  # registered without one (e.g. a LiveU added by External Broadcasts) makes
+  # the kit available in stock.
+  barcode: String
   price: Float
   purchaseDate: DateTime
   warrantyExpiryDate: DateTime
@@ -640,6 +827,8 @@ input UpdateEquipmentInput {
   suspensionStatus: String
   isQuantityBased: Boolean
   isSharedEngineeringEquipment: Boolean
+  nevionCameraCapacity: Int
+  liveuInternalId: String
 }
 
 input StorageLocationInput {
@@ -876,7 +1065,12 @@ type BroadcastEvent {
   synopsis: String
   synopsis_file: String
   synopsisFile: String
-  channel: String!
+  # `channel` was originally declared as required, but the broadcast import
+  # pipeline produces rows without a channel (legacy data, draft events,
+  # venue-only entries). Making it nullable lets the API return those rows
+  # without crashing the query; UI surfaces already render `-` for missing
+  # channels.
+  channel: String
   parallelChannel: String
   channel1_4k: Boolean
   live: Boolean
@@ -903,7 +1097,8 @@ type BroadcastEvent {
   stage: String
   homeTeam: String
   awayTeam: String
-  production_crew: [String!]
+  # production_crew removed — legacy field, replaced by
+  # `metadata.departments.externalBroadcasts.customData.productionCrew`.
   equipment_list: [String!]
   file_path: String
   reception_start_time: DateTime
@@ -971,7 +1166,8 @@ input CreateBroadcastEventInput {
   stage: String
   homeTeam: String
   awayTeam: String
-  production_crew: [String!]
+  # production_crew removed — legacy field, replaced by
+  # `metadata.departments.externalBroadcasts.customData.productionCrew`.
   equipment_list: [String!]
   file_path: String
   reception_start_time: DateTime
@@ -1032,7 +1228,8 @@ input UpdateBroadcastEventInput {
   stage: String
   homeTeam: String
   awayTeam: String
-  production_crew: [String!]
+  # production_crew removed — legacy field, replaced by
+  # `metadata.departments.externalBroadcasts.customData.productionCrew`.
   equipment_list: [String!]
   file_path: String
   reception_start_time: DateTime
@@ -1077,7 +1274,8 @@ input ExcelBroadcastEventInput {
   stage: String
   homeTeam: String
   awayTeam: String
-  production_crew: [String!]
+  # production_crew removed — legacy field, replaced by
+  # `metadata.departments.externalBroadcasts.customData.productionCrew`.
   equipment_list: [String!]
   file_path: String
   reception_start_time: DateTime
@@ -1457,6 +1655,10 @@ type Query {
   # equipment-sets Preset Items selector). Up to 5000 items, name-sorted,
   # optionally filtered by a free-text `search` over name/barcode/model.
   warehouseEquipmentForPicker(search: String): [WarehouseEquipmentPickerItem!]!
+  # NEVION units and LiveU kits surfaced in the External Broadcasts
+  # device-config screen, including LiveU kits still awaiting a warehouse
+  # barcode. Readable by BROADCAST_VIEW or WAREHOUSE_VIEW.
+  externalBroadcastDevices: [ExternalBroadcastDevice!]!
   # Distinct, sorted list of categories present in the active (non-disabled)
   # equipment catalog. Used to populate the warehouse list category filter
   # without having to download the full catalog client-side.
@@ -1574,6 +1776,43 @@ type Query {
   # equipment defaults when a venue is selected).
   venues(includeInactive: Boolean): [Venue!]!
   venue(id: ID!): Venue
+
+  # ===== External Broadcasts operations =====
+  # Equipment fault reports — read all faults (optionally filtered by
+  # equipment, event, or status). Both the External Broadcasts UI and the
+  # warehouse "blocked equipment" report use this query.
+  equipmentFaultReports(
+    equipmentId: ID
+    eventId: ID
+    status: String
+    limit: Int
+  ): [EquipmentFaultReport!]!
+
+  # Change log for External Broadcasts metadata — every status / control-check /
+  # double-broadcast / NEVION / LiveU / finance / exclude edit produces an
+  # entry. Filter by event or date range; defaults to the last 200 entries.
+  externalBroadcastChangeLog(
+    eventId: ID
+    startDate: DateTime
+    endDate: DateTime
+    limit: Int
+  ): [ExternalBroadcastChangeLogEntry!]!
+
+  # Read-only worker assignment search across External Broadcasts events.
+  # Searches `productionCrew` + `dynamicJobs` metadata for the given query
+  # text and returns the events where that worker appears.
+  externalBroadcastWorkerAssignments(
+    query: String!
+    startDate: DateTime
+    endDate: DateTime
+  ): [WorkerAssignmentRow!]!
+
+  # External Broadcasts reference data — vehicles, trailers, control rooms,
+  # broadcast types. One typed collection per kind. The control-room list is
+  # the single source of truth used by the Broadcast Array form, External
+  # Broadcasts (incl. the double-broadcast secondary control selector),
+  # MCR views, and reports.
+  externalBroadcastReference(kind: String, includeInactive: Boolean): [ExternalBroadcastReference!]!
 }
 
 type Mutation {
@@ -1735,6 +1974,66 @@ type Mutation {
   createVenue(input: CreateVenueInput!): Venue!
   updateVenue(id: ID!, input: UpdateVenueInput!): Venue!
   deleteVenue(id: ID!): Boolean!
+
+  # ===== External Broadcasts operations =====
+  # Open / update / resolve an equipment fault report. Opening blocks the
+  # warehouse from assigning the equipment to a new event until resolved.
+  createEquipmentFaultReport(input: CreateEquipmentFaultReportInput!): EquipmentFaultReport!
+  updateEquipmentFaultReport(id: ID!, input: UpdateEquipmentFaultReportInput!): EquipmentFaultReport!
+  resolveEquipmentFaultReport(id: ID!, resolutionNotes: String): EquipmentFaultReport!
+
+  # Send a LiveU activation email request for an event's selected kits.
+  # The email lists the LiveU internal IDs; the warehouse stays the source
+  # of truth for which barcodes are actually allocated.
+  sendLiveUActivationRequest(
+    eventId: ID!
+    recipient: String!
+    kitEquipmentIds: [ID!]!
+    extraNotes: String
+  ): LiveUActivationResult!
+
+  # Auto-request the smallest available NEVION whose camera capacity is
+  # >= `requiredCameraCount`. Adds (or replaces) the system-generated line
+  # in `externalBroadcasts.customData.equipmentList`. Returns the chosen
+  # equipment plus an `unresolved` flag when nothing fits.
+  autoRequestNevion(
+    eventId: ID!
+    requiredCameraCount: Int!
+  ): NevionAutoRequestResult!
+
+  # Persist a manual drag-reorder of events for a specific date. The list
+  # of event IDs becomes the canonical order (1, 2, 3, ...). Other events
+  # for that date keep their current `startTime` ordering.
+  reorderExternalBroadcastEvents(date: DateTime!, eventIds: [ID!]!): Boolean!
+
+  # Mark events from broadcast planning as imported into External Broadcasts.
+  # Returns the count of newly-imported events (already-imported events are
+  # skipped). External Broadcasts shows only imported events; this mutation
+  # is the explicit opt-in performed via the "ייבא אירועים מתכנונית" modal.
+  importBroadcastEventsToExternalBroadcasts(eventIds: [ID!]!): Int!
+
+  # Inverse of import — clear the imported flag without deleting any saved
+  # operational metadata. Returns the count of events that were actually
+  # un-imported (events that weren't imported are skipped).
+  unimportBroadcastEventsFromExternalBroadcasts(eventIds: [ID!]!): Int!
+
+  # External Broadcasts device configuration. These let External Broadcasts
+  # managers (BROADCAST_MANAGE) OR warehouse staff (WAREHOUSE_MANAGE) set the
+  # capability metadata that the EB auto-request / activation flows rely on,
+  # without opening the full warehouse equipment editor.
+  #
+  # Set the NEVION camera capacity (pass null to clear) on a warehouse device.
+  setNevionCameraCapacity(equipmentId: ID!, capacity: Int): ExternalBroadcastDevice!
+  # Set the LiveU internal/console ID (pass null/empty to clear) on a device.
+  setLiveuInternalId(equipmentId: ID!, liveuInternalId: String): ExternalBroadcastDevice!
+  # Register a brand-new LiveU kit from External Broadcasts. The item is
+  # created WITHOUT a barcode and is therefore unavailable in the warehouse
+  # until warehouse staff assign a barcode (which flips it available).
+  registerLiveuDevice(input: RegisterLiveuDeviceInput!): ExternalBroadcastDevice!
+
+  # External Broadcasts reference data CRUD (vehicles, trailers, etc.).
+  upsertExternalBroadcastReference(input: ExternalBroadcastReferenceInput!): ExternalBroadcastReference!
+  deleteExternalBroadcastReference(id: ID!): Boolean!
 
   # Department management
   createDepartment(input: CreateDepartmentInput!): Department!

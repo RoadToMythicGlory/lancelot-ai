@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import Image from 'next/image';
 import { useMutation, useQuery } from '@apollo/client';
 import { App, Button, Spin, Tooltip } from 'antd';
 import {
@@ -455,6 +456,17 @@ export function FlightBoardPageInner({ pinnedBoard }: FlightBoardPageInnerProps 
         ) : (
           renderPanels()
         )}
+
+        <footer className="flight-board-logo-footer" aria-label="Lancelot">
+          <Image
+            src="/lancelot-white-logo.png"
+            alt="Lancelot"
+            width={180}
+            height={55}
+            className="flight-board-footer-logo"
+            unoptimized
+          />
+        </footer>
       </div>
 
       {kiosk && (

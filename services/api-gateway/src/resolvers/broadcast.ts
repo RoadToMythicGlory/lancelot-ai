@@ -500,6 +500,8 @@ export const broadcastResolvers = {
           disabledAt: item.disabledAt?.toISOString() || null,
           disabledReason: item.disabledReason || null,
           suspensionStatus: item.suspensionStatus || null,
+          nevionCameraCapacity: item.nevionCameraCapacity ?? null,
+          liveuInternalId: item.liveuInternalId || null,
           lastUsedAt: item.lastUsedAt?.toISOString() || null,
           createdAt: item.createdAt.toISOString(),
           updatedAt: item.updatedAt.toISOString()
@@ -539,6 +541,10 @@ export const broadcastResolvers = {
         const query: any = {
           isDisabled: { $ne: true },
           name: { $type: 'string', $ne: '' },
+          // Exclude items still awaiting a warehouse barcode (e.g. a LiveU
+          // registered by External Broadcasts). They are not yet available
+          // to be picked onto an event until the warehouse assigns one.
+          barcode: { $type: 'string', $ne: '' },
         };
         if (args?.search) {
           const re = new RegExp(args.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
@@ -560,6 +566,8 @@ export const broadcastResolvers = {
             isQuantityBased: 1,
             isDisabled: 1,
             company: 1,
+            nevionCameraCapacity: 1,
+            liveuInternalId: 1,
           })
           .sort({ name: 1 })
           .limit(PICKER_LIMIT)
@@ -581,6 +589,8 @@ export const broadcastResolvers = {
             isQuantityBased: !!it.isQuantityBased,
             isDisabled: !!it.isDisabled,
             brand: it.company || null,
+            nevionCameraCapacity: it.nevionCameraCapacity ?? null,
+            liveuInternalId: it.liveuInternalId || null,
           }));
       } catch (err) {
         console.error('Error fetching warehouse equipment picker list:', err);
@@ -770,7 +780,8 @@ export const broadcastResolvers = {
           stage: event.stage,
           homeTeam: event.homeTeam,
           awayTeam: event.awayTeam,
-          production_crew: event.production_crew || [],
+          // production_crew dropped — crew is now read from the External
+          // Broadcasts custom data block.
           equipment_list: event.equipment_list || [],
           file_path: event.file_path,
           reception_start_time: event.reception_start_time?.toISOString(),
@@ -873,7 +884,8 @@ export const broadcastResolvers = {
           stage: event.stage,
           homeTeam: event.homeTeam,
           awayTeam: event.awayTeam,
-          production_crew: event.production_crew || [],
+          // production_crew dropped — crew is now read from the External
+          // Broadcasts custom data block.
           equipment_list: event.equipment_list || [],
           file_path: event.file_path,
           reception_start_time: event.reception_start_time?.toISOString(),
@@ -1090,7 +1102,6 @@ export const broadcastResolvers = {
             venue: event.venue,
             liveLocation: event.liveLocation,
             channel: event.channel || '',
-            production_crew: event.production_crew || [],
             equipment_list: event.equipment_list || [],
             metadata: event.metadata,
             createdAt: (event.createdAt || now).toISOString
@@ -1532,6 +1543,11 @@ export const broadcastResolvers = {
           currentLocation,
           isQuantityBased: input.isQuantityBased ?? QUANTITY_BASED_DEFAULT_CATEGORIES.has(input.category),
           isSharedEngineeringEquipment: input.isSharedEngineeringEquipment ?? false,
+          nevionCameraCapacity:
+            typeof input.nevionCameraCapacity === 'number' && input.nevionCameraCapacity >= 0
+              ? input.nevionCameraCapacity
+              : undefined,
+          liveuInternalId: input.liveuInternalId ?? undefined,
           lastUsedAt: new Date()
         });
 
@@ -1574,6 +1590,8 @@ export const broadcastResolvers = {
           disabledAt: savedEquipment.disabledAt?.toISOString() || null,
           disabledReason: savedEquipment.disabledReason || null,
           suspensionStatus: savedEquipment.suspensionStatus || null,
+          nevionCameraCapacity: savedEquipment.nevionCameraCapacity ?? null,
+          liveuInternalId: savedEquipment.liveuInternalId || null,
           lastUsedAt: savedEquipment.lastUsedAt?.toISOString() || null,
           createdAt: savedEquipment.createdAt.toISOString(),
           updatedAt: savedEquipment.updatedAt.toISOString()
@@ -1692,6 +1710,54 @@ export const broadcastResolvers = {
         if (input.isSharedEngineeringEquipment !== undefined) {
           updateData.isSharedEngineeringEquipment = !!input.isSharedEngineeringEquipment;
         }
+        if (input.nevionCameraCapacity !== undefined) {
+          // `null` clears the field; positive numbers set it; negatives are ignored.
+          if (input.nevionCameraCapacity === null) {
+            updateData.nevionCameraCapacity = null;
+          } else if (
+            typeof input.nevionCameraCapacity === 'number' &&
+            input.nevionCameraCapacity >= 0
+          ) {
+            updateData.nevionCameraCapacity = input.nevionCameraCapacity;
+          }
+        }
+        if (input.liveuInternalId !== undefined) {
+          updateData.liveuInternalId = input.liveuInternalId
+            ? String(input.liveuInternalId).trim()
+            : null;
+        }
+
+        // Barcode assignment. When a previously barcode-less kit (registered
+        // by External Broadcasts and awaiting warehouse intake) gets its
+        // first barcode, it enters stock and becomes available.
+        if (input.barcode !== undefined) {
+          const newBarcode = input.barcode ? String(input.barcode).trim() : '';
+          if (newBarcode) {
+            updateData.barcode = newBarcode;
+            const existing = await Equipment.findById(id)
+              .select({ barcode: 1, quantityTotal: 1, quantityAssigned: 1, status: 1 })
+              .lean()
+              .exec();
+            const hadBarcode =
+              existing && typeof (existing as any).barcode === 'string' &&
+              (existing as any).barcode.trim().length > 0;
+            if (existing && !hadBarcode) {
+              const total = (existing as any).quantityTotal || 1;
+              const assigned = (existing as any).quantityAssigned || 0;
+              if (input.quantityTotal === undefined) {
+                updateData.quantityAvailable = Math.max(total - assigned, 0);
+              } else {
+                updateData.quantityAvailable = Math.max(
+                  (input.quantityTotal || 0) - assigned,
+                  0,
+                );
+              }
+              if (input.status === undefined && (existing as any).status === 'maintenance') {
+                updateData.status = 'available';
+              }
+            }
+          }
+        }
 
         // Update equipment
         const updatedEquipment = await Equipment.findByIdAndUpdate(
@@ -1742,6 +1808,8 @@ export const broadcastResolvers = {
           disabledAt: updatedEquipment.disabledAt?.toISOString() || null,
           disabledReason: updatedEquipment.disabledReason || null,
           suspensionStatus: updatedEquipment.suspensionStatus || null,
+          nevionCameraCapacity: updatedEquipment.nevionCameraCapacity ?? null,
+          liveuInternalId: updatedEquipment.liveuInternalId || null,
           lastUsedAt: updatedEquipment.lastUsedAt?.toISOString() || null,
           createdAt: updatedEquipment.createdAt.toISOString(),
           updatedAt: updatedEquipment.updatedAt.toISOString()

@@ -21,6 +21,9 @@ import {
   Popconfirm,
   Tooltip,
   Alert,
+  Segmented,
+  Divider,
+  Empty,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -79,6 +82,15 @@ interface FormColumnEntry {
   order: number;
 }
 
+type RoleScope = 'broadcastArray' | 'externalBroadcasts' | 'both';
+
+interface FormRoleScopeEntry {
+  departmentCode: string;
+  roleKey: string;
+  roleLabel?: string;
+  scope: RoleScope;
+}
+
 interface FormConfigRecord {
   id: string;
   formKey: string;
@@ -89,6 +101,8 @@ interface FormConfigRecord {
   isActive: boolean;
   departments: FormDepartmentEntry[];
   columns?: FormColumnEntry[];
+  roleScopes?: FormRoleScopeEntry[];
+  specialRoles?: string[];
 }
 
 /** Forms that render with the column-based admin editor. Today only the
@@ -254,8 +268,17 @@ const AssignmentFormConfigPanel: React.FC = () => {
   const [form] = Form.useForm();
   const [entries, setEntries] = useState<FormDepartmentEntry[]>([]);
   const [columns_, setColumns] = useState<FormColumnEntry[]>([]);
+  // Cross-form role visibility, keyed by `${departmentCode}::${roleKey}`.
+  const [roleScopeMap, setRoleScopeMap] = useState<Record<string, RoleScope>>({});
+  const [specialRoles, setSpecialRoles] = useState<string[]>([]);
 
   const isColumnBased = COLUMN_BASED_FORM_KEYS.has(currentFormKey);
+
+  const scopeKey = (departmentCode: string, roleKey: string) => `${departmentCode}::${roleKey}`;
+  const getScope = (departmentCode: string, roleKey: string): RoleScope =>
+    roleScopeMap[scopeKey(departmentCode, roleKey)] || 'broadcastArray';
+  const setScope = (departmentCode: string, roleKey: string, scope: RoleScope) =>
+    setRoleScopeMap((prev) => ({ ...prev, [scopeKey(departmentCode, roleKey)]: scope }));
 
   const openEdit = (record?: FormConfigRecord, defaults?: { key: string; hebrewName: string; defaultName: string }) => {
     if (record) {
@@ -290,6 +313,12 @@ const AssignmentFormConfigPanel: React.FC = () => {
           order: typeof c.order === 'number' ? c.order : i,
         })),
       );
+      const scopeMap: Record<string, RoleScope> = {};
+      for (const r of record.roleScopes || []) {
+        scopeMap[scopeKey(r.departmentCode, r.roleKey)] = r.scope || 'broadcastArray';
+      }
+      setRoleScopeMap(scopeMap);
+      setSpecialRoles(record.specialRoles || []);
     } else {
       setEditingFormKey(null);
       setCurrentFormKey(defaults?.key || '');
@@ -303,6 +332,8 @@ const AssignmentFormConfigPanel: React.FC = () => {
       });
       setEntries([]);
       setColumns([]);
+      setRoleScopeMap({});
+      setSpecialRoles([]);
     }
     setModalVisible(true);
   };
@@ -310,6 +341,23 @@ const AssignmentFormConfigPanel: React.FC = () => {
   const handleSubmit = async (values: any) => {
     try {
       const columnBased = COLUMN_BASED_FORM_KEYS.has(values.formKey);
+      // Persist only roles explicitly marked for External Broadcasts or both
+      // (everything else defaults to broadcastArray-only).
+      const roleScopesPayload = columnBased
+        ? Object.entries(roleScopeMap)
+            .filter(([, scope]) => scope === 'externalBroadcasts' || scope === 'both')
+            .map(([key, scope]) => {
+              const [departmentCode, roleKey] = key.split('::');
+              const dept = departmentByCode.get(departmentCode);
+              const roleDef = (dept?.departmentRoles || []).find((r) => r.key === roleKey);
+              return {
+                departmentCode,
+                roleKey,
+                roleLabel: roleDef?.hebrewName || roleDef?.name || roleKey,
+                scope,
+              };
+            })
+        : [];
       const payload = {
         formKey: values.formKey,
         name: values.name,
@@ -317,6 +365,8 @@ const AssignmentFormConfigPanel: React.FC = () => {
         description: values.description || null,
         allowUserPresets: values.allowUserPresets !== false,
         isActive: values.isActive !== false,
+        roleScopes: roleScopesPayload,
+        specialRoles: columnBased ? specialRoles : [],
         departments: entries.map((e, i) => ({
           departmentCode: e.departmentCode,
           allowedRoleKeys: e.allowedRoleKeys || [],
@@ -653,6 +703,79 @@ const AssignmentFormConfigPanel: React.FC = () => {
   // ---- Column-based editor (broadcastArray etc.) ----
   // Each row = one column rendered in the Broadcast Array grid. Admins
   // populate it with allowed departments and/or pinned individual users.
+  const renderRoleVisibilityEditor = () => {
+    const deptsWithRoles = departments.filter(
+      (d) => (d.departmentRoles || []).some((r) => r.isActive !== false),
+    );
+    return (
+      <div>
+        <Divider />
+        <Title level={5}>נראות תפקידים — שידורי חוץ / מערך שידורים</Title>
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="קבע לכל תפקיד היכן הוא מוצג. תפקידים המסומנים 'שידורי חוץ' או 'שניהם' יופיעו כעמודות צוות בכל אירוע שידורי חוץ. ברירת המחדל היא 'מערך שידורים' בלבד."
+        />
+        {deptsWithRoles.length === 0 ? (
+          <Empty description="לא הוגדרו תפקידים במחלקות" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        ) : (
+          <div style={{ maxHeight: 320, overflowY: 'auto', paddingInlineEnd: 8 }}>
+            {deptsWithRoles.map((dept) => (
+              <div key={dept.code} style={{ marginBottom: 16 }}>
+                <Text strong>{dept.hebrewName || dept.name}</Text>
+                <div style={{ marginTop: 8 }}>
+                  {(dept.departmentRoles || [])
+                    .filter((r) => r.isActive !== false)
+                    .map((role) => (
+                      <Row
+                        key={role.key}
+                        gutter={8}
+                        align="middle"
+                        style={{ marginBottom: 6 }}
+                      >
+                        <Col flex="auto">
+                          <Text>{role.hebrewName || role.name || role.key}</Text>
+                        </Col>
+                        <Col>
+                          <Segmented
+                            size="small"
+                            value={getScope(dept.code, role.key)}
+                            onChange={(v) => setScope(dept.code, role.key, v as RoleScope)}
+                            options={[
+                              { label: 'מערך שידורים', value: 'broadcastArray' },
+                              { label: 'שידורי חוץ', value: 'externalBroadcasts' },
+                              { label: 'שניהם', value: 'both' },
+                            ]}
+                          />
+                        </Col>
+                      </Row>
+                    ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <Divider />
+        <Title level={5}>תפקידים מיוחדים (שידורי חוץ)</Title>
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="תפקידים חופשיים נוספים שאינם משויכים למחלקה ויופיעו תמיד בכל אירוע שידורי חוץ (למשל: רחפן, גריפ)."
+        />
+        <Select
+          mode="tags"
+          style={{ width: '100%' }}
+          placeholder="הקלד שם תפקיד והקש Enter"
+          value={specialRoles}
+          onChange={(vals) => setSpecialRoles(vals as string[])}
+          tokenSeparators={[',']}
+        />
+      </div>
+    );
+  };
+
   const renderColumnsEditor = () => (
     <div>
       {columns_.length === 0 ? (
@@ -1008,6 +1131,7 @@ const AssignmentFormConfigPanel: React.FC = () => {
                 message="לכל עמודה בטופס מערך השידור, הוסף את המחלקות שניתן לבחור מהן ו/או משתמשים בודדים שיהיו זמינים גם הם בעמודה זו."
               />
               {renderColumnsEditor()}
+              {renderRoleVisibilityEditor()}
             </>
           ) : (
             <>

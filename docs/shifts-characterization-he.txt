@@ -1,0 +1,218 @@
+אפיון מודול משמרות — Lancelot AI
+גרסה: 10.06.2026
+
+מטרת המסמך
+-----------
+מסמך זה מתאר את אפיון מודול המשמרות: שיבוץ עובדים, בקשות חופש והחלפה,
+העדפות, אילוצים, שיבוץ AI, שליחת WhatsApp ואישורים.
+המסמך מתמקד בדרישות עסקיות ותפעוליות בלבד.
+
+
+1. מטרת מודול המשמרות
+---------------------
+מודול המשמרות הוא מקור האמת לשיבוץ עובדים בארגון.
+
+הוא מיועד ל:
+- שיבוץ עובדים למשמרות לפי מחלקה, תאריך וסוג משמרת.
+- ניהול בקשות חופש, מחלה והחלפת משמרות.
+- איסוף העדפות ואילוצי זמינות מעובדים.
+- אישור בקשות על ידי מנהל מחלקה.
+- הצעות שיבוץ אוטומטיות (AI היוריסטי).
+- שליחת לוח שיבוץ לעובדים ב-WhatsApp.
+- דוחות ניצול ושעות.
+
+מודול המשמרות אינו מחליף את מערך השידורים. שיבוץ תפעולי לשידור (עורך, מפיק)
+נשאר במערך השידורים ואינו יוצר משמרת אוטומטית.
+
+
+2. עקרונות יסוד
+---------------
+- משמרת = יום + סוג משמרת + מחלקה (ייחודי).
+- עובד יכול להיות משובץ למספר APL (תפקידים) באותה משמרת.
+- אילוצי עובד אינם ערבון — מנהל יכול לעקוף במקרי חירום.
+- שיבוץ במערך השידורים מזהיר על חוסר זמינות — לא חוסם.
+- כל הממשק בעברית, RTL, Asia/Jerusalem.
+
+
+3. מפת דפים
+-----------
+
+3.1 עובד
+| נתיב | תיאור | הרשאה |
+|------|--------|--------|
+| /shifts | דף בית — קישורים, משמרות קרובות | SHIFTS_VIEW_OWN |
+| /shifts/my-shifts | המשמרות שלי | SHIFTS_VIEW_OWN |
+| /shifts/my-requests | בקשות חופש/החלפה | SHIFTS_VIEW_OWN |
+| /shifts/my-preferences | העדפות שיבוץ שבועיות | SHIFTS_VIEW_OWN |
+| /shifts/work-log | יומן עבודה | SHIFTS_VIEW_OWN |
+| /shifts/agreements | הסכמים | SHIFTS_VIEW_OWN |
+| /shifts/daily-schedule | סידור יומי (צפייה) | SHIFTS_VIEW_OWN / ALL |
+| /shifts/weekly-schedule | סידור שבועי | כנ"ל |
+| /shifts/schedule-by-employee | סידור לפי עובד | כנ"ל |
+| /shifts/support | פנייה לתמיכה | SHIFTS_VIEW_OWN |
+
+3.2 מנהל מחלקה (HoD)
+| נתיב | תיאור | הרשאה |
+|------|--------|--------|
+| /shifts/manage/hod | לוח בקרה מחלקתי | SHIFTS_MANAGE (מחלקה) |
+| /shifts/manage/assign | שיבוץ ידני + AI + WhatsApp | SHIFTS_MANAGE |
+| /shifts/manage/department-schedule | לוח מחלקה | SHIFTS_MANAGE |
+| /shifts/manage/department-users | עובדי מחלקה / APL | SHIFTS_MANAGE |
+| /shifts/manage/configure-shifts | סוגי משמרת | SHIFTS_MANAGE |
+| /shifts/manage/configure-constraints | ConstraintRule | SHIFTS_MANAGE |
+| /shifts/manage/scheduling-rules | SchedulingRule | SHIFTS_MANAGE |
+| /shifts/manage/approvals | אישור חופשות והחלפות | SHIFTS_MANAGE |
+| /shifts/manage/employee-preferences | צפייה בהעדפות | SHIFTS_MANAGE |
+
+3.3 מנהל מערכת
+| נתיב | תיאור |
+|------|--------|
+| /shifts/admin | לוח בקרה ארגוני |
+| /shifts/admin/departments | הגדרות מחלקות |
+| /shifts/admin/users | משתמשים בהקשר משמרות |
+| /shifts/admin/system-settings | הגדרות מערכת |
+
+
+4. ישויות ושדות
+---------------
+
+4.1 Shift (משמרת)
+| שדה | תיאור | חובה |
+|-----|--------|------|
+| date | תאריך | כן |
+| shiftType | סוג משמרת (דינמי לפי מחלקה) | כן |
+| department | מזהה מחלקה | כן |
+| requiredWorkers | כמות נדרשת | כן |
+| assignedWorkers[] | userId, role, assignedAt, assignedBy | כן (יכול ריק) |
+| startTime / endTime | שעות (נגזר מ-ShiftTypeDef) | לא |
+| templateId | קישור לתבנית | לא |
+| notes | הערות | לא |
+| status | cancelled וכו' | לא |
+
+אינדекс ייחודי: (date, shiftType, department).
+
+4.2 ShiftTypeDef
+| שדה | תיאור |
+|-----|--------|
+| departmentId, name | בוקר/ערב/לילה |
+| startTime, endTime | HH:MM |
+| role, color, order, active | תצוגה |
+
+4.3 APL (תפקיד במשמרת)
+| שדה | תיאור |
+|-----|--------|
+| name, color, order | תווית |
+| eligibleUserIds[] | עובדים זכאים |
+| active | פעיל/מושבת |
+
+4.4 Preference / AvailabilityConstraint
+| ישות | רמת פירוט | ערכי status |
+|------|-----------|-------------|
+| AvailabilityConstraint (legacy) | יום+shiftType | available, unavailable, prefer, prefer_not |
+| Preference (חדש) | יום+shiftType+aplId+rank | אותם ערכים |
+
+4.5 VacationRequest
+| שדה | ערכים |
+|-----|--------|
+| vacationType | annual, sick, personal, maternity, other |
+| startDate, endDate, reason | |
+| status | pending, approved, rejected, cancelled |
+| adminNotes, approvedBy, approvedAt | |
+
+תוויות עברית: ממתין, מאושר, נדחה, בוטל.
+
+4.6 ShiftSwapRequest
+| שדה | תיאור |
+|-----|--------|
+| requestingUserId, shiftId, targetUserId | |
+| reason, adminNotes | |
+| status | pending, approved, rejected, cancelled |
+
+4.7 SchedulingRule (אילוץ קשיח)
+| שדה | משמעות |
+|-----|---------|
+| maxDaysPerWeek | מקסימום ימי עבודה |
+| maxConsecutiveDays | ימים רצופים |
+| maxShiftsOfTypePerWeek + shiftTypeId | מגבלת סוג |
+| maxConsecutiveShiftsOfType | רצף אותו סוג |
+| categoryId + maxCategorySlotsPerWeek | קטגוריות (חג/סופ"ש) |
+
+4.8 ConstraintRule (אילוץ רך)
+| type | value |
+|------|-------|
+| max_prefer_not_per_week | מספר |
+| min_available_per_week | מספר |
+
+4.9 EmployeeSettings
+| שדה | תיאור |
+|-----|--------|
+| roles[], teams[] | תפקידים/צוותים |
+| employmentPercentage | 0–100 |
+| constraintDeadline | דדליין הגשת אילוצים |
+| restrictions[] | type, description, active |
+
+
+5. תהליכים צעד-אחר-צעד
+-----------------------
+
+5.1 עובד — בקשת חופשה
+1. /shifts/my-requests → טופס: תאריכים, סוג, סיבה, קובץ (אופציונלי).
+2. סטטוס pending.
+3. מנהל רואה ב-/shifts/manage/approvals.
+4. מאשר/דוחה + adminNotes → סטטוס סופי.
+
+5.2 עובד — החלפת משמרת
+1. בוחר משמרת → עובד יעד (מסונן לפי זמינות).
+2. עובד יעד מאשר/דוחה (אם נדרש).
+3. מנהל מאשר → החלפה בלוח.
+
+5.3 עובד — העדפות
+1. /shifts/my-preferences — מילוי Preference לשבוע.
+2. ConstraintRule מגביל כמה prefer_not ניתן להגיש.
+
+5.4 מנהל — שיבוץ ידני
+1. /shifts/manage/assign — בחירת מחלקה ושבוע.
+2. גרירה/מודאל שיבוץ ל-APL+ShiftType+תאריך.
+3. ולידציה מול SchedulingRule + חפיפות.
+
+5.5 מנהל — שיבוץ AI (aiScheduleSuggest)
+1. מודאל "הצעות שיבוץ אוטומטיות".
+2. אופציונלי: userPrompt בעברית/אנגלית.
+3. אלגוריתם דטרמיניסטי (לא LLM): ניקוד לפי Preference, eligibility, SchedulingRule.
+4. מנהל בוחר הצעות → applyAiSuggestions.
+
+5.6 מנהל — WhatsApp (dispatchDepartmentShiftAssignments)
+1. מודאל "שגר שיבוצים בוואטסאפ" — טווח תאריכים.
+2. לכל עובד: רק השיבוצים שלו (Meta WhatsApp Cloud API).
+3. תוצאה: sent | skipped | failed.
+4. דורש mobile בפרופיל עובד + WHATSAPP_ACCESS_TOKEN.
+
+5.7 מנהל — אישורים
+1. /shifts/manage/approvals — pending/approved/rejected.
+2. סינון מחלקה.
+3. חופשה/החלפה — אישור עם הערה.
+
+
+6. כללים עסקיים
+---------------
+- SHIFTS_MANAGE נבדק per-department (hasForDept).
+- פעולות מחלקתיות — רק במחלקות שבהן למנהל יש SHIFTS_MANAGE.
+- מחיקת משמרת — unique index מונע כפילויות.
+- AI מחזיר רשימה ריקה אם אין ShiftTypeDef/APL/עובדים.
+
+
+7. מקרי קצה
+-----------
+- עובד ללא mobile — נדלג ב-WhatsApp.
+- עובד ללא שיבוצים בטווח — נדלג.
+- החלפה שנדחתה — ללא שינוי לוח.
+- עובד מושבת (isActive=false) — לא מופיע בשיבוץ.
+
+
+8. הרשאות
+---------
+| פעולה | Permission |
+|-------|-----------|
+| משמרות אישיות | SHIFTS_VIEW_OWN |
+| סידור צוות | SHIFTS_VIEW_ALL |
+| שיבוץ/AI/WhatsApp/אישורים | SHIFTS_MANAGE (מחלקה) |

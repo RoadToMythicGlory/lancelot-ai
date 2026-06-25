@@ -51,6 +51,8 @@ interface EquipmentLike {
   quantityTotal?: number;
   isQuantityBased?: boolean;
   isSharedEngineeringEquipment?: boolean;
+  nevionCameraCapacity?: number | null;
+  liveuInternalId?: string | null;
   suspensionStatus?: string | null;
   condition?: string | null;
   currentLocation?: string | null;
@@ -123,6 +125,8 @@ const EquipmentEditModal: React.FC<EquipmentEditModalProps> = ({
       quantityTotal: equipment.quantityTotal ?? 1,
       isQuantityBased: !!equipment.isQuantityBased,
       isSharedEngineeringEquipment: !!equipment.isSharedEngineeringEquipment,
+      nevionCameraCapacity: equipment.nevionCameraCapacity ?? undefined,
+      liveuInternalId: equipment.liveuInternalId ?? undefined,
       dimensions: {
         length: equipment.dimensions?.length ?? undefined,
         width: equipment.dimensions?.width ?? undefined,
@@ -178,6 +182,11 @@ const EquipmentEditModal: React.FC<EquipmentEditModalProps> = ({
         quantityTotal: values.quantityTotal || 1,
         isQuantityBased: values.isQuantityBased ?? false,
         isSharedEngineeringEquipment: values.isSharedEngineeringEquipment ?? false,
+        nevionCameraCapacity:
+          typeof values.nevionCameraCapacity === 'number'
+            ? values.nevionCameraCapacity
+            : null,
+        liveuInternalId: values.liveuInternalId || null,
         dimensions: (() => {
           const d = values.dimensions || {};
           const hasAny =
@@ -298,6 +307,22 @@ const EquipmentEditModal: React.FC<EquipmentEditModalProps> = ({
                     tooltip="סימון ציוד שיופיע בלשונית ייעודית ב-MCR בכל פעם שהוא מוקצה לאירוע או לאיש צוות"
                   >
                     <Switch />
+                  </Form.Item>
+
+                  <Form.Item
+                    name="nevionCameraCapacity"
+                    label="קיבולת מצלמות NEVION"
+                    tooltip="מספר המצלמות שמכשיר NEVION בודד יכול לטפל בהן. השאר ריק אם הפריט אינו NEVION. משמש לבחירה אוטומטית של ה-NEVION הקטן ביותר שעונה על הצורך בשידור מולטי."
+                  >
+                    <InputNumber min={0} max={64} style={{ width: '100%' }} placeholder="לדוגמה: 4" />
+                  </Form.Item>
+
+                  <Form.Item
+                    name="liveuInternalId"
+                    label="תעודת זהות פנימית של LiveU"
+                    tooltip="המזהה הפנימי במערכת LiveU (לא ברקוד). מופיע במייל בקשת ההפעלה האוטומטית."
+                  >
+                    <Input placeholder="לדוגמה: LU-12345" />
                   </Form.Item>
                 </>
               ),

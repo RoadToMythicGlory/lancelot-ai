@@ -1,0 +1,74 @@
+אפיון אינטגרציות חיצוניות — Lancelot AI
+גרסה: 10.06.2026
+
+
+1. מטרה
+-------
+חיבור המערכת למערכות חיצוניות: Vizrt, WhatsApp, Email, Webhooks,
+REST API, BLE Tracking, Excel Parser, OR-Tools, Ollama.
+
+
+2. טבלת אינטגרציות
+------------------
+
+| אינטגרציה | כיוון | ייעוד | הרשאה/אימות |
+|-----------|--------|--------|-------------|
+| Vizrt Engine/Trio | יוצא | הפעלת CG (triggerCG) | VIZRT_OPERATE |
+| WhatsApp Cloud API | יוצא | שיבוצי משמרת לעובדים | SHIFTS_MANAGE |
+| Email (SMTP) | יוצא | LiveU, התראות | מערכת |
+| Webhooks | יוצא | אירועים לשותפים | INTEGRATIONS_MANAGE |
+| REST External API | נכנס | ציוד הנדסה שיתופי | X-API-Key |
+| BLE Tracker Gateways | נכנס | מיקום ציוד | Gateway key |
+| Excel Parser | פנימי | ייבוא לוח שידורים | BROADCAST_MANAGE |
+| OR-Tools Solver | פנימי | אופטימיזציית משמרות | AI agent |
+| Ollama (LLM) | פנימי | הסקת AI | פנימי |
+| Nevion | יוצא | הזמנת קווי לוויין | שידורי חוץ |
+| LiveU | יוצא | הפעלת יחידת שידור | שידורי חוץ |
+
+
+3. Vizrt
+--------
+- תבניות CG (VizrtTemplate), הגדרות חיבור (VizrtConfig).
+- triggerCG — הפעלת גרפיקה ל-Vizrt Engine / Trio / API ישיר.
+- דף: /integrations (Vizrt config).
+- הרשאות: VIZRT_VIEW, VIZRT_OPERATE, VIZRT_ADMIN.
+
+
+4. Webhooks
+-----------
+- ApiKey + Webhook CRUD.
+- webhookDelivery.service — שליחה עם retry worker.
+- אירועי מערכת → URL חיצוני.
+
+
+5. REST External API (/api/v1/external)
+---------------------------------------
+- Shared Engineering Equipment — קריאה בלבד.
+- אימות: X-API-Key.
+- healthz, openapi.
+
+
+6. BLE Tracking
+---------------
+- POST /tracking/ingest — קריאות מ-Gateways.
+- GraphQL: trackerLatestPositions, היסטוריה.
+- מפה חיה במחסן.
+
+
+7. WhatsApp
+-----------
+- dispatchDepartmentShiftAssignments — Meta Cloud API.
+- דורש: WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID.
+- mobile בפרופיל עובד.
+
+
+8. Email
+--------
+- LiveU activation requests (שידורי חוץ).
+- התראות מערכת.
+
+
+9. דף אינטגרציות
+----------------
+/integrations — API keys, Webhooks, Vizrt.
+לא בסיידבר; דורש INTEGRATIONS_VIEW.

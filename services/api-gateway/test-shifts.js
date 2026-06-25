@@ -4,13 +4,13 @@ async function testShifts() {
   console.log('🔍 Testing shifts in local MongoDB...');
   
   // Connect to local MongoDB without authentication
-  const client = new MongoClient('mongodb://127.0.0.1:27017/broadcast');
+  const client = new MongoClient('mongodb://127.0.0.1:27017/lancelot');
   
   try {
     await client.connect();
     console.log('✅ Connected to local MongoDB');
     
-    const db = client.db('broadcast');
+    const db = client.db('lancelot');
     const shiftsCollection = db.collection('shifts');
     
     // Find shifts with assigned workers

@@ -47,7 +47,6 @@ export const GET_BROADCAST_EVENTS = gql`
       stage
       homeTeam
       awayTeam
-      production_crew
       equipment_list
       file_path
       reception_start_time
@@ -111,7 +110,6 @@ export const GET_BROADCAST_EVENT = gql`
       stage
       homeTeam
       awayTeam
-      production_crew
       equipment_list
       file_path
       reception_start_time
@@ -213,6 +211,13 @@ export const GET_ASSIGNMENT_FORM_CONFIGS = gql`
         defaultCount
         order
       }
+      roleScopes {
+        departmentCode
+        roleKey
+        roleLabel
+        scope
+      }
+      specialRoles
       createdAt
       updatedAt
     }
@@ -246,6 +251,13 @@ export const GET_ASSIGNMENT_FORM_CONFIG = gql`
         defaultCount
         order
       }
+      roleScopes {
+        departmentCode
+        roleKey
+        roleLabel
+        scope
+      }
+      specialRoles
     }
   }
 `;
@@ -396,6 +408,8 @@ export const GET_WAREHOUSE_EQUIPMENT = gql`
       }
       isQuantityBased
       isSharedEngineeringEquipment
+      nevionCameraCapacity
+      liveuInternalId
       isDisabled
       disabledAt
       disabledReason
@@ -422,6 +436,114 @@ export const GET_WAREHOUSE_EQUIPMENT_FOR_PICKER = gql`
       quantityAvailable
       isQuantityBased
       isDisabled
+      nevionCameraCapacity
+      liveuInternalId
+    }
+  }
+`;
+
+// External Broadcasts: operational fault reports. Used by the per-event
+// faults tab and the "blocked equipment" warehouse banner.
+export const GET_EQUIPMENT_FAULT_REPORTS = gql`
+  query GetEquipmentFaultReports($equipmentId: ID, $eventId: ID, $status: String, $limit: Int) {
+    equipmentFaultReports(equipmentId: $equipmentId, eventId: $eventId, status: $status, limit: $limit) {
+      id
+      equipmentId
+      equipmentName
+      equipmentBarcode
+      eventId
+      eventName
+      description
+      severity
+      status
+      reportedBy
+      reportedByName
+      reportedAt
+      resolvedBy
+      resolvedByName
+      resolvedAt
+      resolutionNotes
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+// External Broadcasts: per-event operational change log.
+export const GET_EXTERNAL_BROADCAST_CHANGE_LOG = gql`
+  query GetExternalBroadcastChangeLog($eventId: ID, $startDate: DateTime, $endDate: DateTime, $limit: Int) {
+    externalBroadcastChangeLog(eventId: $eventId, startDate: $startDate, endDate: $endDate, limit: $limit) {
+      id
+      eventId
+      field
+      previousValue
+      newValue
+      changedBy
+      changedByName
+      changedAt
+    }
+  }
+`;
+
+// Shared reference data (vehicles, trailers, control rooms, broadcast types).
+// The control-room list is the single source of truth used by the Broadcast
+// Array form, External Broadcasts, MCR, and reports.
+export const GET_EXTERNAL_BROADCAST_REFERENCE = gql`
+  query GetExternalBroadcastReference($kind: String, $includeInactive: Boolean) {
+    externalBroadcastReference(kind: $kind, includeInactive: $includeInactive) {
+      id
+      kind
+      name
+      description
+      broadcastTypeGroup
+      fiberCount
+      fiberPort
+      fiberPrice
+      returnFiber
+      setupTimeMinutes
+      calculationType
+      extra
+      isActive
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+// External Broadcasts: configurable NEVION / LiveU devices (incl. LiveU
+// kits still awaiting a warehouse barcode).
+export const GET_EXTERNAL_BROADCAST_DEVICES = gql`
+  query GetExternalBroadcastDevices {
+    externalBroadcastDevices {
+      id
+      name
+      category
+      barcode
+      quantityTotal
+      quantityAvailable
+      available
+      awaitingBarcode
+      isNevion
+      isLiveu
+      nevionCameraCapacity
+      liveuInternalId
+    }
+  }
+`;
+
+// External Broadcasts: worker assignment search.
+export const GET_EXTERNAL_BROADCAST_WORKER_ASSIGNMENTS = gql`
+  query GetExternalBroadcastWorkerAssignments($query: String!, $startDate: DateTime, $endDate: DateTime) {
+    externalBroadcastWorkerAssignments(query: $query, startDate: $startDate, endDate: $endDate) {
+      eventId
+      eventTitle
+      startTime
+      endTime
+      league
+      channel
+      location
+      workerName
+      roleLabel
     }
   }
 `;
@@ -627,7 +749,6 @@ export const BROADCAST_EVENT_UPDATED = gql`
       stage
       homeTeam
       awayTeam
-      production_crew
       equipment_list
       file_path
       reception_start_time

@@ -83,6 +83,31 @@ const templates: Record<string, (data: any) => { subject: string; html: string }
     `,
   }),
 
+  liveuActivation: (data) => ({
+    subject: `בקשת הפעלת LiveU - ${data.eventTitle || data.eventName || 'אירוע'}`,
+    html: `
+      <div style="direction: rtl; font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h1 style="color: #1e40af;">בקשת הפעלת ערכות LiveU</h1>
+        <p>נא להפעיל את ערכות ה-LiveU הבאות עבור השידור הבא:</p>
+        <div style="background: #eff6ff; padding: 16px; border-radius: 8px; margin-top: 12px;">
+          <p><strong>שידור:</strong> ${data.eventTitle || data.eventName || '-'}</p>
+          ${data.eventDate ? `<p><strong>תאריך:</strong> ${data.eventDate}</p>` : ''}
+          ${data.eventTime ? `<p><strong>שעה:</strong> ${data.eventTime}</p>` : ''}
+          ${data.channel ? `<p><strong>ערוץ:</strong> ${data.channel}</p>` : ''}
+        </div>
+        <h3 style="margin-top: 20px;">תעודות זהות מבוקשות</h3>
+        <ul>
+          ${(data.internalIds || [])
+            .map((id: string) => `<li><strong>${id}</strong></li>`)
+            .join('')}
+        </ul>
+        ${data.extraNotes ? `<p style="margin-top: 16px;"><strong>הערות:</strong> ${data.extraNotes}</p>` : ''}
+        <hr style="margin-top: 32px; border: none; border-top: 1px solid #e5e7eb;" />
+        <p style="color: #6b7280; font-size: 12px;">נשלח אוטומטית ממערכת ${config.APP_NAME} ע"י ${data.requestedByName || 'משתמש'}.</p>
+      </div>
+    `,
+  }),
+
   rightsExpiry: (data) => ({
     subject: `התראת תפוגת זכויות שידור - ${data.title}`,
     html: `

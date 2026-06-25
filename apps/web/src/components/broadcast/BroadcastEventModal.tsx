@@ -134,13 +134,11 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
         const externalData = departmentData;
         const externalCustomData = externalData.customData || {};
         
-        const productionCrew = externalCustomData.productionCrew || 
-                              externalData.productionCrew || 
-                              externalData.production_crew || 
-                              event.production_crew || [];
-        const equipmentList = externalCustomData.equipmentList || 
-                             externalData.equipmentList || 
-                             externalData.equipment_list || 
+        const productionCrew = externalCustomData.productionCrew ||
+                              externalData.productionCrew ||
+                              [];
+        const equipmentList = externalCustomData.equipmentList ||
+                             externalData.equipmentList ||
                              event.equipment_list || [];
         const equipmentRequests = externalCustomData.equipmentRequests || 
                                  externalData.equipmentRequests || [];
@@ -316,8 +314,20 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
           break;
         
         case 'external-broadcasts':
-          updateData.production_crew = data.productionCrew;
           updateData.equipment_list = data.selectedEquipment;
+          updateData.metadata = {
+            ...event.metadata,
+            departments: {
+              ...(event.metadata?.departments || {}),
+              externalBroadcasts: {
+                ...(event.metadata?.departments?.externalBroadcasts || {}),
+                customData: {
+                  ...(event.metadata?.departments?.externalBroadcasts?.customData || {}),
+                  productionCrew: data.productionCrew,
+                },
+              },
+            },
+          };
           break;
         
         case 'closed-captions':

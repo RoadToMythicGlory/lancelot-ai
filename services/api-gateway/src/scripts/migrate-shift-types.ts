@@ -24,7 +24,7 @@ const SOURCE_COLLECTION = 'department_shift_configs';
 
 async function run() {
   const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017';
-  const dbName = process.env.MONGODB_DB || 'broadcast';
+  const dbName = process.env.MONGODB_DB || 'lancelot';
   const client = new MongoClient(uri);
 
   try {

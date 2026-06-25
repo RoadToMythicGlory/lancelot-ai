@@ -42,7 +42,9 @@ import { equipmentSetsResolvers } from './resolvers/equipmentSets';
 import { equipmentCategoryResolvers } from './resolvers/equipmentCategory';
 import { internalAssignmentsResolvers } from './resolvers/internalAssignments';
 import { seedEquipmentCategories } from './scripts/seed-equipment-categories';
+import { seedExternalBroadcastReference } from './scripts/seed-external-broadcast-reference';
 import { venueResolvers } from './resolvers/venues';
+import { externalBroadcastsOpsResolvers } from './resolvers/externalBroadcastsOps';
 import { trackingResolvers } from './resolvers/tracking';
 import { roleTemplateResolvers } from './resolvers/roleTemplate';
 import { flightBoardResolvers } from './resolvers/flightBoard';
@@ -80,6 +82,14 @@ const resolvers = {
     externalBroadcastPreset: broadcastResolvers.Query.externalBroadcastPreset,
     venues: venueResolvers.Query.venues,
     venue: venueResolvers.Query.venue,
+    equipmentFaultReports: externalBroadcastsOpsResolvers.Query.equipmentFaultReports,
+    externalBroadcastChangeLog: externalBroadcastsOpsResolvers.Query.externalBroadcastChangeLog,
+    externalBroadcastWorkerAssignments:
+      externalBroadcastsOpsResolvers.Query.externalBroadcastWorkerAssignments,
+    externalBroadcastReference:
+      externalBroadcastsOpsResolvers.Query.externalBroadcastReference,
+    externalBroadcastDevices:
+      externalBroadcastsOpsResolvers.Query.externalBroadcastDevices,
     // Equipment Sets
     equipmentSets: equipmentSetsResolvers.Query.equipmentSets,
     equipmentSet: equipmentSetsResolvers.Query.equipmentSet,
@@ -151,6 +161,27 @@ const resolvers = {
     createVenue: venueResolvers.Mutation.createVenue,
     updateVenue: venueResolvers.Mutation.updateVenue,
     deleteVenue: venueResolvers.Mutation.deleteVenue,
+    createEquipmentFaultReport: externalBroadcastsOpsResolvers.Mutation.createEquipmentFaultReport,
+    updateEquipmentFaultReport: externalBroadcastsOpsResolvers.Mutation.updateEquipmentFaultReport,
+    resolveEquipmentFaultReport: externalBroadcastsOpsResolvers.Mutation.resolveEquipmentFaultReport,
+    sendLiveUActivationRequest: externalBroadcastsOpsResolvers.Mutation.sendLiveUActivationRequest,
+    autoRequestNevion: externalBroadcastsOpsResolvers.Mutation.autoRequestNevion,
+    reorderExternalBroadcastEvents:
+      externalBroadcastsOpsResolvers.Mutation.reorderExternalBroadcastEvents,
+    importBroadcastEventsToExternalBroadcasts:
+      externalBroadcastsOpsResolvers.Mutation.importBroadcastEventsToExternalBroadcasts,
+    unimportBroadcastEventsFromExternalBroadcasts:
+      externalBroadcastsOpsResolvers.Mutation.unimportBroadcastEventsFromExternalBroadcasts,
+    setNevionCameraCapacity:
+      externalBroadcastsOpsResolvers.Mutation.setNevionCameraCapacity,
+    setLiveuInternalId:
+      externalBroadcastsOpsResolvers.Mutation.setLiveuInternalId,
+    registerLiveuDevice:
+      externalBroadcastsOpsResolvers.Mutation.registerLiveuDevice,
+    upsertExternalBroadcastReference:
+      externalBroadcastsOpsResolvers.Mutation.upsertExternalBroadcastReference,
+    deleteExternalBroadcastReference:
+      externalBroadcastsOpsResolvers.Mutation.deleteExternalBroadcastReference,
     // Equipment Sets
     createEquipmentSet: equipmentSetsResolvers.Mutation.createEquipmentSet,
     updateEquipmentSet: equipmentSetsResolvers.Mutation.updateEquipmentSet,
@@ -274,6 +305,17 @@ async function startServer() {
     } catch (err) {
       console.error('Failed to seed equipment categories (continuing startup):', err);
     }
+
+    // Idempotent seed for the external_broadcast_reference collection.
+    // Currently inserts the default control rooms (קונטרול 1-8, יוניפייד 1-6,
+    // רדיו, יעלה לווין בלבד) used by the Broadcast Array form, External
+    // Broadcasts, MCR, and reports. Operator-managed rows are preserved.
+    try {
+      await seedExternalBroadcastReference();
+    } catch (err) {
+      console.error('Failed to seed external broadcast reference (continuing startup):', err);
+    }
+
     
     const app = express();
     const PORT = process.env.PORT || config.PORT || 4000;

@@ -1,0 +1,102 @@
+אפיון ניהול משתמשים — Lancelot AI
+גרסה: 10.06.2026
+
+מטרת המסמך
+-----------
+מסמך זה מתאר את אפיון מודול המשתמשים: זהויות, מחלקות, תפקידי מערכת,
+תבניות תפקידים וחישוב הרשאות.
+
+
+1. מטרת המודול
+--------------
+ניהול זהויות עובדים, שיוך למחלקות, תפקידי מערכת ותבניות תפקידים.
+מקור האמת להרשאות — חישוב RBAC מתפקיד מערכת + תפקידי מחלקה + grants ישירים.
+
+
+2. דף ראשי
+----------
+/users — לשוניות: משתמשים | תפקידים (תבניות, דורש ROLE_TEMPLATES_MANAGE).
+
+
+3. שדות User
+------------
+| שדה | חובה | הערות |
+|-----|------|--------|
+| firstName, lastName | כן | |
+| email | כן (יצירה) | לא ניתן לשינוי |
+| password | כן (יצירה) | |
+| systemRole | כן | ראו טבלה |
+| departments[] | | departmentId, departmentName, roles[] |
+| phone, mobile | לא | mobile נדרש ל-WhatsApp משמרות |
+| isActive | | false = השבתה (soft delete) |
+| roleTemplateId | אופציונלי | |
+| permissions[] | | grants ישירים |
+| lastLogin, createdAt | קריאה | |
+| publicKey | | E2EE צ'אט |
+
+3.1 systemRole
+| קוד | עברית | מי מקצה |
+|-----|--------|---------|
+| SYSTEM_ADMIN | מנהל מערכת | SYSTEM_ADMIN בלבד |
+| IT_ADMIN | מנהל IT | SYSTEM_ADMIN |
+| IT_USER | משתמש IT | SYSTEM_ADMIN, IT_ADMIN |
+| DEPARTMENT_ADMIN | מנהל מחלקה | מעלה |
+| DEPARTMENT_USER | משתמש מחלקה | כולם |
+
+
+4. מבנה מחלקות
+--------------
+- מחלקות דינמיות — GET_DEPARTMENTS.
+- כל מחלקה: code, name, hebrewName, category, departmentRoles[], permissions[].
+- departmentRoles: key, name, hebrewName, permissions[], isActive, order.
+- עדכון מחלקות → setDepartmentRoleRegistry → משפיע על computePermissions.
+
+
+5. RoleTemplate
+---------------
+| שדה | תיאור |
+|-----|--------|
+| name, description | |
+| baseSystemRole | תפקיד מערכת מומלץ |
+| permissions[] | חבילת הרשאות |
+| departmentScope | מחלקה ייעודית |
+| allowedForDeptAdmins | האם DEPARTMENT_ADMIN יכול להקצות |
+| isActive | |
+
+ביצירת משתמש: DEPARTMENT_ADMIN חייב לבחור תבנית.
+שינוי תבנית לא מעדכן אוטומטית משתמשים קיימים.
+
+
+6. חישוב הרשאות (computePermissions)
+------------------------------------
+שכבות (additive):
+1. SystemRole → ROLE_PERMISSIONS (גלובלי).
+2. מחלקה → __departmentDefault__ + departments[].roles[].
+3. user.permissions[] → grants ישירים + LEGACY_PERMISSION_MAP.
+4. expandImplications — manage→view.
+
+תוצאה: global Set + byDept Map.
+JWT נושא permissions; שרת מחשב מחדש בכל בקשה.
+
+
+7. תהליכים
+----------
+7.1 יצירת משתמש
+1. "+ צור משתמש חדש".
+2. שדות + מחלקות + תפקידים + תבנית.
+3. deriveEffectivePermissions → שמירה.
+4. שגיאות: email קיים, escalation.
+
+7.2 עריכה / השבתה
+- email נעול; isActive; מחיקה = soft.
+
+
+8. הרשאות
+--------
+| פעולה | Permission |
+|-------|-----------|
+| צפייה | USERS_VIEW |
+| ניהול במחלקה | USERS_MANAGE_DEPT |
+| ניהול כל הארגון | USERS_MANAGE_ALL |
+| מחיקה | USERS_DELETE |
+| תבניות | ROLE_TEMPLATES_MANAGE |

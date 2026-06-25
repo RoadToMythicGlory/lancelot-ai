@@ -113,6 +113,11 @@ const EquipmentRegistrationModal: React.FC<EquipmentRegistrationModalProps> = ({
         quantityTotal: values.quantityTotal || 1,
         isQuantityBased: values.isQuantityBased ?? false,
         isSharedEngineeringEquipment: values.isSharedEngineeringEquipment ?? false,
+        nevionCameraCapacity:
+          typeof values.nevionCameraCapacity === 'number'
+            ? values.nevionCameraCapacity
+            : null,
+        liveuInternalId: values.liveuInternalId || null,
       };
 
       await createEquipment({
@@ -229,6 +234,22 @@ const EquipmentRegistrationModal: React.FC<EquipmentRegistrationModalProps> = ({
                     tooltip="סימון ציוד שיופיע בלשונית ייעודית ב-MCR בכל פעם שהוא מוקצה לאירוע או לאיש צוות"
                   >
                     <Switch />
+                  </Form.Item>
+
+                  <Form.Item
+                    name="nevionCameraCapacity"
+                    label="קיבולת מצלמות NEVION"
+                    tooltip="מספר המצלמות שמכשיר NEVION בודד יכול לטפל בהן. השאר ריק אם הפריט אינו NEVION."
+                  >
+                    <InputNumber min={0} max={64} style={{ width: '100%' }} placeholder="לדוגמה: 4" />
+                  </Form.Item>
+
+                  <Form.Item
+                    name="liveuInternalId"
+                    label="תעודת זהות פנימית של LiveU"
+                    tooltip="המזהה הפנימי במערכת LiveU (לא ברקוד)."
+                  >
+                    <Input placeholder="לדוגמה: LU-12345" />
                   </Form.Item>
                 </>
               ),

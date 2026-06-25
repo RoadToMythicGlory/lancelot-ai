@@ -1,0 +1,144 @@
+אפיון לוח טיסות — Lancelot AI
+גרסה: 10.06.2026
+
+מטרת המסמך
+-----------
+מסמך זה מתאר את אפיון מודול לוח הטיסות (Flight Board): דשבורדים תפעוליים
+מותאמים אישית, פאנלים, מקורות נתונים, Overrides וגרסת MCR.
+המסמך מתמקד בדרישות עסקיות ותפעוליות בלבד.
+
+
+1. מטרת מודול לוח הטיסות
+------------------------
+לוח הטיסות הוא דשבורד תפעולי מותאם אישית — צבירת נתונים ממודולים שונים
+(תכנונית, MCR, מערך, שידורי חוץ, מחסן) לתצוגה על מסכים גדולים בחדרי בקרה.
+
+הוא אינו מקור אמת — שינוי נתונים מתבצע במודול המקור (תכנונית, MCR וכו').
+לוח הטיסות מאפשר רק Overrides מקומיים (עריכת תצוגה, שורות ידניות, הסתרה).
+
+
+2. עקרונות יסוד
+---------------
+- שורה קנונית = אירוע שידור; נתוני מחלקות מתמזגים ל-raw.*.
+- Overrides לא משנים את מקור האמת.
+- רענון אוטומטי לפי refreshIntervalSec.
+- מצב קיוסק (Fullscreen) לתצוגה על מסכים גדולים.
+- כל הממשק בעברית, RTL.
+
+
+3. דפים
+-------
+| נתיב | תיאור |
+|------|--------|
+| /flight-board | לוחות מרובים, בורר, Builder |
+| /MCR/flight-board | גרסה נעולה — לוח ייעודי MCR, ללא בורר |
+
+
+4. ישויות
+---------
+
+4.1 FlightBoard
+| שדה | תיאור |
+|-----|--------|
+| title, description | |
+| refreshIntervalSec | רענון אוטומטי (ברירת מחדל 30 ב-MCR) |
+| visibility | ALL / ADMINS_ONLY |
+| isDefault | לוח ברירת מחדל |
+| panels[] | רשימת פאנלים |
+| overlay | hiddenItemKeys, manualRows, itemOverrides |
+| createdBy | |
+
+4.2 FlightBoardPanel
+| שדה | ערכים |
+|-----|--------|
+| type | TABLE, BAR_CHART, LINE_CHART, PIE_CHART, AREA_CHART, KPI, TIMELINE |
+| width | QUARTER, THIRD, HALF, TWO_THIRDS, FULL |
+| itemTypes[] | BROADCAST, MCR, POST, ACTIVITY (+ STREAM, PODCAST, PROJECT, EXTERNAL ב-schema) |
+| visibleColumns[] | מפתחות עמודות |
+| chartGroupBy, chartMetric | COUNT, PEAK_VIEWERS, AVG_VIEWERS, TOTAL_REVENUE, DURATION |
+| sortField, sortDirection | ASC/DESC |
+| rowLimit | הגבלת שורות |
+| hideSatellites | הסתרת "יעלה לווין בלבד" |
+| order | סדר בגריד |
+
+4.3 FlightBoardItem
+| שדה | תיאור |
+|-----|--------|
+| type | סוג פריט |
+| title, date, startTime, endTime, channel, status | |
+| raw | נתוני מחלקות ממוזגים |
+| itemKey | מזהה ייחודי type:id |
+| isManual | שורה ידנית |
+| hasOverride | נערך מקומית |
+
+
+5. קבוצות עמודות (COLUMN_GROUPS)
+--------------------------------
+| קבוצה | דוגמאות |
+|--------|---------|
+| core | date, title, startTime, endTime, channel, status |
+| broadcast | eventNumber, sport, league, homeTeam, live, location, koTime |
+| mcr | controlStudio, preparationStatus, feedsCount |
+| activity | activityName, source, routing, equipment, isManual |
+| crew | cameramen, soundmen, directors |
+| broadcastArray | editor, producer, vtr, broadcastLocation |
+| external | mobileUnit, crewSummary, equipmentListCount |
+| equipment | count, totalQty, list |
+| post | expiryDate, untilNewPost |
+
+
+6. מקורות נתונים
+----------------
+| מקור | ישות |
+|------|------|
+| תכנונית | BroadcastEvent |
+| MCR | MCREvent, ActivityRow |
+| מערך | metadata.departments.broadcastArray |
+| שידורי חוץ | metadata.departments.externalBroadcasts |
+| מחסן | EquipmentAssignment |
+| פוסטים | BulletinPost → POST rows |
+
+טווחי תאריכים: TODAY, YESTERDAY, THIS_WEEK, THIS_MONTH, ALL, CUSTOM.
+
+
+7. Builder UI — תהליך
+---------------------
+1. בחירת/יצירת לוח (FLIGHT_BOARD_MANAGE).
+2. BoardBuilder — הוספת פאנלים, רוחב, סוג, itemTypes, עמודות.
+3. EditPanelDrawer — עריכת פאנל קיים.
+4. RangeControls — טווח תאריכים.
+5. שמירה.
+
+
+8. Overrides / שורות ידניות / הסתרה
+-----------------------------------
+| מנגנון | התנהגות |
+|--------|----------|
+| hiddenItemKeys | מסתיר type:id — לא מוחק מקור |
+| itemOverrides | עריכת title, channel וכו' מקומית |
+| manualRows | שורות board-only; panelKey null = כל TABLE panels |
+
+
+9. לוח טיסות MCR
+----------------
+- כותרת קבועה: "לוח טיסות - MCR".
+- נוצר אוטומטית בכניסה ראשונה (MCR_FLIGHT_BOARD_MANAGE).
+- פאנל יחיד: TABLE, itemTypes: [ACTIVITY], עמודות לוח MCR.
+- ללא בורר לוחות — נעול ללוח ייעודי.
+
+
+10. ייצוא ותצוגה
+----------------
+- ייצוא CSV: סוג, כותרת, תאריך, שעות, ערוץ, סטטוס.
+- קובץ: flight-board-{title}-{date}.csv.
+- Kiosk/Fullscreen — Esc ליציאה.
+- הרחבת פאנל בודד — kiosk + expandedPanelId.
+
+
+11. הרשאות
+----------
+| פעולה | Permission |
+|-------|-----------|
+| צפייה | FLIGHT_BOARD_VIEW |
+| בנייה/עריכה | FLIGHT_BOARD_MANAGE |
+| MCR | MCR_FLIGHT_BOARD_VIEW / MCR_FLIGHT_BOARD_MANAGE |

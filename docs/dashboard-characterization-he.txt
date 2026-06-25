@@ -1,0 +1,68 @@
+אפיון דף הבית (Dashboard) — Lancelot AI
+גרסה: 10.06.2026
+
+
+1. מטרת המודול
+--------------
+מסך כניסה תפעולי — סטטיסטיקות, שידורים היום, משמרות/שיבוצים אישיים,
+לוח מודעות (Bulletin), פעולות מהירות.
+
+
+2. ווידג'טים
+------------
+
+2.1 שורת סטטיסטיקות (dashboardStats)
+| כרטיס | מקור |
+|--------|------|
+| משתמשים פעילים / סה"כ | users (lastLogin 7 ימים) |
+| מחלקות | distinct department |
+| שידורים היום | BroadcastEvent |
+| משמרות פעילות | shifts היום, לא cancelled |
+| התראות דחופות | bulletin isEmergency |
+
+רענון: כל 5 דקות + כפתור "רענן".
+
+2.2 שידורים היום
+- עד 5 שורות; תגיות: היום, באוויר, בקרוב (30 דק'), נגמר.
+- מודאל "הצג הכל".
+
+2.3 המשמרות והשיבוצים שלי
+- עד 6 פריטים: משמרת (weeklyShifts) + שיבוץ שידור (crewAssignments במערך).
+- Badge "פועל" ליום הנוכחי.
+
+2.4 לוח מודעות (Bulletin)
+- עד 5 פוסטים; מיון: חירום → נעוץ → תאריך.
+- רענון: דקה.
+
+2.5 פעולות מהירות
+תכנון, משמרות, מחסן, משתמשים, צ'אט — מסונן לפי הרשאות.
+
+
+3. BulletinPost — שדות
+----------------------
+| שדה | תיאור |
+|-----|--------|
+| title, content | content חובה |
+| isEmergency | גבול אדום |
+| isPinned | נשאר בראש |
+| departmentId | null = ארגוני |
+| expiryDate | פוסטים שפגו מוסתרים |
+| untilNewPost | מבוטל בפוסט חדש (MCR) |
+| tags[], viewCount | |
+| isActive | soft delete |
+| createdBy | |
+
+
+4. פרסום בולטין
+---------------
+createBulletinPost — דורש BULLETIN_MANAGE.
+שדות: title, content, isEmergency, isPinned, tags, departmentId, expiresAt.
+
+
+5. הרשאות
+---------
+| פעולה | Permission |
+|-------|-----------|
+| צפייה בדף | DASHBOARD_VIEW |
+| בולטין | BULLETIN_VIEW |
+| פרסום | BULLETIN_MANAGE |

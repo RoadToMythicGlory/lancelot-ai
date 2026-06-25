@@ -7,8 +7,8 @@ async function checkUserPassword() {
     await client.connect();
     console.log('Connected to MongoDB');
     
-    // Connect to broadcast database
-    const db = client.db('broadcast');
+    // Connect to lancelot database
+    const db = client.db('lancelot');
     const users = db.collection('users');
     
     // Find the user
@@ -17,7 +17,7 @@ async function checkUserPassword() {
     });
     
     if (user) {
-      console.log('\n🎯 User found in broadcast database:');
+      console.log('\n🎯 User found in lancelot database:');
       console.log('  - Email:', user.email);
       console.log('  - ID:', user._id);
       console.log('  - Name:', user.firstName, user.lastName);

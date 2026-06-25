@@ -627,6 +627,18 @@ const EquipmentDetailsModal: React.FC<EquipmentDetailsModalProps> = ({
                 <Tag>לא</Tag>
               )}
             </Descriptions.Item>
+            {typeof equipment?.nevionCameraCapacity === 'number' && (
+              <Descriptions.Item label="קיבולת NEVION">
+                <Tag color="geekblue">
+                  {equipment.nevionCameraCapacity} מצלמות
+                </Tag>
+              </Descriptions.Item>
+            )}
+            {equipment?.liveuInternalId && (
+              <Descriptions.Item label="LiveU ת.ז.">
+                <Tag color="magenta">{equipment.liveuInternalId}</Tag>
+              </Descriptions.Item>
+            )}
 
             {equipment?.dimensions &&
               (equipment.dimensions.length != null ||

@@ -15,12 +15,14 @@ const mongoOptions: MongoClientOptions = {
 
 // Build MongoDB URL from environment variables
 const buildMongoUrl = (): string => {
-  // For local development, ALWAYS use local MongoDB without authentication
+  // For local development, ALWAYS use local MongoDB without authentication.
+  // Single source of truth: the database is named `lancelot` everywhere.
   if (process.env.NODE_ENV === 'development') {
     const host = process.env.MONGO_HOST || '127.0.0.1';
     const port = process.env.MONGO_PORT || '27017';
+    const database = process.env.MONGO_DATABASE || 'lancelot';
     console.log('🔧 Development mode: Connecting to LOCAL MongoDB without authentication');
-    return `mongodb://${host}:${port}/broadcast`;
+    return `mongodb://${host}:${port}/${database}`;
   }
 
   // For production, check if MONGODB_URL is provided (from docker-compose)
@@ -31,7 +33,7 @@ const buildMongoUrl = (): string => {
 
   const host = process.env.MONGO_HOST || '127.0.0.1';
   const port = process.env.MONGO_PORT || '27017';
-  const database = process.env.MONGO_DATABASE || 'broadcast';
+  const database = process.env.MONGO_DATABASE || 'lancelot';
 
   // Production / staging require explicit credentials. No hardcoded password defaults.
   const username = process.env.MONGO_USERNAME;
@@ -80,7 +82,7 @@ export async function connectMongoDB(): Promise<Db> {
       mongoClient = new MongoClient(MONGODB_URL, mongoOptions);
       await mongoClient.connect();
       
-      db = mongoClient.db(process.env.MONGO_DATABASE || 'broadcast');
+      db = mongoClient.db(process.env.MONGO_DATABASE || 'lancelot');
       
       // Test the connection
       await db.admin().ping();

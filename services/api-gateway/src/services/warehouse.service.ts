@@ -1,9 +1,25 @@
 import mongoose from 'mongoose';
 import { Equipment, EquipmentAssignment, EquipmentHistory } from '../models/equipment.models';
+import { EquipmentFaultReport } from '../models/equipmentFaultReport.models';
 import { syncSharedEngineeringSnapshotForEvent } from './sharedEngineeringSnapshot';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('warehouse-service');
+
+/**
+ * Check whether an equipment has an open (un-resolved) fault report.
+ *
+ * Exposed so resolvers and the External Broadcasts UI can show a clear
+ * "blocked: open fault" message instead of a generic stock error.
+ */
+export async function hasOpenFault(equipmentId: string): Promise<boolean> {
+  if (!mongoose.Types.ObjectId.isValid(equipmentId)) return false;
+  const open = await EquipmentFaultReport.exists({
+    equipmentId: new mongoose.Types.ObjectId(equipmentId),
+    status: { $in: ['open', 'in_progress'] },
+  });
+  return !!open;
+}
 
 /**
  * Domain service that owns atomic warehouse equipment allocation.
@@ -42,7 +58,14 @@ export interface AllocationResult {
     status: string;
   };
   /** Reason for failure, suitable for surfacing back to the resolver. */
-  reason?: 'invalid_id' | 'not_found' | 'disabled' | 'insufficient_stock' | 'invalid_quantity' | 'unknown';
+  reason?:
+    | 'invalid_id'
+    | 'not_found'
+    | 'disabled'
+    | 'insufficient_stock'
+    | 'invalid_quantity'
+    | 'fault_blocked'
+    | 'unknown';
   error?: string;
 }
 
@@ -63,6 +86,19 @@ export async function allocateEquipment(req: AllocationRequest): Promise<Allocat
   }
   if (!Number.isFinite(req.quantity) || req.quantity <= 0) {
     return { success: false, reason: 'invalid_quantity', error: 'quantity must be a positive number' };
+  }
+
+  // Hard block: equipment with an open fault report cannot be allocated to
+  // any new event until the fault is resolved. This is the server-side
+  // enforcement of the External Broadcasts fault workflow — UI hints alone
+  // would be bypassable via direct GraphQL.
+  const faultBlocked = await hasOpenFault(req.equipmentId);
+  if (faultBlocked) {
+    return {
+      success: false,
+      reason: 'fault_blocked',
+      error: 'Equipment is blocked by an open fault report and cannot be assigned',
+    };
   }
 
   // Conditional decrement — succeeds only when the equipment is enabled and

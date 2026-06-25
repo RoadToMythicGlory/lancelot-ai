@@ -15,7 +15,7 @@ import { InternalEquipmentAssignment } from '../models/internalEquipmentAssignme
 async function resetEquipmentStatuses() {
   const startedAt = Date.now();
   try {
-    const mongoUrl = process.env.MONGODB_URL || 'mongodb://127.0.0.1:27017/broadcast';
+    const mongoUrl = process.env.MONGODB_URL || 'mongodb://127.0.0.1:27017/lancelot';
     await mongoose.connect(mongoUrl);
     console.log(`✅ Connected to MongoDB at ${mongoUrl.replace(/:[^:@]+@/, ':***@')}`);
 

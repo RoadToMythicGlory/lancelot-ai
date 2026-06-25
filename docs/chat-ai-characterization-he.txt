@@ -1,0 +1,72 @@
+אפיון צ'אט וסוכן AI — Lancelot AI
+גרסה: 10.06.2026
+
+
+1. צ'אט פנימי
+-------------
+
+1.1 מטרה
+הודעות אישיות 1:1 בין עובדים, כולל סוכן AI כאיש קשר.
+
+1.2 ממשק
+- כפתור צף (MessageCircle) בכל עמוד.
+- ContactsOverlay: אנשי קשר, שיחות, טאב AI.
+- ConversationOverlay: הודעות Socket.IO, typing indicator, קבצים.
+- E2EE (אופציונלי): fingerprint, אזהרת שינוי מפתח.
+
+1.3 ישויות
+PrivateConversation, ChatMessage (MongoDB).
+
+1.4 תהליך
+1. פתיחת שיחה עם עמית או AI.
+2. שליחה → GraphQL + Socket.IO.
+3. סימון נקרא, מצב מקוון.
+4. E2EE: הצפנה מקצה לקצה אם מופעל.
+
+1.5 הרשאות
+CHAT_USE (ברירת מחדל לכולם). כיבוי — Feature Flag chat בהגדרות.
+
+
+2. סוכן AI (Lancelot AI Assistant)
+----------------------------------
+
+2.1 מטרה
+סיוע תפעולי מקומי (On-Premise) ללא שליחת נתונים לענן.
+
+2.2 גישה
+- צ'אט: איש קשר "Lancelot AI".
+- GraphQL: sendAIMessage.
+
+2.3 זרימה
+1. משתמש שולח הודעה → /ai/chat.
+2. Orchestrator: GreetingWorker → IntentWorker → Tool dispatch.
+3. Operational intents (חובה כלי): cg, lineup, shifts, news, rights, help,
+   preset, equipment_lookup, shift_lookup, broadcast_lookup, user_lookup.
+4. תשובה מובנית (Zod schemas).
+5. RBAC בכלים — ללא הרשאה → אין נתונים.
+
+2.4 כלים זמינים
+| כלי | ייעוד |
+|-----|--------|
+| news-fetcher | RSS, חדשות |
+| lineup-builder | Rundown / ליינאפ |
+| cg-spec-generator | מפרט CG ל-Vizrt |
+| shift-solver | אופטימיזציית משמרות (OR-Tools) |
+| rights-board | לוח זכויות |
+| help-search | חיפוש במאמרי עזרה |
+| preset-search | פריסטי שידורי חוץ |
+| equipment-availability | זמינות ציוד |
+| shift-lookup | לוח משמרות |
+| broadcast-lookup | אירועי שידור |
+| user-lookup | חיפוש משתמשים (שדות מוגבלים) |
+
+2.5 הפרדה: AI שיבוץ vs AI צ'אט
+- aiScheduleSuggest — resolver משמרות, דטרמיניסטי, למנהלים.
+- shift-solver tool — סוכן AI (ייעוץ).
+- shift_lookup — קריאה בלבד.
+
+2.6 עקרונות
+- LLM מקומי (Ollama) — ללא API ענן.
+- Workers = stateless, ללא DB.
+- Controller = orchestration בלבד.
+- Tools = עסקי + RBAC.

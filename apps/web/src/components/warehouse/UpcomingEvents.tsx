@@ -55,7 +55,6 @@ interface BroadcastEvent {
   league: string;
   homeTeam: string;
   awayTeam: string;
-  production_crew: any;
   equipment_list: any;
 }
 

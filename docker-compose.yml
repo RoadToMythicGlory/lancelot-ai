@@ -96,8 +96,8 @@ services:
       # Override LLM_HEBREW_MODEL to e.g. dictalm2.0 if you want a Hebrew-fine-tuned model.
       LLM_PRIMARY_MODEL: ${LLM_PRIMARY_MODEL:-aya-expanse:8b}
       LLM_HEBREW_MODEL: ${LLM_HEBREW_MODEL:-aya-expanse:8b}
-      MONGODB_URL: mongodb://${MONGO_USERNAME:?MONGO_USERNAME must be set in .env}:${MONGO_PASSWORD:?MONGO_PASSWORD must be set in .env}@mongodb:27017/broadcast?authSource=admin
-      MONGO_DATABASE: broadcast
+      MONGODB_URL: mongodb://${MONGO_USERNAME:?MONGO_USERNAME must be set in .env}:${MONGO_PASSWORD:?MONGO_PASSWORD must be set in .env}@mongodb:27017/lancelot?authSource=admin
+      MONGO_DATABASE: lancelot
       SHIFT_SOLVER_ENGINE: ${SHIFT_SOLVER_ENGINE:-ortools}
       OR_TOOLS_SOLVER_URL: http://or-tools-solver:5003
       RSS_PIPELINE_ENABLED: "true"

@@ -1,0 +1,160 @@
+אפיון מודולי ניהול — Lancelot AI
+גרסה: 10.06.2026
+
+מסמך זה מאחד: מדיה (DAM), זכויות שידור, תהליכים (Workflows),
+הגדרות, יומן ביקורת, תמיכת IT, דוחות, עזרה.
+
+
+================================================================================
+1. מדיה — DAM (Digital Asset Management)
+================================================================================
+
+1.1 מטרה
+ספריית נכסי דיגיטל — וידאו, אודיו, תמונה, מסמך, גרפיקה.
+
+1.2 דף /media
+תיקיות (שורה אופקית) + טבלה/גריד. סינון: חיפוש, type, status. 24 פריטים/עמוד.
+
+1.3 MediaAsset
+| שדה | תיאור |
+|-----|--------|
+| title, originalFilename | |
+| type | VIDEO, AUDIO, IMAGE, DOCUMENT, GRAPHIC, OTHER |
+| size | B/KB/MB/GB |
+| status | ready, uploading, processing, archived |
+| tags[], uploadedBy, folderId | |
+
+1.4 MediaFolder
+name, hebrewName, parentFolderId.
+
+1.5 תהליכים
+העלאה (MEDIA_MANAGE); תיקיה חדשה; מחיקה (confirm); תצוגה/הורדה.
+
+1.6 הרשאות: MEDIA_VIEW | MEDIA_MANAGE
+
+
+================================================================================
+2. זכויות שידור (Broadcast Rights)
+================================================================================
+
+2.1 מטרה
+ניהול חוזים, תוקפים, עלויות והתראות פקיעה.
+
+2.2 דף /rights
+התראה: זכויות שפגות ב-30 יום. 4 KPI. סינון. טבלה 20/עמוד.
+
+2.3 BroadcastRightManaged — שדות עיקריים
+title, titleHe, contentType (sports, entertainment, news...),
+sport, league, season, rightsHolder (חובה),
+contractNumber, contactPerson, contactEmail, contactPhone,
+territories[], platforms[], channels[],
+startDate, endDate (חובה),
+exclusivity (exclusive, non_exclusive, co_exclusive),
+cost, currency, paymentSchedule[],
+blackoutRegions, blackoutTimes,
+maxRebroadcasts, delayMinutes,
+status (draft, active, expiring_soon, expired, terminated),
+contractDocuments[], expiryNotificationDays, notes.
+
+2.4 כללים
+expiring_soon — 30 יום לפני endDate.
+AI tool rights-board לשאילתות.
+
+2.5 הרשאות: RIGHTS_VIEW | RIGHTS_MANAGE
+
+
+================================================================================
+3. תהליכים — Workflows
+================================================================================
+
+3.1 מטרה
+מנוע אישורים רב-שלבי עם SLA — משלים אישורי משמרות ישירים.
+
+3.2 דף /workflows
+כרטיס אישורים ממתינים; לשונית תהליכים; לשונית תבניות.
+
+3.3 WorkflowTemplate
+triggerType: manual, event_created, event_updated, status_change, scheduled, approval_needed.
+resourceType: broadcast_event, shift, equipment, general.
+steps[]: order, type (approval, notification, assignment, status_change, webhook, checklist),
+assigneeType, assigneeId, timeoutMinutes, onTimeout (escalate, auto_approve, reject).
+
+3.4 WorkflowInstance
+status: in_progress, completed, cancelled, failed, waiting.
+currentStepIndex, stepHistory[], slaDeadline, slaBreached,
+resourceType, resourceId, resourceName, initiatedBy.
+
+3.5 תהליך אישור
+יוזם → instance → מאשר בשלב → processWorkflowAction → שלב הבא או סגירה.
+SLA חריג → תג "חריגת SLA" (לא חוסם).
+
+3.6 הרשאות: WORKFLOWS_VIEW | WORKFLOWS_MANAGE
+
+
+================================================================================
+4. הגדרות (Settings)
+================================================================================
+
+4.1 דף /settings — לשוניות
+| לשונית | תוכן | כתיבה |
+|--------|------|--------|
+| חברה | שם EN/HE, contact, timezone, locale, brandColor | SETTINGS_MANAGE |
+| תכונות | Feature Flags | |
+| אבטחה | MFA, SSO, passwordMinLength, sessionTimeoutMinutes | |
+| מחלקות | DepartmentsAdminPanel | admin |
+| הגדרות טפסים | AssignmentFormConfigPanel | admin |
+| התראות | העדפות אישיות (9 סוגים × ערוצים) | משתמש |
+
+4.2 Feature Flags
+broadcasting, mcr, shifts, warehouse, chat, aiAgent, vizrt, liveMonitoring.
+כיבוי מסתיר בסיידבר — לא מוחק נתונים.
+
+4.3 AssignmentFormConfig (טופס שיבוץ)
+formKey (broadcastArray), name, hebrewName, departments[], columns[].
+FormColumnEntry: key, hebrewLabel, allowedDepartmentCodes[], allowedUserIds[],
+requireUser, defaultCount, order.
+presets מובנים: עורך, מפיק, VTR, טכנאי, שדר, אנליסט, שדר קווים.
+
+4.4 הרשאות: SETTINGS_VIEW | SETTINGS_MANAGE
+
+
+================================================================================
+5. יומן ביקורת (Audit Log)
+================================================================================
+
+5.1 מטרה
+תיעוד פעולות מערכת — משתמש, פעולה, ישות, שינויי שדות, חומרה, IP.
+
+5.2 דף /audit-log
+סינון: תאריך, משתמש, פעולה. ייצוא.
+
+5.3 הרשאות: AUDIT_VIEW | AUDIT_EXPORT
+
+
+================================================================================
+6. תמיכת IT
+================================================================================
+
+6.1 מטרה
+תור פניות תמיכה פנימי (נפרד ממרכז העזרה).
+
+6.2 SupportTicket
+סטטוס, עדיפות, מטפל.
+
+6.3 הרשאות: IT_SUPPORT_VIEW | IT_SUPPORT_MANAGE
+
+
+================================================================================
+7. דוחות (/reports)
+================================================================================
+
+דוחות חוצי-מודולים: שידורים, משמרות, ציוד, משתמשים.
+לא בסיידבר הראשי.
+
+
+================================================================================
+8. מרכז עזרה (/help)
+================================================================================
+
+מדריך משתמש מלא — 20 פרקים מ-docs/user-manual/.
+מסונכרן ל-HelpArticle ב-MongoDB. זמין לכל משתמש מחובר.

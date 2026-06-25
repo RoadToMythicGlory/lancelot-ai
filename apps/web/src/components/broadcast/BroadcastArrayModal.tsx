@@ -2,7 +2,12 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Modal, Form, Input, Select, Row, Col, Button, Space, Divider, Alert, Spin, App } from 'antd';
 import { useApolloClient, useMutation, useQuery } from '@apollo/client';
 import { UPDATE_BROADCAST_EVENT_DEPARTMENT_DATA } from '../../graphql/mutations';
-import { GET_EMPLOYEES_BY_DEPARTMENT, GET_DEPARTMENTS, GET_BROADCAST_EVENT } from '../../graphql/queries';
+import {
+  GET_EMPLOYEES_BY_DEPARTMENT,
+  GET_DEPARTMENTS,
+  GET_BROADCAST_EVENT,
+  GET_EXTERNAL_BROADCAST_REFERENCE,
+} from '../../graphql/queries';
 import dayjs from 'dayjs';
 import 'dayjs/locale/he';
 import DynamicDepartmentJobsPanel, { AssignmentJob } from '../assignments/DynamicDepartmentJobsPanel';
@@ -76,6 +81,20 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
   const { data: departmentsData } = useQuery(GET_DEPARTMENTS, {
     skip: !visible
   });
+
+  // Shared control-rooms list (seeded on the server). The same query
+  // is consumed by the broadcast-array page, External Broadcasts, MCR,
+  // and reports — operators add/remove rooms once in Settings and the
+  // change propagates everywhere.
+  const { data: controlRoomsData } = useQuery(GET_EXTERNAL_BROADCAST_REFERENCE, {
+    variables: { kind: 'controlRoom', includeInactive: false },
+    skip: !visible,
+    fetchPolicy: 'cache-first',
+  });
+  const controlRooms: { id: string; name: string }[] = useMemo(
+    () => (controlRoomsData?.externalBroadcastReference || []) as any[],
+    [controlRoomsData],
+  );
 
   /**
    * IMPORTANT: `users(filter: { departmentId })` expects a department "code" (string),
@@ -543,24 +562,12 @@ const BroadcastArrayModal: React.FC<BroadcastArrayModalProps> = ({ visible, even
           </Col>
           <Col span={12}>
             <Form.Item name="מקוםשידור" label="מקום שידור">
-              <Select placeholder="בחר מקום שידור">
-                <Option value="קונטרול 1">קונטרול 1</Option>
-                <Option value="קונטרול 2">קונטרול 2</Option>
-                <Option value="קונטרול 3">קונטרול 3</Option>
-                <Option value="קונטרול 4">קונטרול 4</Option>
-                <Option value="קונטרול 5">קונטרול 5</Option>
-                <Option value="קונטרול 6">קונטרול 6</Option>
-                <Option value="קונטרול 7">קונטרול 7</Option>
-                <Option value="קונטרול 8">קונטרול 8</Option>
-                <Option value="יוניפייד 1">יוניפייד 1</Option>
-                <Option value="יוניפייד 2">יוניפייד 2</Option>
-                <Option value="יוניפייד 3">יוניפייד 3</Option>
-                <Option value="יוניפייד 4">יוניפייד 4</Option>
-                <Option value="יוניפייד 5">יוניפייד 5</Option>
-                <Option value="יוניפייד 6">יוניפייד 6</Option>
-                <Option value="רדיו">רדיו</Option>
-                <Option value="יעלה לווין בלבד">יעלה לווין בלבד</Option>
-              </Select>
+              <Select
+                placeholder="בחר מקום שידור"
+                showSearch
+                optionFilterProp="label"
+                options={controlRooms.map((r) => ({ value: r.name, label: r.name }))}
+              />
             </Form.Item>
           </Col>
         </Row>

@@ -2083,6 +2083,12 @@ const BroadcastPlanningPage: React.FC = () => {
                       // Prefer top-level parsed fields first
                       const raw = event.metadata?.raw || {};
                       const cd = event.metadata?.customData || {};
+                      // The Excel parser returns the per-match fields (sport,
+                      // league, stage, homeTeam, awayTeam, ...) under
+                      // metadata.eventDetails — make sure we read them, otherwise
+                      // every column collapses into the title and the planning
+                      // grid shows the whole title under "מארחת".
+                      const ed = event.metadata?.eventDetails || {};
 
                       const parseDateStrict = (s: string) => {
                         const candidates = ['DD/MM/YYYY', 'D/M/YYYY', 'DD.MM.YYYY', 'YYYY-MM-DD'];
@@ -2104,8 +2110,8 @@ const BroadcastPlanningPage: React.FC = () => {
                       const dateStr = String(cd.date || raw['תאריך'] || event.date || '').trim();
                       const baseDate = parseDateStrict(dateStr);
                       const startHHmm = normalizeHHmm(String(cd.startTime || raw['שעה'] || event.startTime || '').trim());
-                      const endHHmm = normalizeHHmm(String(cd.endTime || raw['סיום'] || event.endTime || '').trim());
-                      const koHHmm = normalizeHHmm(String(cd.koTime || raw['KO / TO'] || event.koTime || '').trim());
+                      const endHHmm = normalizeHHmm(String(cd.endTime || raw['סיום'] || ed.endTime || event.endTime || '').trim());
+                      const koHHmm = normalizeHHmm(String(cd.koTime || raw['KO / TO'] || ed.koTime || event.koTime || '').trim());
 
                       // Build absolute times in Asia/Jerusalem, then to ISO
                       const startDateTime = baseDate.isValid() && startHHmm
@@ -2122,13 +2128,13 @@ const BroadcastPlanningPage: React.FC = () => {
 
                       const channel = cd.channel || raw['ערוץ'] || event.channel || 'CHANNEL 1';
                       const evType = event.eventType || (event.live ? 'live' : 'recorded') || 'recorded';
-                      const sport = cd.sport || raw['ענף'] || event.sport || '';
-                      const league = cd.league || raw['ליגה/ענף'] || event.league || '';
-                      const stage = cd.stage || raw['שלב'] || event.stage || '';
-                      const homeTeam = cd.homeTeam || raw['מארחת'] || event.homeTeam || '';
-                      const awayTeam = cd.awayTeam || raw['אורחת'] || event.awayTeam || '';
-                      const parallelChannel = cd.parallelChannel || raw['ערוץ מקביל'] || event.parallelChannel || null;
-                      const liveFlag = cd.live === 'ישיר' || raw['ישיר'] === 'ישיר' || evType === 'live';
+                      const sport = cd.sport || raw['ענף'] || ed.sport || event.sport || '';
+                      const league = cd.league || raw['ליגה/ענף'] || ed.league || event.league || '';
+                      const stage = cd.stage || raw['שלב'] || ed.stage || event.stage || '';
+                      const homeTeam = cd.homeTeam || raw['מארחת'] || ed.homeTeam || event.homeTeam || '';
+                      const awayTeam = cd.awayTeam || raw['אורחת'] || ed.awayTeam || event.awayTeam || '';
+                      const parallelChannel = cd.parallelChannel || raw['ערוץ מקביל'] || ed.parallelChannel || event.parallelChannel || null;
+                      const liveFlag = cd.live === 'ישיר' || raw['ישיר'] === 'ישיר' || ed.live === 'ישיר' || ed.live === 'LIVE' || ed.live === 'כן' || evType === 'live';
 
                       return {
                         title: event.title || (homeTeam || awayTeam ? `${homeTeam || ''} נגד ${awayTeam || ''}`.trim() : ''),
@@ -2143,7 +2149,7 @@ const BroadcastPlanningPage: React.FC = () => {
                         awayTeam,
                         koTime: koTimeISO,
                         parallelChannel,
-                        channel1_4k: Boolean(cd.channel1_4k || raw['5 SPORT 4K'] || event.channel1_4k) || false,
+                        channel1_4k: Boolean(cd.channel1_4k || raw['5 SPORT 4K'] || ed.channel1_4k || event.channel1_4k) || false,
                         live: liveFlag,
                         notes: event.notes || cd.notes || raw['הערות'] || '',
                         metadata: { ...(event.metadata || {}), customData: event }

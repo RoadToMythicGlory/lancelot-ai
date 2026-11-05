@@ -22,6 +22,8 @@
 
 ---
 
+<img src="images/screenshots/flight-board.webp" alt="Lancelot flight board — live MCR operations view" width="100%" />
+
 ## Why Lancelot
 
 Running a TV channel is a scheduling problem wearing twenty different hats: which feed lands on which IRD at 02:00, who is on the control-room shift, which camera kit is in which van, which rights contract covers tonight's match, and whether the graphics template is loaded before the anchor says "and now…". Most stations stitch this together from Excel sheets, WhatsApp groups and memory.
@@ -32,6 +34,27 @@ Lancelot replaces that with a single, real-time, role-aware system that was buil
 - **Offline-first AI.** The assistant runs on a local LLM (Ollama / llama.cpp). No data leaves your building.
 - **Hebrew-native, RTL-ready, fully localisable.** Ships with a complete Hebrew user manual and i18n throughout.
 - **Self-hostable in an afternoon.** One `docker compose up`, one MongoDB, done.
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="images/screenshots/dashboard.webp" alt="Main dashboard" /><br/><sub><b>Dashboard</b> — today's broadcasts, my shifts, bulletin board</sub></td>
+    <td width="50%"><img src="images/screenshots/mcr.webp" alt="MCR event preparation" /><br/><sub><b>MCR</b> — event prep: feeds, contacts, output platforms, readiness status</sub></td>
+  </tr>
+  <tr>
+    <td><img src="images/screenshots/broadcast-array.webp" alt="Broadcast array crew grid" /><br/><sub><b>Broadcast array</b> — crew & venue assignment grid with Excel import</sub></td>
+    <td><img src="images/screenshots/external-broadcasts.webp" alt="External broadcasts" /><br/><sub><b>External broadcasts</b> — OB productions, crew presets, logistics</sub></td>
+  </tr>
+  <tr>
+    <td><img src="images/screenshots/warehouse.webp" alt="Warehouse equipment list" /><br/><sub><b>Warehouse</b> — equipment lifecycle, assignments, idle-item alerts</sub></td>
+    <td><img src="images/screenshots/shifts.webp" alt="Shifts module" /><br/><sub><b>Shifts</b> — rosters, swap & vacation requests, availability</sub></td>
+  </tr>
+  <tr>
+    <td><img src="images/screenshots/it-support.webp" alt="IT support tickets" /><br/><sub><b>IT support</b> — internal ticketing with threaded replies</sub></td>
+    <td><img src="images/screenshots/login.webp" alt="Login" /><br/><sub><b>Login</b> — RTL-first, Hebrew-native UI</sub></td>
+  </tr>
+</table>
 
 ## What it does
 

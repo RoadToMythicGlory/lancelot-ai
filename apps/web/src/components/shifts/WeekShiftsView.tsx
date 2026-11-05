@@ -117,7 +117,7 @@ export default function WeekShiftsView() {
   const shifts = data?.getShiftsByWeek?.shifts || [];
 
   // Generate week days
-  const weekDays = [];
+  const weekDays: { date: string; dayName: string; displayDate: string }[] = [];
   for (let i = 0; i < 7; i++) {
     const day = moment(weekStart).add(i, 'days');
     weekDays.push({
@@ -128,14 +128,14 @@ export default function WeekShiftsView() {
   }
 
   // Get all unique shift types from the shifts or from configuration
-  const shiftTypes = useMemo(() => {
+  const shiftTypes = useMemo<string[]>(() => {
     if (configData?.myDepartmentShiftConfig?.shiftTypes) {
       return configData.myDepartmentShiftConfig.shiftTypes
         .filter((st: any) => st.enabled)
-        .map((st: any) => st.type);
+        .map((st: any) => st.type as string);
     }
     // Fallback to extracting from shifts data or using defaults
-    const typesFromShifts = [...new Set(shifts.map((s: any) => s.shiftType))];
+    const typesFromShifts = [...new Set<string>(shifts.map((s: any) => s.shiftType as string))];
     return typesFromShifts.length > 0 ? typesFromShifts : ['morning', 'afternoon', 'night'];
   }, [configData, shifts]);
 

@@ -260,7 +260,7 @@ export default function AvailabilityConstraints() {
     );
   }
 
-  const SHIFT_TYPES = (deptConfigData?.myDepartmentShiftConfig?.shiftTypes || deptConfigData?.departmentShiftConfig?.shiftTypes || [])
+  const SHIFT_TYPES: { value: string; label: string; time: string }[] = (deptConfigData?.myDepartmentShiftConfig?.shiftTypes || deptConfigData?.departmentShiftConfig?.shiftTypes || [])
     .filter((st: any) => st.enabled)
     .map((st: any) => ({ value: st.type, label: st.label, time: `${st.defaultStartTime}-${st.defaultEndTime}` }))
     .concat((deptConfigData ? [] : DEFAULT_SHIFT_TYPES));

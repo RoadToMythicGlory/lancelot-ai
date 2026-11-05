@@ -119,7 +119,7 @@ export default function BulletinWidget() {
                   dangerouslySetInnerHTML={{ __html: sanitizeMcrHtml(post.content) }}
                 />
                 <div className="mt-2 text-xs text-gray-500">
-                  <Text type="secondary">נוצר על ידי: {post.createdBy}</Text>
+                  <Text type="secondary">נוצר על ידי: {typeof post.createdBy === 'string' ? post.createdBy : post.createdBy?.displayName}</Text>
                   <span className="mx-2">|</span>
                   <Text type="secondary">{new Date(post.createdAt).toLocaleString('he-IL')}</Text>
                   {post.expiryDate && (

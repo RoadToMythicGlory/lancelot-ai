@@ -75,7 +75,7 @@ export default function VizrtConfigPanel({ visible, onClose }: VizrtConfigPanelP
       
       setConfigModalVisible(false);
       refetch();
-    } catch (error) {
+    } catch (error: any) {
       message.error(`Error saving configuration: ${error.message}`);
     }
   };
@@ -87,7 +87,7 @@ export default function VizrtConfigPanel({ visible, onClose }: VizrtConfigPanelP
       });
       message.success('Vizrt configuration deleted successfully');
       refetch();
-    } catch (error) {
+    } catch (error: any) {
       message.error(`Error deleting configuration: ${error.message}`);
     }
   };

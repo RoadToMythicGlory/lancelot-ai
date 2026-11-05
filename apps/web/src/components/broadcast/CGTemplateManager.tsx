@@ -142,7 +142,7 @@ export default function CGTemplateManager({ visible, onClose }: CGTemplateManage
       
       setTemplateModalVisible(false);
       refetch();
-    } catch (error) {
+    } catch (error: any) {
       message.error(`Error saving template: ${error.message}`);
     }
   };
@@ -154,7 +154,7 @@ export default function CGTemplateManager({ visible, onClose }: CGTemplateManage
       });
       message.success('CG template deleted successfully');
       refetch();
-    } catch (error) {
+    } catch (error: any) {
       message.error(`Error deleting template: ${error.message}`);
     }
   };

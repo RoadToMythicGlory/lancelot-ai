@@ -466,7 +466,7 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
           visible={true}
           event={event}
           onClose={handleDepartmentModalClose}
-          onDataSaved={onDataSaved}
+          onDataSaved={onDataSaved ?? (() => {})}
           canEdit={canEdit}
         />
       )}
@@ -476,7 +476,7 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
           visible={true}
           event={event}
           onClose={handleDepartmentModalClose}
-          onDataSaved={onDataSaved}
+          onDataSaved={onDataSaved ?? (() => {})}
           canEdit={canEdit}
         />
       )}
@@ -516,7 +516,7 @@ const BroadcastEventModal: React.FC<BroadcastEventModalProps> = ({
           visible={true}
           event={event}
           onClose={handleDepartmentModalClose}
-          onDataSaved={onDataSaved}
+          onDataSaved={onDataSaved ?? (() => {})}
           canEdit={canEdit}
         />
       )}

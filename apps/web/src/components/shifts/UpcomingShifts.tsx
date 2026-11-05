@@ -94,14 +94,14 @@ export default function UpcomingShifts() {
   const { data: configData } = useQuery(GET_MY_DEPARTMENT_SHIFT_CONFIG);
   
   // Default shift types for backward compatibility
-  const defaultShiftTypeMap = {
+  const defaultShiftTypeMap: Record<string, { label: string; time: string; color?: string }> = {
     morning: { label: 'בוקר', time: '07:00-15:00', color: '#faad14' },
     afternoon: { label: 'צהריים', time: '15:00-23:00', color: '#fa8c16' },
     night: { label: 'לילה', time: '23:00-07:00', color: '#8c8c8c' }
   };
   
   // Build shift type map from configuration or use defaults
-  const shiftTypeMap = React.useMemo(() => {
+  const shiftTypeMap = React.useMemo<Record<string, { label: string; time: string; color?: string }>>(() => {
     if (configData?.myDepartmentShiftConfig?.shiftTypes) {
       const map: Record<string, any> = {};
       configData.myDepartmentShiftConfig.shiftTypes
@@ -372,7 +372,7 @@ export default function UpcomingShifts() {
                       <Typography.Text>
                         {worker.user.firstName} {worker.user.lastName}
                       </Typography.Text>
-                      <Tag size="small">{worker.role}</Tag>
+                      <Tag>{worker.role}</Tag>
                     </List.Item>
                   )}
                   locale={{ emptyText: 'אין עובדים משובצים' }}

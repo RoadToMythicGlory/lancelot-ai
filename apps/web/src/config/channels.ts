@@ -72,8 +72,6 @@ export const CHANNEL_MAPPINGS: Record<string, string> = {
   'CHANNEL 2': 'CHANNEL 2',
   'CHANNEL 3': 'CHANNEL 3',
   'CHANNEL 5': 'CHANNEL 5',
-  // Hebrew variants
-***REMOVED***
 };
 
 // Helper function to normalize channel name to Hebrew

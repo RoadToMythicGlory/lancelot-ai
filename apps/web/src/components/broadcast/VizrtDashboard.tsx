@@ -279,7 +279,7 @@ export default function VizrtDashboard({ eventId, segmentId }: VizrtDashboardPro
                               <div className="text-lg font-bold">
                                 {templateCounts[category.value] || 0}
                               </div>
-                              <Tag color={category.color} size="small">
+                              <Tag color={category.color}>
                                 {category.label}
                               </Tag>
                             </Card>
@@ -307,7 +307,7 @@ export default function VizrtDashboard({ eventId, segmentId }: VizrtDashboardPro
                           size="small"
                           title={template.name}
                           extra={
-                            <Tag color={getCategoryColor(template.category)} size="small">
+                            <Tag color={getCategoryColor(template.category)}>
                               {getCategoryLabel(template.category)}
                             </Tag>
                           }

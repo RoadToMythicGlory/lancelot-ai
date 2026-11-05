@@ -100,7 +100,7 @@ export default function CGControlPanel({
         setSelectedTemplate(template);
         // Set initial field values
         const fieldValues: Record<string, any> = {};
-        template.fields.forEach(field => {
+        template.fields.forEach((field: VizrtTemplateField) => {
           fieldValues[field.key] = initialFields[field.key] || field.defaultValue || '';
         });
         form.setFieldsValue(fieldValues);
@@ -117,7 +117,7 @@ export default function CGControlPanel({
       
       // Reset form with default values
       const fieldValues: Record<string, any> = {};
-      template.fields.forEach(field => {
+      template.fields.forEach((field: VizrtTemplateField) => {
         fieldValues[field.key] = field.defaultValue || '';
       });
       form.setFieldsValue(fieldValues);
@@ -152,7 +152,7 @@ export default function CGControlPanel({
       } else {
         message.error(data.previewCG.message || 'Failed to generate preview');
       }
-    } catch (error) {
+    } catch (error: any) {
       message.error(`Error generating preview: ${error.message}`);
     } finally {
       setIsPreviewLoading(false);
@@ -189,7 +189,7 @@ export default function CGControlPanel({
       } else {
         message.error(data.triggerCG.message || 'Failed to trigger CG');
       }
-    } catch (error) {
+    } catch (error: any) {
       if (error.errorFields) {
         message.error('Please fill in all required fields');
       } else {
@@ -274,7 +274,7 @@ export default function CGControlPanel({
               <Option key={template.id} value={template.id}>
                 <div className="flex items-center justify-between">
                   <span>{template.name}</span>
-                  <Tag color={getCategoryColor(template.category)} size="small">
+                  <Tag color={getCategoryColor(template.category)}>
                     {getCategoryLabel(template.category)}
                   </Tag>
                 </div>
@@ -309,7 +309,7 @@ export default function CGControlPanel({
                         <div className="flex items-center gap-1">
                           <span>{field.label}</span>
                           {field.required && <span className="text-red-500">*</span>}
-                          <Tag size="small" color="default">{field.type}</Tag>
+                          <Tag color="default">{field.type}</Tag>
                         </div>
                       }
                       rules={field.required ? [{ required: true, message: `${field.label} is required` }] : []}

@@ -14,6 +14,15 @@ import '../styles/calendar-jewish-holidays.css';
 
 import EventForm from './EventForm';
 import { BroadcastType, MCREvent } from '../types';
+
+// Base shape for events created client-side before they are persisted.
+const emptyMCREvent = (): Pick<MCREvent, 'preparationStatus' | 'feeds' | 'contacts' | 'outputPlatforms' | 'exchangeGroupIds'> => ({
+  preparationStatus: 'NOT_STARTED',
+  feeds: [],
+  contacts: [],
+  outputPlatforms: [],
+  exchangeGroupIds: [],
+});
 import { GET_BROADCAST_EVENTS } from '@/graphql/queries';
 import { CREATE_MCR_EVENT, UPDATE_MCR_EVENT } from '@/graphql/mcrMutations';
 import { getJewishHolidays } from '../utils/jewishHolidays';
@@ -67,7 +76,7 @@ const broadcastTypeColors: Record<BroadcastType, string> = {
 };
 
 export default function CalendarWidget() {
-  const [view, setView] = useState<string>('week');
+  const [view, setView] = useState<View>('week');
   const [selectedEvent, setSelectedEvent] = useState<MCREvent | null>(null);
   const [showEventForm, setShowEventForm] = useState(false);
   const [events, setEvents] = useState<MCREvent[]>([]);
@@ -179,7 +188,8 @@ export default function CalendarWidget() {
           });
         } else {
           // No MCR event yet, create a basic broadcast event
-        const eventToAdd = {
+        const eventToAdd: MCREvent = {
+          ...emptyMCREvent(),
           id: `broadcast-${broadcast.id}`,
           title: broadcast.title,
           start: startDate,
@@ -227,7 +237,7 @@ export default function CalendarWidget() {
     }
   }, [date, view, refetchMCR, refetchBroadcast]);
 
-  const viewOptions = [
+  const viewOptions: { value: View; label: string }[] = [
     { value: 'day', label: 'תצוגה יומית' },
     { value: 'week', label: 'תצוגה שבועית' },
     { value: 'month', label: 'תצוגה חודשית' },
@@ -244,6 +254,7 @@ export default function CalendarWidget() {
 
   const handleCreateEvent = (slotInfo: any) => {
     const newEvent: MCREvent = {
+      ...emptyMCREvent(),
       id: '',
       title: 'אירוע חדש',
       start: slotInfo.start,
@@ -455,7 +466,6 @@ export default function CalendarWidget() {
           style={{ height: 'calc(100% - 20px)' }}
           scrollToTime={new Date(1970, 1, 1, 8)}
           dayLayoutAlgorithm='no-overlap'
-          showCurrentTime={true}
           messages={{
             today: 'היום',
             previous: 'הקודם',
@@ -527,8 +537,8 @@ export default function CalendarWidget() {
                       id: mcrEventId,
                       input: {
                         title: updatedEvent.title,
-                        start: updatedEvent.start.toISOString(),
-                        end: updatedEvent.end.toISOString(),
+                        start: new Date(updatedEvent.start).toISOString(),
+                        end: new Date(updatedEvent.end).toISOString(),
                         broadcastType: updatedEvent.broadcastType || null,
                         isMCROnly: false,
                         details: finalDetails,
@@ -544,8 +554,8 @@ export default function CalendarWidget() {
                     variables: {
                       input: {
                         title: updatedEvent.title,
-                        start: updatedEvent.start.toISOString(),
-                        end: updatedEvent.end.toISOString(),
+                        start: new Date(updatedEvent.start).toISOString(),
+                        end: new Date(updatedEvent.end).toISOString(),
                         broadcastType: updatedEvent.broadcastType || null,
                         isMCROnly: false,
                         details: finalDetails,
@@ -564,8 +574,8 @@ export default function CalendarWidget() {
                     id: updatedEvent.id,
                     input: {
                       title: updatedEvent.title,
-                      start: updatedEvent.start.toISOString(),
-                      end: updatedEvent.end.toISOString(),
+                      start: new Date(updatedEvent.start).toISOString(),
+                      end: new Date(updatedEvent.end).toISOString(),
                       broadcastType: updatedEvent.broadcastType || null,
                       isMCROnly: updatedEvent.isMCROnly,
                       details: finalDetails,
@@ -581,8 +591,8 @@ export default function CalendarWidget() {
                   variables: {
                     input: {
                       title: updatedEvent.title,
-                      start: updatedEvent.start.toISOString(),
-                      end: updatedEvent.end.toISOString(),
+                      start: new Date(updatedEvent.start).toISOString(),
+                      end: new Date(updatedEvent.end).toISOString(),
                       broadcastType: updatedEvent.broadcastType || null,
                       isMCROnly: updatedEvent.isMCROnly !== undefined ? updatedEvent.isMCROnly : true,
                       details: finalDetails,

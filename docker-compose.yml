@@ -36,7 +36,8 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 4000
-      MONGODB_URI: mongodb://${MONGO_USERNAME:?MONGO_USERNAME must be set in .env}:${MONGO_PASSWORD:?MONGO_PASSWORD must be set in .env}@mongodb:27017/lancelot?authSource=admin
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env (openssl rand -base64 64)}
+      MONGODB_URL: mongodb://${MONGO_USERNAME:?MONGO_USERNAME must be set in .env}:${MONGO_PASSWORD:?MONGO_PASSWORD must be set in .env}@mongodb:27017/lancelot?authSource=admin
     ports:
       - "4000:4000"
     depends_on:
@@ -51,6 +52,9 @@ services:
     build:
       context: ./apps/web
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_GRAPHQL_URL: ${NEXT_PUBLIC_GRAPHQL_URL:-http://localhost:4000/graphql}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:4000/graphql}
     container_name: broadcast-web
     environment:
       NODE_ENV: ${NODE_ENV:-development}

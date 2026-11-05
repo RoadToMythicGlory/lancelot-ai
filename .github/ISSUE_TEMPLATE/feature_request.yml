@@ -1,0 +1,23 @@
+name: Feature request
+description: Suggest an idea
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the operational situation, not the button you want.
+    validations: { required: true }
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+  - type: dropdown
+    id: module
+    attributes:
+      label: Module
+      options: [Broadcast Planning, MCR / Flight Board, External Broadcasts, Shifts, Warehouse, Graphics (Vizrt), Rights / Media, Users & RBAC, Chat, AI Copilot, Excel import, API / External API, Deployment, New module]

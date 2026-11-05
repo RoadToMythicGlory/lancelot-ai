@@ -23,9 +23,11 @@ const MONGO_URL = isDev
 
 const DRY_RUN = process.argv.includes('--dry-run');
 
+// Credentials come from the environment so nothing real is ever committed:
+//   ADMIN_EMAIL=you@yourstation.tv ADMIN_PASSWORD='...' node dist/scripts/bootstrap-system-admin.js
 const SYS_ADMIN = {
-  email: 'sysadmin@example.com',
-  password: 'CHANGE_ME_PASSWORD',
+  email: process.env.ADMIN_EMAIL || 'sysadmin@example.com',
+  password: process.env.ADMIN_PASSWORD || 'CHANGE_ME_PASSWORD',
   firstName: 'System',
   lastName: 'Admin',
   displayName: 'System Admin',

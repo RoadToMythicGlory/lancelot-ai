@@ -1,8 +1,35 @@
 {
   "name": "lancelot-platform",
   "version": "1.0.0",
-  "description": "Lancelot Operations Platform - Broadcast ERP",
+  "description": "Lancelot — open-source ERP for broadcast operations: planning, MCR, shifts, warehouse, graphics, rights and an on-prem AI copilot",
   "private": true,
+  "license": "AGPL-3.0-or-later",
+  "author": "Idan Magor",
+  "homepage": "https://github.com/RoadToMythicGlory/lancelot-ai#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RoadToMythicGlory/lancelot-ai.git"
+  },
+  "bugs": {
+    "url": "https://github.com/RoadToMythicGlory/lancelot-ai/issues"
+  },
+  "keywords": [
+    "broadcast",
+    "erp",
+    "mcr",
+    "master-control",
+    "tv",
+    "scheduling",
+    "shifts",
+    "warehouse",
+    "vizrt",
+    "graphql",
+    "nextjs",
+    "mongodb",
+    "ollama",
+    "hebrew",
+    "rtl"
+  ],
   "scripts": {
     "dev": "concurrently --kill-others --prefix \"[{name}]\" --names \"web,api\" --prefix-colors \"cyan,yellow\" \"npm --prefix apps/web run dev\" \"npm --prefix services/api-gateway run start:dev\"",
     "dev:windows": "concurrently --kill-others --prefix \"[{name}]\" --names \"web,api\" --prefix-colors \"cyan,yellow\" \"powershell -Command 'cd apps/web; npm run dev'\" \"powershell -Command 'cd services/api-gateway; npm run start:dev'\"",
@@ -17,6 +44,12 @@
     "start:dev": "npm run dev:windows",
     "start:dev:windows": ".\\scripts\\start-dev.ps1"
   },
+  "dependencies": {
+    "mongodb": "^6.17.0",
+    "pg": "^8.16.3",
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-util": "^0.15.1"
+  },
   "devDependencies": {
     "@types/react-big-calendar": "^1.16.2",
     "concurrently": "^8.2.2"
@@ -24,11 +57,5 @@
   "engines": {
     "node": ">=18.0.0",
     "npm": ">=9.0.0"
-  },
-  "dependencies": {
-    "mongodb": "^6.17.0",
-    "pg": "^8.16.3",
-    "tweetnacl": "^1.0.3",
-    "tweetnacl-util": "^0.15.1"
   }
 }

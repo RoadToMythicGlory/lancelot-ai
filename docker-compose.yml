@@ -151,7 +151,7 @@ services:
     image: prom/prometheus:latest
     container_name: broadcast-prometheus
     volumes:
-      - ./production-build/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./config/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     ports:
       - "9090:9090"

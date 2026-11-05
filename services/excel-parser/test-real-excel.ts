@@ -2,8 +2,13 @@ import { BroadcastScheduleParser } from './src/broadcast-schedule-parser';
 import * as fs from 'fs';
 import * as path from 'path';
 
-// Test with real Excel file
-const excelPath = path.join(__dirname, '../../schedules/תכנונית/תכנונית_שבוע_25_2025.xlsx');
+// Test with a real Excel file. Pass the path as the first argument or set EXCEL_PATH:
+//   npx ts-node test-real-excel.ts ./my-schedule.xlsx
+const excelPath = path.resolve(process.argv[2] || process.env.EXCEL_PATH || '');
+if (!excelPath || excelPath === path.resolve('')) {
+  console.error('Usage: npx ts-node test-real-excel.ts <schedule.xlsx>  (or set EXCEL_PATH)');
+  process.exit(1);
+}
 
 console.log('🧪 Testing Real Excel File Parsing...\n');
 console.log('📁 File:', excelPath);

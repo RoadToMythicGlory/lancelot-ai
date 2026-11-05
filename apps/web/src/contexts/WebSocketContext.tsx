@@ -118,7 +118,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       });
       
       // Debug auth handshake
-      s.io.on('upgrade', (transport: any) => {
+      (s.io as any).on('upgrade', (transport: any) => {
         console.log('[WebSocket] Transport upgraded to:', transport.name);
       });
     } catch (err) {

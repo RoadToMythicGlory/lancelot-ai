@@ -18,17 +18,17 @@ describe('normalizeWhatsAppPhone', () => {
   });
 
   it('converts leading zero to Israeli E.164', () => {
-    expect(normalizeWhatsAppPhone('[PHONE REDACTED]')).toBe('[PHONE REDACTED]');
-    expect(normalizeWhatsAppPhone('0501234567')).toBe('[PHONE REDACTED]');
+    expect(normalizeWhatsAppPhone('050-123-4567')).toBe('+972501234567');
+    expect(normalizeWhatsAppPhone('0501234567')).toBe('+972501234567');
   });
 
   it('keeps the country code when 972 is already there', () => {
-    expect(normalizeWhatsAppPhone('[PHONE REDACTED]')).toBe('[PHONE REDACTED]');
-    expect(normalizeWhatsAppPhone('[PHONE REDACTED]')).toBe('[PHONE REDACTED]');
+    expect(normalizeWhatsAppPhone('972501234567')).toBe('+972501234567');
+    expect(normalizeWhatsAppPhone('+972 50 123 4567')).toBe('+972501234567');
   });
 
   it('preserves arbitrary plus-prefixed numbers', () => {
-    expect(normalizeWhatsAppPhone('[PHONE REDACTED]')).toBe('[PHONE REDACTED]');
+    expect(normalizeWhatsAppPhone('+1 (555) 010-9999')).toBe('+15550109999');
   });
 });
 
@@ -149,7 +149,7 @@ describe('sendShiftAssignmentsWhatsApp', () => {
     });
 
     expect(result.messageId).toBe('wamid.123');
-    expect(result.recipient).toBe('[PHONE REDACTED]');
+    expect(result.recipient).toBe('+972501234567');
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     const [url, init] = fetchMock.mock.calls[0];
@@ -157,7 +157,7 @@ describe('sendShiftAssignmentsWhatsApp', () => {
     expect((init as any).headers.Authorization).toBe('Bearer test-token');
     const body = JSON.parse((init as any).body);
     expect(body.messaging_product).toBe('whatsapp');
-    expect(body.to).toBe('[PHONE REDACTED]');
+    expect(body.to).toBe('972501234567');
     expect(body.type).toBe('text');
     expect(body.text.body).toContain('דנה');
   });
@@ -172,7 +172,7 @@ describe('sendShiftAssignmentsWhatsApp', () => {
     global.fetch = fetchMock as any;
 
     await sendShiftAssignmentsWhatsApp({
-      to: '[PHONE REDACTED]',
+      to: '+972501234567',
       employeeName: 'דנה',
       departmentName: 'MCR',
       startDate: '2026-06-07',

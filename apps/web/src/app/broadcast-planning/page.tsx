@@ -911,7 +911,7 @@ const BroadcastPlanningPage: React.FC = () => {
                       </div>
                       {overlaps.map((overlap, index) => (
                         <div key={index} style={{ marginBottom: '2px' }}>
-                          • {overlap.title || overlap.hebrewTitle || 'אירוע ללא שם'}
+                          • {overlap.title || (overlap as any).hebrewTitle || 'אירוע ללא שם'}
                           <br />
                           <span style={{ fontSize: '11px', opacity: 0.8 }}>
                             {new Date(overlap.startTime).toLocaleString('he-IL', { 
@@ -2087,7 +2087,7 @@ const BroadcastPlanningPage: React.FC = () => {
                       const parseDateStrict = (s: string) => {
                         const candidates = ['DD/MM/YYYY', 'D/M/YYYY', 'DD.MM.YYYY', 'YYYY-MM-DD'];
                         for (const f of candidates) {
-                          const d = dayjs.tz(s, f, 'Asia/Jerusalem', true);
+                          const d = dayjs.tz(s, f, 'Asia/Jerusalem');
                           if (d.isValid()) return d;
                         }
                         return dayjs.tz(s, 'Asia/Jerusalem');
@@ -2109,15 +2109,15 @@ const BroadcastPlanningPage: React.FC = () => {
 
                       // Build absolute times in Asia/Jerusalem, then to ISO
                       const startDateTime = baseDate.isValid() && startHHmm
-                        ? dayjs.tz(`${baseDate.format('DD/MM/YYYY')} ${startHHmm}`, 'DD/MM/YYYY HH:mm', 'Asia/Jerusalem', true)
+                        ? dayjs.tz(`${baseDate.format('DD/MM/YYYY')} ${startHHmm}`, 'DD/MM/YYYY HH:mm', 'Asia/Jerusalem')
                         : baseDate.startOf('day');
                       let endDateTime = baseDate.isValid() && endHHmm
-                        ? dayjs.tz(`${baseDate.format('DD/MM/YYYY')} ${endHHmm}`, 'DD/MM/YYYY HH:mm', 'Asia/Jerusalem', true)
+                        ? dayjs.tz(`${baseDate.format('DD/MM/YYYY')} ${endHHmm}`, 'DD/MM/YYYY HH:mm', 'Asia/Jerusalem')
                         : startDateTime.add(2, 'hour');
                       if (endDateTime.isBefore(startDateTime)) endDateTime = endDateTime.add(1, 'day');
 
                       const koTimeISO = baseDate.isValid() && koHHmm
-                        ? dayjs.tz(`${baseDate.format('DD/MM/YYYY')} ${koHHmm}`, 'DD/MM/YYYY HH:mm', 'Asia/Jerusalem', true).toISOString()
+                        ? dayjs.tz(`${baseDate.format('DD/MM/YYYY')} ${koHHmm}`, 'DD/MM/YYYY HH:mm', 'Asia/Jerusalem').toISOString()
                         : null;
 
                       const channel = cd.channel || raw['ערוץ'] || event.channel || 'CHANNEL 1';
@@ -2296,7 +2296,7 @@ const BroadcastPlanningPage: React.FC = () => {
                   maxTagCount="responsive"
                   showSearch
                   filterOption={(input, option) =>
-                    option?.children?.toString().toLowerCase().includes(input.toLowerCase())
+                    !!option?.children?.toString().toLowerCase().includes(input.toLowerCase())
                   }
                 >
                   {filterOptions.teams.map(team => (

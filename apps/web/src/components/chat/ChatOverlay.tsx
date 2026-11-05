@@ -161,7 +161,7 @@ export default function ChatOverlay({
             conversationId,
             receiverId: participantId,
             senderId: user.id,
-            senderName: user.fullName || 'משתמש',
+            senderName: user.displayName || 'משתמש',
             content: newMessage.trim(),
             timestamp: new Date().toISOString()
           }

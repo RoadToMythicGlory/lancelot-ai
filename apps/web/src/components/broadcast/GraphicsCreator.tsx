@@ -230,7 +230,7 @@ export default function GraphicsCreator() {
         id: Date.now().toString(),
         name: `${template.name} Project`,
         template: templateKey,
-        elements: [...template.elements],
+        elements: [...(template.elements as GraphicsElement[])],
         width: template.width,
         height: template.height,
         duration: 10,

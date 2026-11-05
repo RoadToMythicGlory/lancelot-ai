@@ -76,7 +76,7 @@ const EquipmentCategoriesManagement: React.FC<EquipmentCategoriesManagementProps
   // refetchQueries on the active query name makes both the management table
   // and every page-level dropdown re-render with the latest catalog in one go.
   const refetchActiveCatalog = {
-    refetchQueries: ['GetEquipmentCategoriesCatalog'],
+    refetchQueries: ['GetEquipmentCategoriesCatalog'] as string[],
     awaitRefetchQueries: true,
   } as const;
 

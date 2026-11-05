@@ -557,7 +557,7 @@ const ChatManager: React.FC = () => {
 
   // Register the conversation handler
   useEffect(() => {
-    registerConversationHandler(handleStartConversation);
+    registerConversationHandler((u, conversationId) => { void handleStartConversation(u as User, conversationId); });
   }, [registerConversationHandler, handleStartConversation]);
 
   // Only render if user is authenticated
@@ -623,7 +623,7 @@ const ChatManager: React.FC = () => {
               email: currentUser.email,
               fullName: currentUser.displayName,
               displayName: currentUser.displayName,
-              role: currentUser.role,
+              role: currentUser.systemRole,
               department: currentUser.department,
               status: 'online' // Current user is always online
             } : null}

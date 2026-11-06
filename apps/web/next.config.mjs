@@ -1,4 +1,8 @@
 import { createHash } from 'crypto';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const nextConfig = {
   reactStrictMode: true,
@@ -48,6 +52,13 @@ const nextConfig = {
     
     config.ignoreWarnings = [
       { module: /node_modules\/punycode/ },
+    ];
+
+    // services/shared/crypto lives outside this package and imports tweetnacl;
+    // let webpack resolve those from apps/web/node_modules as well.
+    config.resolve.modules = [
+      ...(config.resolve.modules || ['node_modules']),
+      path.resolve(__dirname, 'node_modules'),
     ];
 
     // Konva's Node.js entry point hard-requires the optional 'canvas' native module.

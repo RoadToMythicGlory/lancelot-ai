@@ -7,7 +7,7 @@
     "dev": "ts-node src/index.ts",
     "dev:watch": "nodemon --exec ts-node src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "node dist/ai-agent/src/index.js",
     "test": "jest",
     "seed:ai-user": "ts-node src/scripts/seed-ai-user.ts",
     "rss:verify": "ts-node src/scripts/verify-rss-feeds.ts"

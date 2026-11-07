@@ -89,6 +89,11 @@ jspm_packages/
 
 # IDE
 .vscode/
+
+# Visual Studio workspace state (contains local paths)
+.vs/
+*.vsidx
+*.wsuo
 .idea/
 *.swp
 *.swo

@@ -24,7 +24,6 @@ Successfully migrated the Lancelot application to use Docker MongoDB with new se
 - **services/api-gateway/setup-env.ps1**
 - **services/api-gateway/start-local.ps1**
 - **services/api-gateway/run-dev.ps1**
-- **services/api-gateway/start-dev-with-env.bat**
 - **scripts/start-all.ps1**
 
 ### 4. Shell Scripts Updated
